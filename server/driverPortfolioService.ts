@@ -23,7 +23,7 @@ import {
 import { getDb, orgScopeWhere, ownershipScopeWhere, type TenantScope } from "./db";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { entityIdsInScope } from "./_core/entityScope";
-import { MEDICAL_FITNESS_DOC_TYPES } from "./_core/compliancePassport";
+import { isMedicalDocType } from "./_core/compliancePassport";
 import {
   credentialType, normalizeCode, requirementFromBinding,
   type DriverPortfolio, type DriverRequirement, type PortfolioCredential, type RequirementBinding,
@@ -132,7 +132,7 @@ export async function loadPortfolios(db: Db | Tx, ops: readonly OperatorRow[]): 
   }
   return ops.map(op => {
     // Medical fitness stays out by type as well as by flag: a mis-flagged medical row is still medical.
-    const rows = creds.filter(c => c.ownerId === op.id && !c.privateDetail && !MEDICAL_FITNESS_DOC_TYPES.includes(c.docType));
+    const rows = creds.filter(c => c.ownerId === op.id && !c.privateDetail && !isMedicalDocType(c.docType));
     return {
       rows,
       portfolio: {

@@ -285,3 +285,75 @@ d("entry provenance is the same whichever path recorded the credential", () => {
     expect(await as(c.safety).driverPortfolio.credentialVerify({ credentialId: again.credentialId, outcome: "verified" })).toMatchObject({ verificationStatus: "verified" });
   });
 });
+
+d("credentials minted by workforce (independent review H1, M1)", () => {
+  async function training(orgRef: string, trainee: number) {
+    const recorder = await member(orgRef, ["hr"]);
+    const [ev] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, capturedAt, capturedBy) VALUES ('H2S card', 'training', NOW(), ?)", [recorder]);
+    const trn = await as(recorder).workforce.trainingRecord({ userId: trainee, courseCode: "H2S_ALIVE", title: "H2S Alive", completedAt: new Date(), evidenceRecordId: Number(ev.insertId) } as never) as { trainingRef: string };
+    return { recorder, trainingRef: trn.trainingRef };
+  }
+  const docsFor = async (operatorId: number) =>
+    (await pool.query<mysql.RowDataPacket[]>("SELECT id, verificationStatus FROM complianceDocuments WHERE ownerType = 'operator' AND ownerId = ?", [operatorId]))[0];
+
+  it("lands on the operator record in the verifier's organization, never another organization's, and is audited there", async () => {
+    // The person drives for Org B first (the older operator row), then for Org A.
+    const orgB = await org();
+    const person = await member(orgB, ["driver"]);
+    const opB = await operator(orgB, person);
+    const a = await org();
+    await member(a, [], person);
+    const opA = await operator(a, person);
+    const { recorder, trainingRef } = await training(a, person);
+    const verifier = await member(a, ["hr"]);
+    const ok = await as(verifier).workforce.trainingVerify({ trainingRef, decision: "verified" } as never) as { complianceDocumentId: number };
+    expect(await docsFor(opB)).toEqual([]);
+    expect((await docsFor(opA)).map(r => r.id)).toEqual([ok.complianceDocumentId]);
+    expect((await eventsOf(opA)).map(e => [e.eventType, e.actorUserId])).toEqual([["credential_uploaded", recorder], ["credential_verified", verifier]]);
+    expect(await eventsOf(opB)).toEqual([]);
+  });
+
+  it("a concurrent reject and verify: one decision lands, and a rejected training mints nothing", async () => {
+    for (let round = 0; round < 3; round++) {
+      const c = await company();
+      const { trainingRef } = await training(c.orgRef, c.driver);
+      const [v1, v2, v3] = [await member(c.orgRef, ["hr"]), await member(c.orgRef, ["hr"]), await member(c.orgRef, ["hr"])];
+      const results = await Promise.allSettled([
+        as(v1).workforce.trainingVerify({ trainingRef, decision: "verified" } as never),
+        as(v2).workforce.trainingVerify({ trainingRef, decision: "rejected" } as never),
+        as(v3).workforce.trainingVerify({ trainingRef, decision: "verified" } as never),
+      ]);
+      expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+      for (const r of results) if (r.status === "rejected") expect(r.reason).toMatchObject({ code: "PRECONDITION_FAILED" });
+      const [[tr]] = await pool.query<mysql.RowDataPacket[]>("SELECT verificationStatus FROM trainingRecords WHERE trainingRef = ?", [trainingRef]) as unknown as [[{ verificationStatus: string }]];
+      const docs = await docsFor(c.operatorId);
+      expect(docs).toHaveLength(tr.verificationStatus === "verified" ? 1 : 0);
+    }
+  });
+});
+
+d("equipment authorization (independent review M2)", () => {
+  it("nobody authorizes themselves on equipment", async () => {
+    const orgRef = await org();
+    const safety = await member(orgRef, ["safety"]);
+    const entityId = await book(orgRef);
+    await expect(as(safety).requirement.authorize({ userId: safety, financialEntityId: entityId, equipmentType: "hydrovac" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const other = await member(orgRef, ["driver"]);
+    expect(await as(safety).requirement.authorize({ userId: other, financialEntityId: entityId, equipmentType: "hydrovac" })).toMatchObject({ status: "pending" });
+  });
+});
+
+d("medical records by any spelling (independent review L1)", () => {
+  it("'Medical_Fitness ' filed by either legacy path is private and never projected", async () => {
+    const c = await company();
+    const office = await member(c.orgRef, ["office"]);
+    const id1 = await as(office).fieldRoute.identity.documents.create({ ownerType: "operator", ownerId: c.operatorId, docType: "Medical_Fitness ", title: "Medical", capturedAt: new Date() } as never);
+    const r2 = await as(c.safety).compliance.credentialRecord({ ownerType: "operator", ownerId: c.operatorId, docType: "medical-fitness", title: "Medical", identifier: "MED-SECRET-9" });
+    const [rows] = await pool.query<mysql.RowDataPacket[]>("SELECT privateDetail FROM complianceDocuments WHERE id IN (?, ?)", [id1, r2.credentialId]);
+    expect(rows.map(r => r.privateDetail)).toEqual([1, 1]);
+    const p = await as(c.safety).driverPortfolio.portfolio({ operatorId: c.operatorId });
+    expect(JSON.stringify(p.credentials) + JSON.stringify(p.unrecognisedCredentials)).not.toMatch(/medical|MED-SECRET/i);
+    expect(p.privateCredentialsWithheld).toBe(2);
+    expect((await eventsOf(c.operatorId)).filter(e => e.eventType === "credential_uploaded")).toEqual([]);
+  });
+});

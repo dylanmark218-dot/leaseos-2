@@ -22,7 +22,7 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, gt, inArray, isNull, like, or } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, like } from "drizzle-orm";
 import { publicProcedure, roleProcedure, router } from "./_core/trpc";
 import { actingScopeFor, evidenceInScope } from "./db";
 import { complianceDocuments, driverCredentialShares, driverPortfolioEvents, driverRequirementBindings, operators } from "../drizzle/schema";
@@ -35,7 +35,7 @@ import { newToken, sha256 } from "./_core/externalIdentityPolicy";
 import { affectedRows } from "./_core/enforcementCommit";
 import { AttemptLimiter } from "./_core/attemptLimiter";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
-import { MEDICAL_FITNESS_DOC_TYPES } from "./_core/compliancePassport";
+import { isMedicalDocType } from "./_core/compliancePassport";
 import { assertReadinessSubjectInScope } from "./dispatchEnforcementService";
 import { composeReadiness } from "./readinessComposer";
 import { decideComplianceCredential } from "./credentialVerificationService";
@@ -338,9 +338,9 @@ export const driverPortfolioRouter = router({
       const { db, scope } = await scoped(ctx.user.id);
       const op = await operatorInScopeOrThrow(db, input.operatorId, scope);
       const [{ portfolio, rows }] = await loadPortfolios(db, [op]);
-      const privateWithheld = (await db.select({ id: complianceDocuments.id }).from(complianceDocuments)
-        .where(and(eq(complianceDocuments.ownerType, "operator"), eq(complianceDocuments.ownerId, op.id),
-          or(eq(complianceDocuments.privateDetail, true), inArray(complianceDocuments.docType, [...MEDICAL_FITNESS_DOC_TYPES]))))).length;
+      // Withheld by the same rule loadPortfolios leaves them out by: the flag, or a medical doc type.
+      const privateWithheld = (await db.select({ privateDetail: complianceDocuments.privateDetail, docType: complianceDocuments.docType }).from(complianceDocuments)
+        .where(and(eq(complianceDocuments.ownerType, "operator"), eq(complianceDocuments.ownerId, op.id)))).filter(r => r.privateDetail || isMedicalDocType(r.docType)).length;
       const bindings = await bindingsInScope(db, scope);
       const codes = Array.from(new Set(rows.map(r => credentialType(r.docType)?.code).filter((c): c is string => !!c)));
       const byCode = codes.map(code => {

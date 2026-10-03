@@ -97,6 +97,26 @@ The `driverPortfolioEvents` table stays append-only. It records:
 
 No row carries a raw token, an identifier, a storage key or document contents.
 
+## 7. Fixed from the independent review
+
+| # | Finding | Fix |
+|---|---|---|
+| H1 | `workforce` minted a verified credential onto `operators.userId = ? LIMIT 1`: possibly another organization's record for a person who drives for two | `ownerFor` reads the operator in the verifier's organization (`ownershipScopeWhere`); more than one there is refused (`CONFLICT`) |
+| M1 | `trainingVerify` / `taskVerify` checked state on a stale read and updated unconditionally: a concurrent reject and verify could leave a verified credential behind a rejected training | one transaction: a conditional claim (`verificationStatus='unverified'` / `verifiedAt IS NULL`) that must change exactly one row, then the credential |
+| M2 | `requirement.authorize` let a caller authorize themselves on equipment (clears a mandatory equipment requirement) | refused when `userId` is the caller |
+| L1 | medical detection was exact-match (`"Medical_Fitness "` slipped through as not private) | `isMedicalDocType` (normalized) for the private flag at both legacy entry points, `loadPortfolios` and the withheld count |
+| L2 | workforce-minted operator credentials had no portfolio audit | `credential_uploaded` (recorder) and `credential_verified` (verifier, `via workforce.*`) in the same transaction |
+
+Reported, not changed here (outside this PR's scope; separate checkpoints):
+- **M3 (suspected).** Academy qualifications have no organization column. `readinessComposer` reads them by `userId`, the same cross-tenant class as equipment, and `certificateIssue` uses an unscoped assignment lookup.
+- **L3.** Unauthenticated calls to gated procedures each write an authorization-decision row. This predates the branch.
+- **L4.** Limiter keying behind a proxy (`trust proxy`), and eviction under more than 10k addresses.
+- **L5.** The `share_verified` throttle is check-then-insert. Concurrent redemptions can write a few rows, capped by the per-share limit.
+- **Info.**
+  - `readiness.forTime` accepts a `userId` that is not in scope.
+  - `createComplianceDocument` accepts an owner with no ownership row.
+  - The structural guard does not parse raw-SQL inserts.
+
 ## Not in this change
 
 - **Dashboard performance.** `expiryDashboard` and `verificationQueue` each load every in-scope operator's portfolio on each call. This is a separate checkpoint (pagination is already keyset; the cost is the load).

@@ -20,7 +20,7 @@ import { requireSubjectInScope, type ComplianceOwnerType } from "./complianceSub
 import { decideComplianceCredential, recordCredentialEntry } from "./credentialVerificationService";
 import { carrierProfileReviews, complianceConsents, complianceDocuments, complianceRequirements, writtenProgramVersions } from "../drizzle/schema";
 import {
-  abstractRequestPermitted, buildPassport, composeJobPassport, MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch, nextRenewalDue,
+  abstractRequestPermitted, buildPassport, composeJobPassport, isMedicalDocType, MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch, nextRenewalDue,
   type Credential, type Passport, type Requirement, type Subject,
 } from "./_core/compliancePassport";
 import { COMPLIANCE_REQUIREMENT_SEEDS } from "./_core/complianceRequirementSeeds";
@@ -151,7 +151,7 @@ export const complianceRouter = router({
       if (input.evidenceRecordId != null && !(await evidenceInScope(input.evidenceRecordId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       // Recorded is not verified. Every credential enters as needs_review.
       const now = new Date();
-      const privateDetail = input.privateDetail || input.docType === "medical_fitness";
+      const privateDetail = input.privateDetail || isMedicalDocType(input.docType);
       return db.transaction(async tx => {
       const ins = await tx.insert(complianceDocuments).values({
         ownerType: input.ownerType, ownerId: input.ownerId, docType: input.docType, requirementKey: input.requirementKey ?? null,

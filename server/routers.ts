@@ -146,7 +146,7 @@ import { trainingAcademyRouter } from "./trainingAcademyRouter";
 import { driverPortfolioRouter } from "./driverPortfolioRouter";
 import { decideComplianceCredential, recordCredentialEntry } from "./credentialVerificationService";
 import { dbOrThrow } from "./driverPortfolioService";
-import { MEDICAL_FITNESS_DOC_TYPES } from "./_core/compliancePassport";
+import { isMedicalDocType } from "./_core/compliancePassport";
 import { contractorOperationsRouter } from "./contractorOperationsRouter";
 import { auditRouter } from "./auditRouter";
 import { spatialRouter } from "./spatialRouter";
@@ -1744,7 +1744,7 @@ export const appRouter = router({
           )
           .mutation(async ({ ctx, input }) => {
             // A medical record is private whichever path files it (as compliance.credentialRecord does).
-            const privateDetail = MEDICAL_FITNESS_DOC_TYPES.includes(input.docType);
+            const privateDetail = isMedicalDocType(input.docType);
             const id = await createComplianceDocument({ ...input, verificationStatus: "needs_review", recordedByUserId: ctx.user.id, privateDetail }, await scopeFor(ctx.user.id));
             // The same entry row in the portfolio audit as a driver's own submission.
             if (id) await recordCredentialEntry(await dbOrThrow(), { credentialId: Number(id), ownerType: input.ownerType, ownerId: input.ownerId, docType: input.docType, privateDetail, actorUserId: ctx.user.id, path: "documents.create", at: new Date() });

@@ -29,7 +29,7 @@ import { actingScopeFor } from "./db";
 import { affectedRows } from "./_core/enforcementCommit";
 import { verificationRefusal, type CredentialDecision } from "./_core/credentialVerificationPolicy";
 import { credentialHistory, credentialType } from "./_core/driverPortfolio";
-import { MEDICAL_FITNESS_DOC_TYPES } from "./_core/compliancePassport";
+import { isMedicalDocType } from "./_core/compliancePassport";
 import { requireSubjectInScope, type ComplianceOwnerType } from "./complianceSubjectScope";
 import { dbOrThrow, loadPortfolios, orgRefFor, recordPortfolioEvent, submitterOf, type CredentialRow, type Db } from "./driverPortfolioService";
 
@@ -67,7 +67,7 @@ export async function recordCredentialEntry(db: Db | Parameters<Parameters<Db["t
   credentialId: number; ownerType: string; ownerId: number; docType: string; privateDetail: boolean;
   actorUserId: number; path: EntryPath; at: Date;
 }): Promise<void> {
-  if (e.ownerType !== "operator" || e.privateDetail || MEDICAL_FITNESS_DOC_TYPES.includes(e.docType) || !e.credentialId) return;
+  if (e.ownerType !== "operator" || e.privateDetail || isMedicalDocType(e.docType) || !e.credentialId) return;
   const label = credentialType(e.docType)?.label ?? e.docType;
   await recordPortfolioEvent(db, {
     orgRef: orgRefFor(await actingScopeFor(e.actorUserId)), operatorId: e.ownerId, credentialId: e.credentialId, actorUserId: e.actorUserId,
