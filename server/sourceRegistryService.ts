@@ -211,16 +211,22 @@ async function networkEdit(tx: Tx, s: SourceRow, actor: Actor, reason: string): 
   return { revision, lifecycle: next.to };
 }
 
-export type SourceInput = {
-  sourceKey: string; displayName: string; authority: string; category: typeof externalDataSources.$inferInsert.category;
+/**
+ * What the registry writes about a source: identity, classification and where its terms are. The licence
+ * determinations — attribution, commercial use, redistribution, cleared or not — belong to the licence
+ * review (`geo.sourceReview`, a sensitive permission) and are never written here.
+ */
+export type SourceIdentity = {
+  displayName: string; authority: string; category: typeof externalDataSources.$inferInsert.category;
   jurisdiction?: string | null; sourceUrl?: string | null; termsUrl?: string | null;
   sourceClass?: typeof externalDataSources.$inferInsert.sourceClass; riskClass?: typeof externalDataSources.$inferInsert.riskClass;
-  sensitivity?: typeof externalDataSources.$inferInsert.sensitivity;
-  licenceName?: string | null; licenceUrl?: string | null; attributionText?: string | null;
-  commercialUsePermitted?: "yes" | "no" | "unknown"; redistributionPermitted?: "yes" | "no" | "unknown"; notes?: string | null;
+  sensitivity?: typeof externalDataSources.$inferInsert.sensitivity; notes?: string | null;
 };
+const IDENTITY_FIELDS = ["displayName", "authority", "category", "jurisdiction", "sourceUrl", "termsUrl", "sourceClass", "riskClass", "sensitivity", "notes"] as const;
+/** A new source may also say which licence a reviewer should read. */
+export type SourceInput = SourceIdentity & { sourceKey: string; licenceName?: string | null; licenceUrl?: string | null };
 
-/** A new source starts as a draft with an unreviewed licence. It authorises nothing. */
+/** A new source starts as a draft whose licence is unreviewed and whose permissions are unknown. It authorises nothing. */
 export async function createSource(actor: Actor, input: SourceInput, reason: string) {
   const db = await dbOrThrow();
   return db.transaction(async tx => {
@@ -230,8 +236,8 @@ export async function createSource(actor: Actor, input: SourceInput, reason: str
       sourceKey: input.sourceKey, displayName: input.displayName, authority: input.authority, category: input.category,
       jurisdiction: input.jurisdiction ?? null, sourceUrl: input.sourceUrl ?? null, termsUrl: input.termsUrl ?? null,
       sourceClass: input.sourceClass ?? null, riskClass: input.riskClass ?? null, sensitivity: input.sensitivity ?? null,
-      licenceName: input.licenceName ?? null, licenceUrl: input.licenceUrl ?? null, attributionText: input.attributionText ?? null,
-      commercialUsePermitted: input.commercialUsePermitted ?? "unknown", redistributionPermitted: input.redistributionPermitted ?? "unknown",
+      licenceName: input.licenceName ?? null, licenceUrl: input.licenceUrl ?? null, attributionText: null,
+      commercialUsePermitted: "unknown", redistributionPermitted: "unknown",
       notes: input.notes ?? null, status: "unverified", lifecycle: "draft", createdByUserId: actor.userId,
     });
     await tx.insert(externalSourceEvents).values({
@@ -242,15 +248,18 @@ export async function createSource(actor: Actor, input: SourceInput, reason: str
 }
 
 /** Identity, classification and terms. None of it changes what may be contacted, so no revision is made. */
-export async function updateSource(actor: Actor, sourceKey: string, expectedRowVersion: number, patch: Omit<Partial<SourceInput>, "sourceKey">, reason: string) {
+export async function updateSource(actor: Actor, sourceKey: string, expectedRowVersion: number, patch: Partial<SourceIdentity>, reason: string) {
+  const given = patch as Record<string, unknown>;
+  const outside = Object.keys(given).filter(k => (IDENTITY_FIELDS as readonly string[]).indexOf(k) < 0);
+  if (outside.length) throw new SourceRegistryError("invalid", `not a registry field (licence determinations are the licence review's): ${outside.join(", ")}`);
+  const fields = IDENTITY_FIELDS.filter(k => given[k] !== undefined);
+  if (!fields.length) throw new SourceRegistryError("invalid", "nothing to change");
   const db = await dbOrThrow();
   return db.transaction(async tx => {
     const s = await lockSource(tx, sourceKey, expectedRowVersion);
     if (s.lifecycle === "retired") throw new SourceRegistryError("invalid", `${sourceKey} is retired`);
     const set: Partial<typeof externalDataSources.$inferInsert> = {};
-    const fields = Object.keys(patch).filter(k => (patch as Record<string, unknown>)[k] !== undefined) as (keyof typeof patch)[];
-    for (const k of fields) (set as Record<string, unknown>)[k] = (patch as Record<string, unknown>)[k];
-    if (!fields.length) throw new SourceRegistryError("invalid", "nothing to change");
+    for (const k of fields) (set as Record<string, unknown>)[k] = given[k];
     await bump(tx, s, set);
     await tx.insert(externalSourceEvents).values({
       externalDataSourceId: s.id, eventType: "updated", fromLifecycle: s.lifecycle, toLifecycle: s.lifecycle, sourceRevision: s.revision,

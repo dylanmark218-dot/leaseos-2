@@ -153,6 +153,22 @@ d("source registry — who may do what", () => {
     expect(await decisions(t.approver, "sourceRegistry.approve")).toEqual([{ permission: "source.registry.approve", outcome: "allowed" }]);
   }, 60_000);
 
+  it("leaves licence determinations to the licence review: a new source's permissions are unknown, and no registry call can set them", async () => {
+    const sfx = rnd(), sourceKey = `regtest_${sfx}`;
+    const manager = await withRole("management");
+    const base = { sourceKey, displayName: `Registry test ${sfx}`, authority: "Test publisher", category: "other" as const, reason: REASON };
+    await expect(callerFor(manager).sourceRegistry.create({ ...base, commercialUsePermitted: "yes" } as never)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(callerFor(manager).sourceRegistry.create({ ...base, attributionText: "© Test" } as never)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await callerFor(manager).sourceRegistry.create({ ...base, licenceName: "Test Open Licence", licenceUrl: "https://example.ca/licence" });
+    const { source } = await callerFor(manager).sourceRegistry.get({ sourceKey });
+    expect(source.licence).toMatchObject({ status: "unverified", name: "Test Open Licence", attributionText: null, commercialUsePermitted: "unknown", redistributionPermitted: "unknown" });
+    for (const patch of [{ commercialUsePermitted: "yes" }, { redistributionPermitted: "yes" }, { attributionText: "x" }, { licenceName: "Another" }, { status: "verified" }]) {
+      await expect(callerFor(manager).sourceRegistry.update({ sourceKey, expectedRowVersion: source.rowVersion, patch, reason: REASON } as never), JSON.stringify(patch)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    await callerFor(manager).sourceRegistry.update({ sourceKey, expectedRowVersion: source.rowVersion, patch: { termsUrl: "https://example.ca/terms", riskClass: "low" }, reason: REASON });
+    expect((await callerFor(manager).sourceRegistry.get({ sourceKey })).source).toMatchObject({ termsUrl: "https://example.ca/terms", riskClass: "low", licence: { commercialUsePermitted: "unknown", status: "unverified" } });
+  }, 60_000);
+
   it("keeps the requester and the author of a revision from approving it, even holding the permission", async () => {
     const t = await draftSource();
     const manager = await withRole("management");

@@ -54,6 +54,14 @@ export const ENDPOINT_CONTENT_TYPES = ["application/json", "text/plain", "applic
 export const REGISTRY_PURPOSES = ["facility_directory.arcgis_import"] as const;
 export type RegistryPurpose = (typeof REGISTRY_PURPOSES)[number];
 
+/**
+ * The kinds of endpoint each purpose's runtime path reads. An approval for a purpose covers only these,
+ * so a source approved for the ArcGIS importer does not thereby let the importer read its 511 feed.
+ */
+export const PURPOSE_SERVICE_TYPES: Record<RegistryPurpose, readonly EndpointServiceType[]> = {
+  "facility_directory.arcgis_import": ["arcgis_feature_server", "arcgis_map_server"],
+};
+
 /** An approval is reviewed at least yearly. */
 export const APPROVAL_MAX_DAYS = 366;
 
@@ -284,7 +292,7 @@ export type RegistryRefusalCode =
   | "no_approval" | "approval_stale" | "approval_expired" | "out_of_scope" | "endpoint_disabled" | "endpoint_policy" | "changed_during_operation";
 
 export type RuntimeSource = { id: number; sourceKey: string; lifecycle: SourceLifecycle; revision: number };
-export type RuntimeEndpoint = EndpointPolicy & { id: number; endpointRef: string; externalDataSourceId: number; enabled: boolean };
+export type RuntimeEndpoint = EndpointPolicy & { id: number; endpointRef: string; externalDataSourceId: number; enabled: boolean; serviceType: EndpointServiceType };
 export type RuntimeApproval = { id: number; state: ApprovalState; sourceRevision: number; expiresAt: Date | null; scope: readonly string[] };
 
 /** What a request was authorised under — carried into the audit trail and the provenance record. */
@@ -295,7 +303,8 @@ export type RegistryDecision = {
 /**
  * Whether one request may proceed. The order is the order an operator would fix things in, and
  * every branch refuses: only an approved source, with an approval for its current revision that
- * has not expired and names this purpose, and an enabled endpoint that covers the URL, passes.
+ * has not expired and names this purpose, and an enabled endpoint of a kind that purpose reads,
+ * covering the URL, passes.
  */
 export function runtimeDecision(a: {
   source: RuntimeSource; endpoint: RuntimeEndpoint; approval: RuntimeApproval | null; url: URL; method?: EndpointMethod; purpose: RegistryPurpose; now: Date;
@@ -310,6 +319,8 @@ export function runtimeDecision(a: {
   if (approval.sourceRevision !== source.revision) return { ok: false, code: "approval_stale", reason: `${source.sourceKey}'s approval covers revision ${approval.sourceRevision}, and its endpoints are at revision ${source.revision}` };
   if (!approval.expiresAt || approval.expiresAt.getTime() <= a.now.getTime()) return { ok: false, code: "approval_expired", reason: `${source.sourceKey}'s approval is past its review-by date` };
   if (approval.scope.indexOf(a.purpose) < 0) return { ok: false, code: "out_of_scope", reason: `${source.sourceKey} is not approved for ${a.purpose}` };
+  const reads = PURPOSE_SERVICE_TYPES[a.purpose];
+  if (reads.indexOf(endpoint.serviceType) < 0) return { ok: false, code: "out_of_scope", reason: `endpoint ${endpoint.endpointRef} is ${endpoint.serviceType}; ${a.purpose} reads ${reads.join(" or ")}` };
   if (!endpoint.enabled) return { ok: false, code: "endpoint_disabled", reason: `endpoint ${endpoint.endpointRef} is disabled` };
   const outside = endpointRefusal(a.url, endpoint, a.method ?? "GET");
   if (outside) return { ok: false, code: "endpoint_policy", reason: outside };

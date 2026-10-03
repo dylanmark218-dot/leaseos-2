@@ -288,7 +288,7 @@ describe("who may approve, and until when", () => {
 describe("the runtime decision fails closed", () => {
   const NOW = new Date("2026-10-03T12:00:00Z");
   const source: RuntimeSource = { id: 10, sourceKey: "sk_petroleum_gis", lifecycle: "approved", revision: 3 };
-  const endpoint: RuntimeEndpoint = { ...EP, id: 20, endpointRef: "sk_petroleum_gis/layer_17", externalDataSourceId: 10, enabled: true };
+  const endpoint: RuntimeEndpoint = { ...EP, id: 20, endpointRef: "sk_petroleum_gis/layer_17", externalDataSourceId: 10, enabled: true, serviceType: "arcgis_feature_server" };
   const approval: RuntimeApproval = { id: 30, state: "approved", sourceRevision: 3, expiresAt: new Date("2027-01-01T00:00:00Z"), scope: ["facility_directory.arcgis_import"] };
   const decide = (patch: { source?: Partial<RuntimeSource>; endpoint?: Partial<RuntimeEndpoint>; approval?: Partial<RuntimeApproval> | null; url?: URL; method?: "GET" | "POST" }) =>
     runtimeDecision({
@@ -315,6 +315,7 @@ describe("the runtime decision fails closed", () => {
     ["an expired approval", { approval: { expiresAt: new Date("2026-10-03T11:59:59Z") } }, "approval_expired"],
     ["an approval with no review-by date", { approval: { expiresAt: null } }, "approval_expired"],
     ["an approval for another purpose", { approval: { scope: ["something_else"] } }, "out_of_scope"],
+    ["an endpoint of a kind the purpose does not read", { endpoint: { serviceType: "json_feed" as const } }, "out_of_scope"],
     ["a disabled endpoint", { endpoint: { enabled: false } }, "endpoint_disabled"],
     ["a URL outside the endpoint", { url: at("/arcgis/rest/services/Admin") }, "endpoint_policy"],
     ["a look-alike host", { url: at(EP.pathPrefix, "evil-example.com") }, "endpoint_policy"],

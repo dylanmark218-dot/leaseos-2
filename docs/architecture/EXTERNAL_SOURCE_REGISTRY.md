@@ -53,7 +53,8 @@ The order of a request (`registryGet`, the only path from an approval to the net
 procedure permission (roleProcedure)          — business authorization, audited
 → checkEgressUrl(url)                          — the caller (arcgisGet) refuses an unsafe URL before the database
 → authorizeUrl: endpoint for host+port+path    — registry lookup, read fresh on every call
-→ runtimeDecision: lifecycle, approval, revision, review-by, purpose, endpoint enabled, endpoint policy
+→ runtimeDecision: lifecycle, approval, revision, review-by, purpose, endpoint kind for that purpose,
+                   endpoint enabled, endpoint policy
 → (multi-page work) sameAuthority(pinned, now) — same source, endpoint, revision and approval as at the start
 → guardedGet(url, edges, effectiveLimits(endpoint, defaults))
      └ the guard's own checks, then destinationPolicy = the endpoint's rule, on the first URL and every redirect
@@ -133,6 +134,9 @@ retired. Approval rows use the versioned-approval words.
 | pending_approval, approved, suspended | `revoke` | revoked |
 | any but retired | `retire` (also disables every endpoint and revokes open approvals) | retired |
 
+- **A purpose covers only the endpoint kinds its runtime path reads.** The ArcGIS importer's purpose
+  covers ArcGIS FeatureServer and MapServer layers, so approving a source for it does not let the importer
+  read the same source's JSON feed (`PURPOSE_SERVICE_TYPES`; refused as `out_of_scope`).
 - **Draft and pending never authorise.** The runtime refuses every state except `approved`, with codes
   `not_approved`, `suspended`, `revoked` and `retired`.
 - **An edit that changes what may be contacted reopens review.** This covers a new host, port, path, path
@@ -224,6 +228,12 @@ The registry records what is known — `licenceName`, `licenceUrl`, `termsUrl`, 
 - **Licence review and approval are separate.** Licence review is the existing `status` and
   `geo.sourceReview`. Approval to contact a source says nothing about whether its data may be cached,
   redistributed or used commercially.
+- **The registry never writes a licence determination.** `create` accepts a licence name and URL as
+  pointers for a reviewer, and starts every source `unverified`, with no attribution text and commercial use
+  and redistribution `unknown`. `update` accepts only identity, classification, `termsUrl` and notes. Both
+  schemas are strict, so a determination sent to either is refused, not dropped, and the service refuses any
+  other field too. Attribution, commercial use, redistribution and clearance are set only by
+  `geo.sourceReview`, a sensitive permission.
 - The two facility sources are seeded `unverified` with commercial use and redistribution `unknown` and no
   attribution text, as every unverified seed is.
 - The facility importer still requires a confirmed, cache-permitted licence in `facilitySourceLicences`.
@@ -270,6 +280,8 @@ row records:
 | Alerts or notifications for drift, failures, or an approaching review-by date | Design extension point only |
 | Detecting a change to a publisher's licence or terms page | Design extension point only |
 | Presenting a bound credential through `registryGet` | Design extension point only |
+| A POST path through the registry (webhook endpoints are modelled; `registryGet` is GET only, and webhook delivery keeps its own guarded path) | Design extension point only |
+| Purposes beyond `facility_directory.arcgis_import` (a purpose is added only with the runtime path that checks it, and names the endpoint kinds it reads in `PURPOSE_SERVICE_TYPES`) | Design extension point only |
 | The 511 collector consulting the registry (its endpoints are seeded disabled; it keeps its own licence and owner gates) | Design extension point only |
 
 ## Seeds (only what the repository already reads)

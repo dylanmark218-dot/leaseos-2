@@ -39,10 +39,15 @@ const VERSION = z.number().int().min(1);
 /** Why — every change carries one, and it lands in the source's event history. */
 const REASON = z.string().trim().min(10).max(1000);
 const URL_TEXT = z.string().url().max(600).nullable().optional();
-const PERMITTED = z.enum(["yes", "no", "unknown"]);
 const CATEGORY = z.enum(externalDataSources.category.enumValues);
 
-const sourceFields = {
+/**
+ * Identity, classification and where the terms are. The licence determinations — attribution, commercial
+ * use, redistribution, cleared or not — are the licence review's (`geo.sourceReview`, a sensitive
+ * permission), so no registry procedure accepts them; the schemas are strict, so one sent is refused rather
+ * than dropped.
+ */
+const identityFields = {
   displayName: z.string().trim().min(3).max(220),
   authority: z.string().trim().min(3).max(220),
   category: CATEGORY,
@@ -52,12 +57,12 @@ const sourceFields = {
   sourceClass: z.enum(SOURCE_CLASSES).nullable().optional(),
   riskClass: z.enum(RISK_CLASSES).nullable().optional(),
   sensitivity: z.enum(SENSITIVITY_CLASSES).nullable().optional(),
+  notes: z.string().max(4000).nullable().optional(),
+};
+/** A new source may say which licence a reviewer should read; what it permits is left `unknown` for them. */
+const licencePointers = {
   licenceName: z.string().max(180).nullable().optional(),
   licenceUrl: URL_TEXT,
-  attributionText: z.string().max(600).nullable().optional(),
-  commercialUsePermitted: PERMITTED.optional(),
-  redistributionPermitted: PERMITTED.optional(),
-  notes: z.string().max(4000).nullable().optional(),
 };
 
 const endpointFields = {
@@ -83,10 +88,10 @@ export const sourceRegistryRouter = router({
   seed: roleProcedure("sourceRegistry.seed").mutation(() => run(() => reg.seedRegistry())),
 
   create: roleProcedure("sourceRegistry.create")
-    .input(z.object({ sourceKey: SOURCE_KEY, ...sourceFields, reason: REASON }))
+    .input(z.object({ sourceKey: SOURCE_KEY, ...identityFields, ...licencePointers, reason: REASON }).strict())
     .mutation(({ ctx, input }) => run(() => { const { reason, ...source } = input; return reg.createSource({ userId: ctx.user.id }, source, reason); })),
   update: roleProcedure("sourceRegistry.update")
-    .input(z.object({ sourceKey: SOURCE_KEY, expectedRowVersion: VERSION, patch: z.object(sourceFields).partial(), reason: REASON }))
+    .input(z.object({ sourceKey: SOURCE_KEY, expectedRowVersion: VERSION, patch: z.object(identityFields).partial().strict(), reason: REASON }).strict())
     .mutation(({ ctx, input }) => run(() => reg.updateSource({ userId: ctx.user.id }, input.sourceKey, input.expectedRowVersion, input.patch, input.reason))),
 
   endpointAdd: roleProcedure("sourceRegistry.endpointAdd")
