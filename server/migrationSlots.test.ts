@@ -68,7 +68,10 @@ describe("the real tree", () => {
     expect(files).toContain("0226_payroll_compensation_agreements.sql");
     // Payroll P2 took 0227 (pay schedules): 0223–0225 are still claimed by open branches, below main's 0226.
     expect(files).toContain("0227_payroll_pay_schedules.sql");
-    expect(headSlot(files)).toBe("0227");
+    // Driver Portfolio security hardening took 0229 (compliance document recorder): 0228 is claimed by an
+    // open payroll branch, so head+1 would have collided; the register records the scan.
+    expect(files).toContain("0229_compliance_document_recorder.sql");
+    expect(headSlot(files)).toBe("0229");
   });
 
   it("keeps the reserved slots empty", () => {

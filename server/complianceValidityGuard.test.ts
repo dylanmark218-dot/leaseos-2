@@ -199,6 +199,8 @@ const READERS: Record<string, string> = {
   // and requirement-binding windows, not documents.
   "server/driverPortfolioRouter.ts": "wallet, dispatch view and credential history through driverPortfolio (complianceDocumentValidity); writes a driver-uploaded credential as needs_review",
   "server/driverPortfolioService.ts": "loads the operator's complianceDocuments rows for driverPortfolio; decides nothing itself",
+  // Driver Portfolio security hardening: the one verification door.
+  "server/credentialVerificationService.ts": "decides verified/rejected on a needs_review row (separation of duties, conditional update); reads the operator's rows only to name what a renewal supersedes, through credentialHistory (complianceDocumentValidity)",
   // C1b-3's D-05 read adapter (#57), added on merging main.
   "server/qualificationReads.ts": "an Academy grant's evidence document through complianceDocumentValidity; the grant itself through academyVerdict (qualificationValidity)",
 };
