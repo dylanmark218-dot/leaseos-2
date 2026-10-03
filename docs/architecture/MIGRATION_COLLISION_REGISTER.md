@@ -412,3 +412,16 @@ every slot in use, so it moved to `0228`. The migration creates only new tables 
   "0197 unused" is about `main`, where it is indeed absent). It now sits below `main`'s head (`0219`), the
   same position as LA-1a's `0202`/`0203`: `migrationLedger` applies any unapplied file by name, and no
   migration on `main` touches the columns or the table 0197 adds, so it keeps `0197` rather than moving.
+
+## State at the Driver Portfolio security hardening (2026-10-03, `main` = `60de8c2`)
+
+`main` migration head: **`0228_safety_program_builder.sql`**. The security-hardening branch
+(`security/driver-portfolio-hardening`, PR #135) takes **`0236_compliance_document_recorder.sql`** — one
+nullable column, `complianceDocuments.recordedByUserId`, no back-fill (NULL = recorder unknown). Drafted as
+`0229`; the scan across all 144 remote branches found `0229` claimed by
+`claude/integration-hub-subsystem-6nzrkw` and `0230`–`0235` by other open branches, so it moved to `0236`
+before it was ever applied on main. The ledger runner applies it by name.
+
+**Next free number after this: `0237`** (re-check with the scan before committing).
+
+* **2026-10-03 (Driver Portfolio hardening)**: drafted `0229`, renumbered to `0236` on merging `main` `60de8c2` (0229–0235 claimed by open branches); next free `0237`.
