@@ -159,7 +159,7 @@ export const complianceRouter = router({
         expiresAt: input.expiresAt ?? null, jurisdiction: input.jurisdiction ?? null, verificationStatus: "needs_review",
         source: input.source ?? null, confidence: "medium", privateDetail,
         evidenceRecordId: input.evidenceRecordId ?? null,
-        // 0229 — who entered it, so the same person cannot then verify it.
+        // 0236 — who entered it, so the same person cannot then verify it.
         recordedByUserId: ctx.user.id,
       });
       const credentialId = Number(ins[0]?.insertId ?? 0);

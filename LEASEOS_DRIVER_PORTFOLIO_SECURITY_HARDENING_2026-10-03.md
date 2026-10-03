@@ -1,7 +1,7 @@
 # Driver Portfolio — security hardening (2026-10-03)
 
 This is the hardening pass on what #16 (`48a64e1`) landed, before any Wallet UI work starts.
-`LEASEOS_RELEASE` is unchanged. The one migration is `0229_compliance_document_recorder.sql`.
+`LEASEOS_RELEASE` is unchanged. The one migration is `0236_compliance_document_recorder.sql`.
 
 ## 1. One verification door
 
@@ -29,7 +29,7 @@ Structural guard: `server/credentialVerificationGuard.test.ts` fails if any of t
 - a verified insert outside workforce;
 - an insert without a recorder.
 
-## 2. Recorder provenance (0229)
+## 2. Recorder provenance (0236)
 
 `complianceDocuments.recordedByUserId` is a nullable int. These paths set it:
 - `compliance.credentialRecord`;

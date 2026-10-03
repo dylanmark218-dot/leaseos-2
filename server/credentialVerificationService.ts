@@ -45,7 +45,7 @@ export async function credentialSubjectUserId(db: Db, doc: Pick<CredentialRow, "
   return op?.userId ?? null;
 }
 
-/** Whoever entered it: the 0229 column, plus the portfolio's own upload row for rows older than it. */
+/** Whoever entered it: the 0236 column, plus the portfolio's own upload row for rows older than it. */
 export async function credentialRecorders(db: Db, doc: Pick<CredentialRow, "id" | "recordedByUserId">): Promise<number[]> {
   const out = new Set<number>();
   if (doc.recordedByUserId != null) out.add(doc.recordedByUserId);
@@ -59,7 +59,7 @@ export type EntryPath = "compliance.credentialRecord" | "documents.create";
 /**
  * The portfolio's entry row for an operator's credential recorded outside the portfolio, so the
  * audit names who entered it whichever path did (driverPortfolio.submitCredential writes its own).
- * Private and medical rows get none: the portfolio audit never projects them, and the 0229
+ * Private and medical rows get none: the portfolio audit never projects them, and the 0236
  * `recordedByUserId` column is their provenance. The detail names the type and path, never the
  * identifier, storage key or contents.
  */
