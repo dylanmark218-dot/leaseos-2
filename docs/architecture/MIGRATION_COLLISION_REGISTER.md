@@ -52,7 +52,14 @@ communications-marketplace). `scripts/verify-migration-0170.sh` became `verify-m
 open, not touched here: `0202`/`0203` are claimed twice — driver-portfolio (#16) and
 `claude/live-assist-architecture-qg4jgp` (no PR). Next free number at that time: `0209` (since taken by main for P0-A2.1; see the 2026-10-01 section below — next free is `0210`).
 
-**Next free number for new work: `0210`** (re-check with the scan before committing). The 2026-09-24 table below
+**PR #16 renumbering (2026-10-01, at its merge of `main` = `c6d180f`):** LA-1a merged `0202`/`0203` first, so
+under the rule of thumb the driver portfolio yields its three numbers. It moves `0202_driver_portfolio → 0210`,
+`0203_driver_portfolio_events_append_only → 0211` and `0204_driver_portfolio_api → 0212`, the first run of three
+free on `main` and on every remote branch at the time of the scan (`0205`–`0208` are held by the
+communications-marketplace and auth-workspace branches). The three move together because 0211's triggers and
+0212's ALTERs act on 0210's tables.
+
+**Next free number for new work:** see the latest section below (`0220` at the SA1 merge). The 2026-09-24 table below
 is kept for history; several of its claims have since merged or been renumbered by their authors.
 
 ## Earlier state (2026-09-24, `main` = `1680e94`, scan at C1b-1)
@@ -100,6 +107,22 @@ Next free number at that time: `0191` (superseded above).
 * **2026-09-24 (C1b-1)**: rescanned after #6, #9, #11, #10, #13, #17, #18, #21, #23–#25 merged. C1b-1 takes
   `0189`, the first number no branch holds, rather than `0175` (named free on 2026-09-23 and claimed by
   four branches since). No other branch renumbered.
+
+## Claim: 0227 (payroll P2 — pay schedules and the pay-period machine, 2026-10-03)
+
+`main` = `a61ff29`, migration head **`0226_payroll_compensation_agreements.sql`** (P1, merged as #130). Scan over
+`origin/main` and all 130 remote refs immediately before the P2 commit:
+
+| Number | Migration file | Branch | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|
+| 0220 | `0220_eld_event_ledger.sql` | `claude/eld-compliance-intelligence-ramlrd` | open | with integration hub | first to merge keeps it |
+| 0220–0223 | `0220_integration_hub_connectors.sql` … `0223_integration_hub_conflicts_and_links.sql` | `claude/integration-hub-subsystem-6nzrkw` | open | 0220 with ELD | first to merge keeps it |
+| 0224 | `0224_eld_duty_day_designations.sql` | `claude/eld-compliance-intelligence-ramlrd` | open | with ci-stabilization | first to merge keeps it |
+| 0224, 0225 | `0224_offline_capture_identity_scope.sql`, `0225_queued_package_identity_scope.sql` | `fix/main-ci-stabilization` | open | 0224 with ELD | first to merge keeps it |
+| **0227** | **`0227_payroll_pay_schedules.sql`** | **`claude/payroll-p2-pay-schedules`** | **claiming** | **none** | **keeps 0227** |
+
+No ref holds anything at or above `0227`. **Next free number for new work: `0228`** (re-check with the scan before
+committing).
 
 ## Claim: 0226 (payroll P1 — compensation agreements and earning codes, 2026-10-02)
 
@@ -157,6 +180,12 @@ apply it in different orders.
 | 0170 | `0170_driver_portfolio_events_append_only.sql` | `claude/driver-portfolio-credential-wallet-ya8928` | none | `3911f59` | open branch, no PR | with #9, #11, auth-workspace | renumber at rebase |
 | 0170 | `0170_dispatch_role_types.sql` | `feature/dispatch-role-assignment-backend` | #9 | `42c454f` | PR open against `main`, main merged in | with auth-workspace, driver-portfolio | #9 is nearest to merge and **proposes to keep 0170/0171**; owner to confirm |
 | 0170 | `0170_dispatch_role_types.sql` | `feature/dispatch-assignment-ui` | #11 | `e6b65f2` | PR open, stacked on #9 | inherited from #9 (same file) | follows #9 |
+| 0169 | `0169_defect_resolution.sql` | *(main)* | #4 (merged) | — | **on main** | vs `0169_driver_portfolio` | main owns 0169 |
+| ~~0169~~ → **0175** | `0175_driver_portfolio.sql` | `claude/driver-portfolio-credential-wallet-ya8928` | driver-portfolio PR | merged main `42c454f` | PR open | none | **renumbered 0169 → 0175** at its merge of main |
+| ~~0170~~ → **0176** | `0176_driver_portfolio_events_append_only.sql` | `claude/driver-portfolio-credential-wallet-ya8928` | driver-portfolio PR | merged main `42c454f` | PR open | none | **renumbered 0170 → 0176** at its merge of main |
+| 0177 | `0177_driver_portfolio_api.sql` | `claude/driver-portfolio-api-ya8928` (stacked on the driver-portfolio PR #16) | none yet | driver-portfolio `613e837` | open branch | none | first number free on main and every open branch at 2026-09-23 |
+| 0170 | `0170_dispatch_role_types.sql` | `feature/dispatch-role-assignment-backend` | #9 | `e6b65f2` | PR open, stacked; CI green | with auth-workspace, driver-portfolio | #9 is nearest to merge, so it **proposes to keep 0170/0171**. Owner to confirm |
+| 0170 | `0170_dispatch_role_types.sql` | `feature/dispatch-assignment-ui` | #11 | `e6b65f2` | PR open, stacked on #9 | same file as #9 (inherited), not a separate claim | follows #9 |
 | 0170 | `0170_organization_scoped_role_grants.sql` | `claude/leaseos-auth-workspace-system-t008ad` | none | `f21cd1b` | open branch, no PR | with #9, driver-portfolio | renumber at rebase |
 | 0171 | `0171_dispatch_role_assignment_events.sql` | `feature/dispatch-role-assignment-backend` | #9 | `42c454f` | PR open | inherited copy on #11 only | follows #9 |
 | 0171 | `0171_dispatch_role_assignment_events.sql` | `feature/dispatch-assignment-ui` | #11 | `e6b65f2` | PR open, stacked on #9 | inherited from #9 | follows #9 |
@@ -200,6 +229,10 @@ auth-workspace, work-calendar), `0172`–`0175` (training-academy-workforce), `0
   No other branch was renumbered.
 * **2026-09-24**: `0185` claimed by SEC-004 (`claude/sec-004-webhook-delivery-integrity`); first number free on
   `main` and every remote branch. No branch renumbered.
+* **2026-09-23**: the driver-portfolio branch merged `main` (`42c454f`) and moved `0169 → 0175` and
+  `0170 → 0176`, the first two numbers held by neither `main` nor any open branch (0170–0173 are
+  claimed by #9/#11 and the training-academy branch; 0174 is on main). `claude/leaseos-auth-workspace-system-t008ad`
+  still claims 0170 and should take the next free number at its own rebase.
 * **2026-09-24**: `0186` claimed by `claude/canadian-govt-apis-leaseos-q33l42` (external source categories);
   first number free after the `0185` claims above. No branch renumbered.
 
@@ -283,6 +316,16 @@ anywhere is `0193`, so `0194` is the first free everywhere.
   migration**, rather than afterwards. That ordering is the correction for the `0191`–`0193`
   omission recorded above: those numbers were each verified free before use, but the verification
   went unrecorded, and this register is the only place that verification survives.
+* **2026-09-24**: the driver-portfolio branch (PR #16) merged `main` (`60f3899`) again and keeps
+  `0175`/`0176`. The training-academy branch's claim on `0175` is later and has no PR; under the rule of
+  thumb it takes the next free number at its own rebase.
+* **2026-09-23**: `claude/driver-portfolio-api-ya8928` claims **0177** (Driver Portfolio API), stacked on PR #16.
+* **2026-09-25**: `main` merged `0175_session_families.sql` (S1-A) first, so under the rule of thumb the
+  driver portfolio yields all three of its numbers. PR #16 (which now carries #28's API work) moves
+  `0175_driver_portfolio → 0202`, `0176_driver_portfolio_events_append_only → 0203` and
+  `0177_driver_portfolio_api → 0204`: the first run of three that neither `main` nor any open branch
+  holds (every number 0175–0201 but 0190 is claimed). The three move together because 0203's triggers
+  and 0204's ALTERs act on 0202's tables. The driver-portfolio rows above are superseded by this entry.
 
 ## State at the P0-A2.1 claim (2026-10-01, `main` = `64f784d`, after PR #73)
 
@@ -296,12 +339,14 @@ number free everywhere.
 |---|---|---|---|---|---|---|
 | 0209 | `0209_operating_zone_scope.sql` | `security/operating-zone-tenant-model` | P0-A2.1 | claiming | none | keeps 0209 |
 
-**Next free number for new work: `0210`** (re-check with the scan before committing).
+**Next free number for new work: `0210`** at that time (superseded above: `0213`).
 
 ## Change log (continued)
 
 * **2026-10-01 (P0-A2.1)**: claimed `0209` (`operatingZones.orgRef`, nullable; NULL = the historical single
   tenant, as 0132 and 0148), recorded in the commit that creates the migration.
+* **2026-10-01 (PR #16)**: the driver portfolio renumbers `0202`–`0204` → `0210`–`0212` after LA-1a merged
+  `0202`/`0203`; next free `0213`.
 
 ## Claim: 0217–0219 (Customer, Contract and Rate Management, 2026-10-01)
 

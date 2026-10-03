@@ -1167,3 +1167,132 @@ migration and a new ladder row are expected to move, and they were updated expli
 separately from the one payroll row (owner decision D4, 2026-10-02). A visible consequence of reusing the ladder:
 the commercial office's approval-policy list now shows a `compensation_agreement` row, and a book can add its own
 tier for that category through the existing policy editor (its category field accepts any snake_case key).
+
+## 25. P2 — Pay Schedules & the Pay-Period Machine (implemented 2026-10-03)
+
+**Base:** `main` = `a61ff29` (P1 merged as #130; P0 `2552380` and P1 `84f2554`/`67dbbfc` are in its history).
+**Branch:** `claude/payroll-p2-pay-schedules`.
+**Migration:** **`0227_payroll_pay_schedules.sql`** — one migration. The scan over `origin/main` and all 130 remote
+refs immediately before the commit found the same open claims as at P1 (`0220`–`0225` on the ELD, integration-hub
+and CI-stabilization branches) and nothing at or above `0227`. Claim recorded in
+`docs/architecture/MIGRATION_COLLISION_REGISTER.md`; next free is `0228`.
+
+### Tables and columns
+
+| Table / change | Purpose |
+|---|---|
+| `paySchedules` (new) | A book's payroll calendar: `scheduleRef` unique, `financialEntityId`, `name`, `frequency` weekly/biweekly/semi_monthly/monthly/custom, `anchorDate` (`date`), `periodLengthDays` (custom only, 1–62), `paymentLagDays` (0–60) and `cutoffLagDays` (−14–60) — ranges enforced by a CHECK and, with "cutoff not after payment", by `validateSchedule` — IANA `timezone`, `status` active/retired, creator and retirer with timestamps. |
+| `payPeriods` + `payScheduleId`, `periodStartDate`, `periodEndDate`, `paymentDate`, `cutoffDate` | A generated period's calendar dates, half-open `[periodStartDate, periodEndDate)` like 0226's windows. `paymentDate` = last day + `paymentLagDays`; `cutoffDate` = last day + `cutoffLagDays`. UNIQUE `(payScheduleId, periodStartDate)` makes generation idempotent at the database too. |
+| `payPeriods` + `createdByUserId`, `submittedBy/At`, `approvedBy/At`, `finalizedBy/At`, `reopenedBy/At/Reason`, `voidedBy/At/Reason` | Who moved the period, when, and why. The existing `lockedAt`/`lockedByUserId` (0042) now carry the payroll lock. |
+| `payPeriods.state` + `voided` | The one new enum value; every existing value is kept. |
+
+No foreign keys, no money columns, no `tenantId` (the book is the boundary, 0146). For scheduled periods the `date`
+columns are authoritative; the legacy `startsOn`/`endsOn` instants are derived from them as local midnight in the
+schedule's zone (`fromDateText`, the transport adapters' DST-safe conversion), so every existing reader of those
+columns keeps working.
+
+### Permissions
+
+| Permission | Holders | Sensitive |
+|---|---|---|
+| `payroll.schedule.read` | payroll_admin, hr, controller | no |
+| `payroll.schedule.manage` | payroll_admin, controller | yes |
+| `payroll.finalize` | payroll_admin, controller | yes |
+| `payroll.void` | controller | yes |
+
+Submit and process reuse `payroll.run`; approve and reopen reuse `payroll.approve` (so the administrator, denied
+`payroll.approve` since P0, cannot approve or reopen). All four new permissions join `COMPENSATION_PERMISSIONS` and
+are denied by name to dispatcher, driver, mechanic, shop_lead, auditor and bookkeeper; `payroll.void` is additionally
+denied to payroll_admin. Management holds none. Twelve procedures in `server/payrollScheduleRouter.ts`, mounted as
+`payrollSchedule.*`, every one `moneyScoped` with point checks (a schedule or period outside the caller's books is
+`NOT_FOUND`): `schedulesList`, `scheduleCreate`, `scheduleRetire`, `periodsGenerate`, `periodsList`, `periodGet`,
+`periodSubmit`, `periodApprove`, `periodReopen`, `periodProcess`, `periodFinalize`, `periodVoid`.
+
+### Generation
+
+`generatePeriods` (pure, `server/_core/payrollSchedule.ts`) walks the calendar from the anchor: weekly 7 days,
+biweekly 14, custom `periodLengthDays`, monthly by calendar month from the anchor's day (anchor day ≤ 28, so no
+month ever lacks it), semi-monthly `[1st, 16th)` and `[16th, next 1st)` (anchor on the 1st or 16th). It returns the
+periods that have started by `through` and not ended before `from`, at most 60 per call. `periodsGenerate` inserts
+them in one transaction with the schedule row locked, skips starts that exist, and reports `created` and `existing`;
+rerunning is a no-op. Generated periods open in OPEN (`collecting`). A retired schedule generates nothing; its
+periods keep their state.
+
+### The machine and its labels
+
+The state names stay those of the existing enum, with the brief's labels returned beside them (`stateLabel`):
+
+| Stored | Label | Moves to | Door |
+|---|---|---|---|
+| `draft` | DRAFT | `collecting`, `voided` | — (legacy rows only) |
+| `collecting` | OPEN | `review` (submit), `voided` | `payroll.run` / `payroll.void` |
+| `review` | REVIEWING | `approved` (approve), `collecting` (reopen) | `payroll.approve` |
+| `approved` | APPROVED | `processing` (process), `review` (reopen) | `payroll.run` / `payroll.approve` |
+| `processing` | PROCESSING | `closed` (finalize) | `payroll.finalize` |
+| `closed`, `paid` | FINALIZED | `amended` (engine only; no P2 procedure) | — |
+| `amended` | CORRECTED | terminal | — |
+| `voided` | VOIDED | terminal | — |
+
+Every transition is a guarded `UPDATE … WHERE state = from`; a period that moved underneath the caller is refused,
+never overwritten. A reopen requires a reason and steps back exactly one stage.
+
+### The lock (D6)
+
+- **OPEN** accepts earnings (`payroll.earningPropose`) and runs (`payroll.runCreate`), and runs on it collect.
+- **REVIEWING** refuses new earnings; runs may still be created and collect, so the review can be completed.
+- **APPROVED and later, and VOIDED,** refuse new earnings, new runs and collection. The routers check first for a
+  clear message, and the writes re-read the period `FOR UPDATE` inside their own transactions (earning insert, run
+  insert, collection), so an approval that lands between the check and the write still wins: the approval's guarded
+  `UPDATE` waits on that row lock, and the write that held it saw the period still open.
+- Approval sets `lockedAt`/`lockedByUserId`; reopening an approved period clears them and the approval.
+- Approval is refused while any run on the period is `draft` or `collecting`. Finalization is refused until every
+  run on it is `paid` (or `closed`/`amended`). Void is refused once any run or earning references the period.
+- This lock is payroll's own. The accounting close (`periodCloses`) neither owns nor is owned by it; the export's
+  posting date will be checked with `assertPeriodOpen` when export arrives (P6), per D6.
+
+### Separation of duties (D4)
+
+`periodApprove` refuses the period's opener (the generator, or `payroll.periodOpen`'s caller, which now records
+`createdByUserId`), refuses the submitter, and refuses a period whose opener is not on record (every pre-P2 period)
+rather than assuming it was someone else. Through roles alone the submitter can never approve — the administrator's
+denial of `payroll.approve` wins over any second role — so the submitter rule is defence in depth and is tested by
+recording the submitter directly.
+
+### Deviations from the September design, and why
+
+- **Migration number** `0227`, not the design's `0221` (taken long ago).
+- **No `payGroups.payScheduleId` and no profile → schedule link.** Nothing in P2 needs to know which people a
+  schedule pays; that belongs with candidate generation (P3), which will add it on its own slot.
+- **No `payRuns` finalize/void/snapshot/supersede columns.** They belong to the run and statement work (P5); P2 does
+  not change `payRuns` at all.
+- **The period machine reuses the existing enum plus `voided`** instead of narrowing to new names: the stored values
+  stay readable by every existing reader, and the labels above give the brief's vocabulary. Legacy `paid` reads as
+  FINALIZED.
+- **Void is narrower than the design's diagram:** only DRAFT/OPEN with nothing recorded. Voiding a processed period
+  "before any export acknowledgement" needs an export acknowledgement to exist (P6).
+- **CORRECTED** has no P2 procedure: a correction is a correction run (P5).
+- **Date columns are authoritative for scheduled periods**, with the legacy instants derived from them, rather than
+  replacing the instants.
+
+### Behaviour change on existing paths
+
+`payroll.earningPropose` is refused unless the period is OPEN; `payroll.runCreate` and `payroll.runCollect` unless it
+is OPEN or REVIEWING. `payroll.periodOpen` has always created periods in `collecting`, so legacy ad-hoc periods are
+unaffected until someone submits them; a legacy period left in `draft` would now refuse earnings until moved to OPEN.
+Ad-hoc periods move through the same `payrollSchedule.period*` procedures (they are found by `periodRef`).
+
+### Tests and gates
+
+- `server/_core/payrollSchedule.test.ts` (14, pure): every frequency including semi-monthly and month-end, payment
+  and cutoff dates, `from`/`through`/`max`, validation, every legal and illegal edge, labels, readiness rules.
+- `server/payrollSchedule.db.test.ts` (10, database, through `appRouter` except one direct service call): tenant isolation on every procedure;
+  idempotent generation with local-midnight legacy instants in America/Edmonton; invalid calendars; retirement; the
+  lock against earnings, runs and collection (including a period locked after its run was created, and the
+  in-transaction re-read refusing an earning or run insert into a period locked after the router's check); reopen
+  releasing the lock; opener/submitter/unrecorded-opener refusals; approval blocked by a collecting run;
+  finalization blocked by an unpaid run and permanent once done; void only when empty; role refusals for
+  dispatch/driver/mechanic/management/bookkeeper/auditor, the administrator refused approve and void, HR read-only.
+- Updated: `financeScopeCoverage` (+ `payrollSchedule`, 144 money procedures), `procedureAuthorization` (803 mapped,
+  new router in the wiring sources), `operationalApiAuthorization` (803), `crossLayerIntegrity` (880 server paths),
+  `migrationSlots` (head `0227`), `PROCEDURE_AUTHORIZATION_INVENTORY.md` (new row, 519 total),
+  `LEASEOS_CURRENT_STATE.md`.
