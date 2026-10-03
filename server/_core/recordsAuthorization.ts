@@ -162,6 +162,12 @@ export type Permission =
   | "payroll.compensation.propose"
   | "payroll.compensation.approve"
   | "payroll.earning_code.manage"
+  // Payroll P2 (0227) — the payroll calendar and the pay-period machine. Reading the calendar, configuring it,
+  // finalizing a period and voiding one are separate authorities; approving a period reuses `payroll.approve`.
+  | "payroll.schedule.read"
+  | "payroll.schedule.manage"
+  | "payroll.finalize"
+  | "payroll.void"
   // Contractor settlement is its own ledger, never employee payroll.
   | "contractor.read" | "contractor.write" | "contractor.approve"
   | "finance.entity.write"
@@ -1460,6 +1466,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.review",
     "payroll.compensation.read",
     "payroll.compensation.propose",
+    "payroll.schedule.read",
     "personnel.read",
     "personnel.write",
     "hos.read",
@@ -1679,6 +1686,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.compensation.read",
     "payroll.compensation.propose",
     "payroll.earning_code.manage",
+    "payroll.schedule.read",
+    "payroll.schedule.manage",
+    "payroll.finalize",
     "contractor.read",
     "surface.exceptions.read",
     "surface.search",
@@ -1765,6 +1775,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.compensation.read",
     "payroll.compensation.approve",
     "payroll.earning_code.manage",
+    "payroll.schedule.read",
+    "payroll.schedule.manage",
+    "payroll.finalize",
+    "payroll.void",
     "evidence.read_commercial",
     "evidence.browse",
     "evidence.export",
@@ -1985,7 +1999,9 @@ export function isUniversalPermission(p: Permission): boolean {
  * Payroll P1 — every compensation authority, denied by name to the roles that work beside payroll but
  * must never see or set what a person is paid. Sharing a job, a dispatch or a truck grants none of it.
  */
-const COMPENSATION_PERMISSIONS: readonly Permission[] = ["payroll.compensation.read", "payroll.compensation.propose", "payroll.compensation.approve", "payroll.earning_code.manage"];
+const COMPENSATION_PERMISSIONS: readonly Permission[] = ["payroll.compensation.read", "payroll.compensation.propose", "payroll.compensation.approve", "payroll.earning_code.manage",
+  // P2 — the payroll calendar and the period machine, denied to the same roles for the same reason.
+  "payroll.schedule.read", "payroll.schedule.manage", "payroll.finalize", "payroll.void"];
 
 const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
   mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
@@ -2001,7 +2017,7 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
   // measurement ladder.
   bookkeeper: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "payroll.approve", ...COMPENSATION_PERMISSIONS],
   // P1 — the administrator proposes compensation; approving it is the controller's (D4).
-  payroll_admin: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.approve", "billing.write", "payroll.compensation.approve"],
+  payroll_admin: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.approve", "billing.write", "payroll.compensation.approve", "payroll.void"],
   tax_preparer: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "billing.write", "banking.reconcile"],
   controller: ["payroll.bank.read", "payroll.tax_identifier.read"],
   external_accountant: [
@@ -2222,6 +2238,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "payroll.compensation.propose",
   "payroll.compensation.approve",
   "payroll.earning_code.manage",
+  // P2 — configuring the calendar, finalizing a period and voiding one.
+  "payroll.schedule.manage",
+  "payroll.finalize",
+  "payroll.void",
   "contractor.approve",
   "finance.entity.write",
   // B20.13 — a claim ties an expense to a program on the stacking ledger, and
@@ -2955,6 +2975,20 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "payrollCompensation.versionApprove": "payroll.compensation.approve",
   "payrollCompensation.versionReject": "payroll.compensation.approve",
   "payrollCompensation.versionInForce": "payroll.compensation.read",
+
+  // Payroll P2 (0227) — pay schedules and the pay-period machine.
+  "payrollSchedule.schedulesList": "payroll.schedule.read",
+  "payrollSchedule.scheduleCreate": "payroll.schedule.manage",
+  "payrollSchedule.scheduleRetire": "payroll.schedule.manage",
+  "payrollSchedule.periodsGenerate": "payroll.schedule.manage",
+  "payrollSchedule.periodsList": "payroll.schedule.read",
+  "payrollSchedule.periodGet": "payroll.schedule.read",
+  "payrollSchedule.periodSubmit": "payroll.run",
+  "payrollSchedule.periodApprove": "payroll.approve",
+  "payrollSchedule.periodReopen": "payroll.approve",
+  "payrollSchedule.periodProcess": "payroll.run",
+  "payrollSchedule.periodFinalize": "payroll.finalize",
+  "payrollSchedule.periodVoid": "payroll.void",
 
   "contractors.settlementsList": "contractor.read",
   "contractors.settlementCreate": "contractor.write",

@@ -3375,10 +3375,30 @@ export const payPeriods = mysqlTable("payPeriods", {
   financialEntityId: int("financialEntityId").notNull(),
   startsOn: timestamp("startsOn").notNull(),
   endsOn: timestamp("endsOn").notNull(),
-  state: mysqlEnum("state", ["draft", "collecting", "review", "approved", "processing", "paid", "closed", "amended"]).default("draft").notNull(),
+  /** 0227 adds `voided`. The P2 machine: collecting=OPEN, review=REVIEWING, approved=APPROVED (locked), processing, closed=FINALIZED, amended=CORRECTED, voided. `paid` reads as FINALIZED. */
+  state: mysqlEnum("state", ["draft", "collecting", "review", "approved", "processing", "paid", "closed", "amended", "voided"]).default("draft").notNull(),
   lockedAt: timestamp("lockedAt"),
   lockedByUserId: int("lockedByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0227 (P2) — the schedule that generated the period; authoritative calendar dates [start, end); the machine's actors. */
+  payScheduleId: int("payScheduleId"),
+  periodStartDate: date("periodStartDate", { mode: "string" }),
+  periodEndDate: date("periodEndDate", { mode: "string" }),
+  paymentDate: date("paymentDate", { mode: "string" }),
+  cutoffDate: date("cutoffDate", { mode: "string" }),
+  createdByUserId: int("createdByUserId"),
+  submittedByUserId: int("submittedByUserId"),
+  submittedAt: timestamp("submittedAt"),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  finalizedByUserId: int("finalizedByUserId"),
+  finalizedAt: timestamp("finalizedAt"),
+  reopenedByUserId: int("reopenedByUserId"),
+  reopenedAt: timestamp("reopenedAt"),
+  reopenReason: varchar("reopenReason", { length: 400 }),
+  voidedByUserId: int("voidedByUserId"),
+  voidedAt: timestamp("voidedAt"),
+  voidReason: varchar("voidReason", { length: 400 }),
 });
 
 export const payrollTimeEntries = mysqlTable("payrollTimeEntries", {
@@ -10525,3 +10545,27 @@ export const compensationEarningRules = mysqlTable("compensationEarningRules", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type CompensationEarningRuleRow = typeof compensationEarningRules.$inferSelect;
+
+/* ---- 0227: Payroll P2 — pay schedules ---- */
+
+export const PAY_FREQUENCIES = ["weekly", "biweekly", "semi_monthly", "monthly", "custom"] as const;
+
+/** A book's payroll calendar; periods are generated from it on calendar dates (see 0227 for the rules). */
+export const paySchedules = mysqlTable("paySchedules", {
+  id: int("id").autoincrement().primaryKey(),
+  scheduleRef: varchar("scheduleRef", { length: 40 }).notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  name: varchar("name", { length: 120 }).notNull(),
+  frequency: mysqlEnum("frequency", PAY_FREQUENCIES).notNull(),
+  anchorDate: date("anchorDate", { mode: "string" }).notNull(),
+  periodLengthDays: int("periodLengthDays"),
+  paymentLagDays: int("paymentLagDays").default(0).notNull(),
+  cutoffLagDays: int("cutoffLagDays").default(0).notNull(),
+  timezone: varchar("timezone", { length: 64 }).notNull(),
+  status: mysqlEnum("status", ["active", "retired"]).default("active").notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  retiredByUserId: int("retiredByUserId"),
+  retiredAt: timestamp("retiredAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type PayScheduleRow = typeof paySchedules.$inferSelect;
