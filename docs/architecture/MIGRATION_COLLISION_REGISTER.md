@@ -461,3 +461,14 @@ before it was ever applied on main. The ledger runner applies it by name.
 **Next free number after this: `0237`** (re-check with the scan before committing).
 
 * **2026-10-03 (Driver Portfolio hardening)**: drafted `0229`, renumbered to `0236` on merging `main` `60de8c2` (0229–0235 claimed by open branches); next free `0237`.
+
+## State at the safety program security follow-up merge (2026-10-03, `main` = `5283a8e`, PR #140)
+
+`main` migration head: **`0241_safety_program_event_chain_unique.sql`** (212 migrations). It is applied by name,
+so slots below it that are still empty stay usable for the branches that hold them: `0234`–`0235` (payroll P4),
+`0237`–`0240` (the marketplace branches, PR #109). At the post-merge scan of `main` and all 144 remote branches,
+`claude/fleet-equipment-portfolio-design-3d13d5` holds `0242`–`0243` and nothing holds a higher slot.
+
+**Next free number for new work: `0244`** (re-check with the scan before committing).
+
+* **2026-10-03 (PR #140 merged)**: `0241` merged to `main` as `5283a8e`; next free `0244`.
