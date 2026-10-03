@@ -70,7 +70,9 @@ d("the closeout, decided by terms", () => {
     const office = await withRole("office");
     const controller = await withRole("controller");
     const driver = await withRole("driver");
-    const entityId = 3_900_000 + Math.floor(Math.random() * 90_000);
+    // P0-A3: terms are recorded against an account in a book the caller owns; these people hold no membership, so the
+    // book carries no organization (the historical single tenant's), as termsComplete.test.ts already does.
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [key("FE").slice(0, 40)]))[0].insertId);
     const acctRef = key("CUST").slice(0, 40);
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, 'ABC Energy')", [acctRef, entityId]);
     const [job] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress, createdAt) VALUES (?, 'hydrovac', 'hydrovac', 'ABC Energy', '10-22-045-06-W5', 'on_site', 0, NOW())", [key("JOB").slice(0, 40)]);
@@ -122,26 +124,49 @@ d("the worker sends the event it processed", () => {
   it("delivers a subscribed webhook from the worker's processEvent, and the retry sweep on heartbeat picks up a failed one when it is due", async () => {
     const controller = await withRole("controller");
     const sub = await callerFor(controller).integration.webhookSubscribe({ name: "ERP", url: "https://erp.example/hook", eventTypes: ["worker.*"] });
+    // Revoked whatever happens: a live subscription left behind is encrypted under this file's key and
+    // breaks the next suite that dispatches webhooks under its own.
+    try {
+    // Deliveries are read for this subscription only: another subscription on the same event type (another
+    // suite's, or one a failed run left) is not this test's to count.
+    const [subRow] = await pool.execute<mysql.RowDataPacket[]>("SELECT id FROM webhookSubscriptions WHERE subscriptionRef = ?", [sub.subscriptionRef]);
+    const subscriptionId = Number(subRow[0]!.id);
     const seen: string[] = [];
     let failing = true;
-    setWebhookPoster(async (_url, body) => { seen.push(body); return failing ? { status: 503 } : { status: 200 }; });
+    setWebhookPoster(async (url, body) => { if (url === "https://erp.example/hook") seen.push(body); return failing ? { status: 503 } : { status: 200 }; });
     const eventId = key("EV").slice(0, 40);
     await pool.execute("INSERT INTO domainEventOutbox (eventId, eventType, eventVersion, aggregateType, aggregateId, tenantId, correlationId, actorSource, payloadJson, occurredAt, attemptCount, createdAt) VALUES (?, 'worker.test', 1, 'ticket', 'FT-9', 'default', ?, 'system', '{}', NOW(), 0, NOW())", [eventId, key("C").slice(0, 40)]);
     const ports = createWorkerPorts(pool as never, () => new Date("2026-09-10T12:00:00Z"));
-    const batch = await ports.claimBatch("worker-test", 50);
-    const mine = batch.find(e => e.eventId === eventId);
+    // The outbox is shared by every suite and claimed oldest first, so this event may sit behind a
+    // backlog other suites left. Claim until it turns up, then hand every other row back untouched.
+    // The search claims on the real clock: the lease is compared with the database's NOW(), and a claim
+    // stamped with this test's fixed 2026-09-10 would read as expired and hand back the same rows forever.
+    const claimer = `worker-test-${key("W").slice(0, 20)}`;
+    const searching = createWorkerPorts(pool as never, () => new Date());
+    let mine: Awaited<ReturnType<typeof ports.claimBatch>>[number] | undefined;
+    try {
+      for (let i = 0; i < 200 && !mine; i++) {
+        const batch = await searching.claimBatch(claimer, 50);
+        if (!batch.length) break;
+        mine = batch.find(e => e.eventId === eventId);
+      }
+    } finally {
+      await pool.execute("UPDATE domainEventOutbox SET claimedAt = NULL, claimedBy = NULL, attemptCount = GREATEST(attemptCount - 1, 0) WHERE claimedBy = ? AND eventId <> ?", [claimer, eventId]);
+    }
     expect(mine).toBeTruthy();
     await ports.processEvent(mine!);
-    const [d1] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? ORDER BY attempt", [eventId]);
+    const [d1] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? AND subscriptionId = ? ORDER BY attempt", [eventId, subscriptionId]);
     expect(d1.map(x => [x.attempt, x.status])).toEqual([[1, "failed"]]);                      // sent by the worker, failed, scheduled
     failing = false;
     await ports.heartbeat!("worker-test", new Date("2026-09-10T12:00:30Z"));
-    const [d2] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? ORDER BY attempt", [eventId]);
+    const [d2] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? AND subscriptionId = ? ORDER BY attempt", [eventId, subscriptionId]);
     expect(d2).toHaveLength(1);                                                                // not due yet at +30 s
     await ports.heartbeat!("worker-test", new Date("2026-09-10T12:01:30Z"));
-    const [d3] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? ORDER BY attempt", [eventId]);
+    const [d3] = await pool.execute<mysql.RowDataPacket[]>("SELECT attempt, status FROM webhookDeliveries WHERE eventId = ? AND subscriptionId = ? ORDER BY attempt", [eventId, subscriptionId]);
     expect(d3.map(x => [x.attempt, x.status])).toEqual([[1, "failed"], [2, "delivered"]]);   // due at +1 min, delivered by the sweep
     expect(seen.filter(b => b.includes(eventId))).toHaveLength(2);
-    await callerFor(controller).integration.webhookSetStatus({ subscriptionRef: sub.subscriptionRef, status: "revoked" });
+    } finally {
+      await callerFor(controller).integration.webhookSetStatus({ subscriptionRef: sub.subscriptionRef, status: "revoked" });
+    }
   });
 });

@@ -65,7 +65,12 @@ describe("every decision cites the data it used, by version", () => {
 
 describe("a restriction outside its effective window is not applied", () => {
   it("windows restrictions on both read paths", () => {
-    const uses = Array.from(spatial.matchAll(/applicableRestrictions\(/g)).length;
+    // The approval-dependency path moved from spatialRouter into server/routeDependencies.ts (the
+    // provider runtime shares it), so the two read paths now live in two files. Both still window.
+    const deps = readFileSync("server/routeDependencies.ts", "utf8");
+    expect(Array.from(spatial.matchAll(/applicableRestrictions\(/g)).length, "the evaluation path in spatialRouter").toBeGreaterThanOrEqual(1);
+    expect(Array.from(deps.matchAll(/applicableRestrictions\(/g)).length, "the approval-dependency path in routeDependencies").toBeGreaterThanOrEqual(1);
+    const uses = Array.from((spatial + deps).matchAll(/applicableRestrictions\(/g)).length;
     // Two paths read restrictions; both must window them. One unwindowed path is enough to enforce
     // a road ban that ended in April, or miss one that starts tomorrow.
     expect(uses).toBeGreaterThanOrEqual(2);

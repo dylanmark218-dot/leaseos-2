@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { EXTERNAL_PROCEDURE_PERMISSIONS, OPERATIONAL_PROCEDURE_PERMISSIONS, RECORDS_PROCEDURE_PERMISSIONS, type ProcedureName } from "./_core/recordsAuthorization";
+import { EXTERNAL_PROCEDURE_PERMISSIONS, OPERATIONAL_PROCEDURE_PERMISSIONS, RECORDS_PROCEDURE_PERMISSIONS, SESSION_PROCEDURE_PERMISSIONS, type ProcedureName } from "./_core/recordsAuthorization";
 import {
   UNVERIFIED_DATA_SOURCES,
   VERIFIED_DATA_SOURCES,
@@ -20,6 +20,7 @@ import {
  */
 
 const routers = readFileSync("server/routers.ts", "utf8");
+const peopleRouter = readFileSync("server/peopleRouter.ts", "utf8");   // B23.2
 const recordsRouter = readFileSync("server/recordsRouter.ts", "utf8");
 const payrollRouter = readFileSync("server/payrollRouter.ts", "utf8");
 const portalFundingRouter = readFileSync("server/portalFundingRouter.ts", "utf8");
@@ -42,6 +43,8 @@ const cashRouter = readFileSync("server/cashRouter.ts", "utf8");
 const commercialRouter = readFileSync("server/commercialRouter.ts", "utf8");
 const portalRouter = readFileSync("server/portalRouter.ts", "utf8");
 const shopRouter = readFileSync("server/shopRouter.ts", "utf8");
+const maintenanceRouter = readFileSync("server/maintenanceRouter.ts", "utf8");
+const fleetPortfolioRouter = readFileSync("server/fleetPortfolioRouter.ts", "utf8");
 const assetRouter = readFileSync("server/assetRouter.ts", "utf8");
 const projectRouter = readFileSync("server/projectRouter.ts", "utf8");
 const integrationRouter = readFileSync("server/integrationRouter.ts", "utf8");
@@ -49,6 +52,7 @@ const telematicsRouter = readFileSync("server/telematicsRouter.ts", "utf8");
 const workforceRouter = readFileSync("server/workforceRouter.ts", "utf8");
 const auditRouter = readFileSync("server/auditRouter.ts", "utf8");
 const spatialRouter = readFileSync("server/spatialRouter.ts", "utf8");
+const customerCommercialRouter = readFileSync("server/customerCommercialRouter.ts", "utf8");
 const commercialSetupRouter = readFileSync("server/commercialSetupRouter.ts", "utf8");
 const invoicingRouter = readFileSync("server/invoicingRouter.ts", "utf8");
 const geoRouter = readFileSync("server/geoRouter.ts", "utf8");
@@ -63,6 +67,7 @@ const calendarRouter = readFileSync("server/calendarRouter.ts", "utf8");
 const readinessRouter = readFileSync("server/readinessRouter.ts", "utf8");
 const messageBoardRouter = readFileSync("server/messageBoardRouter.ts", "utf8");
 const agentRouter = readFileSync("server/agentRouter.ts", "utf8");
+const liveAssistRouter = readFileSync("server/liveAssistRouter.ts", "utf8");
 const hosRouter = readFileSync("server/hosRouter.ts", "utf8");
 const closeoutRouter = readFileSync("server/closeoutRouter.ts", "utf8");
 const insuranceRouter = readFileSync("server/insuranceRouter.ts", "utf8");
@@ -71,7 +76,16 @@ const assistantAskRouter = readFileSync("server/assistantAskRouter.ts", "utf8");
 // procedures; a router the tripwire cannot see is a router it cannot defend.
 const contractorOperationsRouter = readFileSync("server/contractorOperationsRouter.ts", "utf8");
 const trainingAcademyRouter = readFileSync("server/trainingAcademyRouter.ts", "utf8");
-// 0182: the Safety & Compliance Program Builder, gated from the start.
+const sessionRouter = readFileSync("server/sessionRouter.ts", "utf8");
+// The page scanner's read-only paperwork surface.
+const paperworkRouter = readFileSync("server/paperworkRouter.ts", "utf8");
+const driverPortfolioRouter = readFileSync("server/driverPortfolioRouter.ts", "utf8");
+// DC-A (0178): Document Control.
+const documentControlRouter = readFileSync("server/documentControlRouter.ts", "utf8");
+const attestRouter = readFileSync("server/attestRouter.ts", "utf8");   // SA1
+const payrollCompensationRouter = readFileSync("server/payrollCompensationRouter.ts", "utf8");   // payroll P1 (0226)
+const payrollScheduleRouter = readFileSync("server/payrollScheduleRouter.ts", "utf8");   // payroll P2 (0227)
+// 0228: the Safety & Compliance Program Builder, gated from the start.
 const safetyProgramRouter = readFileSync("server/safetyProgramRouter.ts", "utf8");
 const inventory = readFileSync("PROCEDURE_AUTHORIZATION_INVENTORY.md", "utf8");
 const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
@@ -81,7 +95,7 @@ const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
  * payrollRouter.ts both draw from it. Checking only one would let a declared
  * permission go unwired without anyone noticing.
  */
-const OPERATIONAL_SOURCES = [routers, automationPolicyRouter, restrictedVaultRouter, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + safetyProgramRouter].join("\n");
+const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, payrollCompensationRouter, payrollScheduleRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + customerCommercialRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter + attestRouter, maintenanceRouter, fleetPortfolioRouter + driverPortfolioRouter + safetyProgramRouter].join("\n");
 
 const countBuilders = (src: string, builder: string) =>
   (src.match(new RegExp(`\\w+:\\s*${builder}\\b`, "g")) ?? []).length;
@@ -95,13 +109,26 @@ const countBuilders = (src: string, builder: string) =>
  * an ungated operational endpoint, and this is the thing that notices.
  */
 const UNREVIEWED_BASELINE = 0;
-const PUBLIC_BASELINE = 2;
+/*
+ * S1: 2 → 4. `auth.refresh` and `auth.revokeAll` are public **necessarily**, not by oversight —
+ * a refresh exists precisely because the access credential has expired, so requiring an
+ * authenticated session to obtain one would be circular. They are not ungated: both demand
+ * possession of a single-use refresh verifier whose hash is stored server-side, and both refuse
+ * identically whatever the reason, so neither reveals which families exist. The other two remain
+ * `auth.me` and `auth.logout`.
+ */
+/*
+ * 4 → 5: `driverPortfolio.shareRedeem`, in driverPortfolioRouter.ts — one credential behind a
+ * 256-bit token whose hash is all that is stored, re-read on every redemption. Counted with the
+ * routers.ts builders below, and pinned by name, so a second public procedure there is seen.
+ */
+const PUBLIC_BASELINE = 5;
 
 describe("records surface is fully role-authorized", () => {
   it("uses roleProcedure for every records procedure", () => {
     const roleCount = (recordsRouter.match(/roleProcedure\(/g) ?? []).length;
     expect(roleCount).toBe(Object.keys(RECORDS_PROCEDURE_PERMISSIONS).length);
-    expect(roleCount).toBe(18);
+    expect(roleCount).toBe(23);   // +3 records.files.{list,get,download} (Records & File Manager).   // merge of main into #64: main's 18 + #64's 2.   // B23.1A: +1 records.roles.resolveLegacy — resolving a grant 0170 quarantined;   // B23.1: +1 records.roles.revoke
   });
 
   it("has no protectedProcedure fallback in the records router", () => {
@@ -114,7 +141,7 @@ describe("records surface is fully role-authorized", () => {
     const names = Array.from(
       recordsRouter.matchAll(/roleProcedure\("([^"]+)"\)/g)
     ).map(m => m[1]);
-    expect(names.length).toBe(18);
+    expect(names.length).toBe(23);   // +3 records.files.{list,get,download} (Records & File Manager).   // merge of main into #64: main's 18 + #64's 2.   // B23.1A: +1 records.roles.resolveLegacy;   // B23.1: +1 records.roles.revoke
     for (const n of names) {
       expect(
         Object.prototype.hasOwnProperty.call(RECORDS_PROCEDURE_PERMISSIONS, n),
@@ -160,7 +187,8 @@ describe("migrated operational procedures", () => {
     // 85 unreviewed at B20.3, 57 after B20.4, 0 after B20.6. B20.7 added the
     // 40-procedure payroll/finance surface, all gated from the start.
     // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
-    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(672)   // 0182: +38 safetyProgram.* (Safety & Compliance Program Builder);   // canonical assignment: +3 dispatch.{createPosting,addRole,listRoles};   // v22.40: +3 commercialOffice.{organizationCreate,organizationsList,facilityStatementsList} (P7.9);   // v22.38: +9 commercialOffice.document* (P7.7, 0144);   // v22.36: +2 facilityDirectory.{hydrovacImport,duplicates};   // v22.35: +6 facilityDirectory.{arcgisPresets,arcgisInspect,arcgisImportFeatures,arcgisImportFromLayer,arcgisRuns,lsdFind} (0142);   // v22.34: +1 facilityDirectory.seedBrief (0141);   // v22.33: +5 facilityDirectory.{hoursSet,callAheadRecord,waitReport,nearby,driverView} (0140);   // v22.32: +14 facilityDirectory.* (0139, re-based from feature/facility-map-v7);   // v22.31: +5 commercialOffice.{glAccountSet,glMappingSet,glList,glExportReadiness,profitabilityByDimension} (P7.6, 0138);   // v22.30: +1 commercialOffice.apAgingByOrganization (P7.5, 0137);   // v22.29: +2 commercialOffice.{arAgingByOrganization,approvalLedger} (P7.4, 0136);   // v22.28: +4 commercialOffice.facilityStatement* (P7.3, 0135);   // v22.27: +4 commercialOffice.link* (P7.2, 0134);   // v22.26: +15 commercialOffice.* (P7.1, 0133: role types, roles, settings, numbering, approvals, categories);   // v22.23: +2 academy.{sheetPrintRun,sheetScanFile} (0125); +3 widgets.{offerable,boardResolve,layoutSave} (B28);   // v22.22: +6 academy (tdgCoverageSet/Approve/Status, inspectorRequestCreate/Assemble/List)   // v22.21: +4 integration.{ownershipAssign,ownershipList,loadSenseBindGateway,loadSenseCalibrate} (were wired under clientRegister/inboundList names)   // v22.21: census re-baselined to the real map (ChatGPT recovery commits added entries without bumping it); +14 contractorOperations.* (wired by procedure name)   // v22.21: +1 hos.limitPromote (recovered 0093)   // v22.20: +5 agent runtime   // v22.20: +1 (source licence review)   // v22.7: +13 commercial setup; v22.8: +2 (ticket pricing, vendor rate variances); v22.9: +3 invoicing; v22.10: +2 (render, send); v22.11: +2 (void, disputeResolve); v22.13: +5 geo; v22.14: +6 (legal land, entrances, corridor); v22.15: +4 (structures, route approvals); v22.16: +2 (graph build, route compute); v22.17: +16 communications; v22.18: +4 (policy propose/approve/current, channel retire); v22.20: +1 (source licence review); v22.19: +4 (package build/fetch/acknowledge/status); v22.20: +7 hours of service   // v22.67: +6 automationPolicy.{resolve,set,setEntitlement,operationalOverride,history,snapshotFor} (P8.2) +1 hos.attestHours (P8.3), +1 hos.recordScannedLog, +8 restrictedVault.* (P8.5), +1 restrictedVault.restrictedIndex, +1 device.verifySeal (P1.2)
+    // The merged surface includes 8 Live Assist, 2 paperwork, 23 Document Control, and 10 auth-workspace procedures.
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(858);   // 0228: +38 safetyProgram.* (Safety & Compliance Program Builder);   // driver portfolio (#16): +17 driverPortfolio.*;   // payroll P2: +12 payrollSchedule.*;   // payroll P1: +11 payrollCompensation.*;   // payroll P0: +3 payroll.{runCollect,runSubmit,earningApprove};   // 0221: +7 maintenance.{defectReport,defectTriage,defectSendToShop,taskAdd,taskSetStatus,returnToService,defectHistory} (fleet maintenance CP2);   // 0200: +9 fleet.{unitState,holdList,holdPlace,holdRelease,meterReadings,meterProgress,meterRecord,meterDecide,history} (portfolio foundation);   // 0199: +3 maintenance.{workOrderAssignment,workOrderAssign,workOrderCancel} (fleet maintenance CP1);   // SA1: +14 attest.* (server/attestRouter.ts);   // merge of main (b35bac4) into #59: main 723 + #59's 21 (7 board.*, 14 shifts.*);   // v23.31: +40 customerCommercial.* (customers, contacts, contracts, rate sheets, job commercial basis, expiry sweep);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
     expect(UNREVIEWED_BASELINE).toBe(0);
   });
 
@@ -171,6 +199,8 @@ describe("migrated operational procedures", () => {
 
   it("has no bare protectedProcedure in the payroll or finance surface", () => {
     expect(countBuilders(payrollRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(payrollCompensationRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(payrollScheduleRouter, "protectedProcedure")).toBe(0);
   });
 
   it("has no bare protectedProcedure in the portal or funding surface", () => {
@@ -223,6 +253,8 @@ describe("migrated operational procedures", () => {
 
   it("has no bare protectedProcedure in the shop or the asset register", () => {
     expect(countBuilders(shopRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(maintenanceRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(fleetPortfolioRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(assetRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(projectRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(integrationRouter, "protectedProcedure")).toBe(0);
@@ -230,7 +262,7 @@ describe("migrated operational procedures", () => {
     expect(countBuilders(workforceRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(auditRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(spatialRouter, "protectedProcedure")).toBe(0);
-    expect(countBuilders(commercialSetupRouter + invoicingRouter + geoRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(commercialSetupRouter + customerCommercialRouter + invoicingRouter + geoRouter, "protectedProcedure")).toBe(0);
     // the inbound router mounts only the machine gate
     const inbound = integrationRouter.slice(integrationRouter.indexOf("export const inboundRouter"));
     expect(countBuilders(inbound, "roleProcedure")).toBe(0);
@@ -251,7 +283,7 @@ describe("migrated operational procedures", () => {
     // The portal router must never mount a role procedure: an external identity is not a domain-role user.
     expect(countBuilders(portalRouter, "roleProcedure")).toBe(0);
     const external = [...portalRouter.matchAll(/externalProcedure\("([^"]+)"\)/g)].map(m => m[1]);
-    expect(external.length).toBe(36);   // v22.10: + invoices, invoiceView, invoiceAccept // v21.17: + quotes, quote acceptance, change-order authorization, RFI answers
+    expect(external.length).toBe(40);   // SA1: +4 portal.attest{List,View,Sign,Decline}   // v22.10: + invoices, invoiceView, invoiceAccept // v21.17: + quotes, quote acceptance, change-order authorization, RFI answers
     for (const name of external) expect(EXTERNAL_PROCEDURE_PERMISSIONS, name).toHaveProperty(name);
     expect(Object.keys(EXTERNAL_PROCEDURE_PERMISSIONS).sort()).toEqual([...external].sort());
     // And no internal router mounts an external procedure.
@@ -264,14 +296,15 @@ describe("migrated operational procedures", () => {
 });
 
 describe("the data source document matches the seeded registry", () => {
-  it("states the corrected count of eight verified and thirteen not", () => {
+  it("states the corrected count of ten verified and eighteen not", () => {
     // The research summary said nine of eleven were clean; three were unresolved,
     // so it was eight. v22.17 added six spectrum and coverage sources, none of
     // them licence-cleared, so nine are now blocked. The document and the seed
-    // must agree or a future reader trusts the wrong number.
-    expect(dataSources).toContain("Eight verified, thirteen not");
-    expect(VERIFIED_DATA_SOURCES).toHaveLength(8);
-    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(13);
+    // must agree or a future reader trusts the wrong number. The Canadian 511 tranche cleared two
+    // (Ontario, Québec) and blocked five (MB, NB, YT, NL, SK).
+    expect(dataSources).toContain("Ten verified, eighteen not");
+    expect(VERIFIED_DATA_SOURCES).toHaveLength(10);
+    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(18);
   });
 
   it("lists exactly the blocked sources as blocked", () => {
@@ -298,7 +331,9 @@ describe("the untouched API is counted, not forgotten", () => {
   });
 
   it("holds the public procedure count exactly", () => {
-    expect(countBuilders(routers, "publicProcedure")).toBe(PUBLIC_BASELINE);
+    expect(countBuilders(routers, "publicProcedure") + countBuilders(driverPortfolioRouter, "publicProcedure")).toBe(PUBLIC_BASELINE);
+    // The portfolio's one public procedure is the share redemption, and nothing else.
+    expect(driverPortfolioRouter.match(/(\w+):\s*publicProcedure\b/g)).toEqual(["shareRedeem: publicProcedure"]);
   });
 
   it("has no stale narrative claiming completed work is still pending", () => {
@@ -310,9 +345,70 @@ describe("the untouched API is counted, not forgotten", () => {
     expect(inventory).not.toContain("— next");
   });
 
-  it("keeps the inventory document in step with the code", () => {
+  it("keeps the inventory document in step with the code: every row is its router's count, and the total is their sum", () => {
+    // CP1.5 — this used to pin one hand-written total ("356", then "368") and nothing else, and nine rows
+    // drifted below their routers unseen (complianceRouter listed 9 with 18). Every row is now read from
+    // its router; `node scripts/procedure-inventory.mjs` writes the numbers.
     expect(inventory).toContain("ROLE_AUTHORIZED");
-    expect(inventory).toContain("356");
+    const rows = Array.from(inventory.matchAll(/^\| `(server\/[^`]+)` \| `ROLE_AUTHORIZED`[^|]*\| \*\*(\d+)\*\*[^|]*\|$/gm));
+    expect(rows.length).toBeGreaterThanOrEqual(28);
+    const drift = rows
+      .map(r => ({ file: r[1]!, listed: Number(r[2]), actual: (readFileSync(r[1]!, "utf8").match(/roleProcedure\(\s*"/g) ?? []).length }))   // the script's own definition
+      .filter(r => r.listed !== r.actual)
+      .map(r => `${r.file}: listed ${r.listed}, router has ${r.actual}`);
+    expect(drift, "Run: node scripts/procedure-inventory.mjs").toEqual([]);
+    const sum = rows.reduce((n, r) => n + Number(r[2]), 0);
+    expect(inventory).toMatch(new RegExp(`^\\*\\*${sum} role-authorized procedures across the surfaces listed above\\.`, "m"));
+  });
+});
+
+/**
+ * v23.26 — the session gate is a closed list.
+ *
+ * `sessionProcedure` is the one builder in this system that a caller holding
+ * NO domain role can pass: it requires authentication and nothing else, because
+ * the question "what am I allowed to open?" has to be answerable by the person
+ * who is allowed to open nothing. That makes it exactly the kind of builder the
+ * census exists to watch, so the set of procedures permitted to use it is
+ * declared in code and pinned here.
+ *
+ * If this count rises, somebody has added an endpoint reachable by any
+ * authenticated account, and this is the thing that noticed.
+ */
+describe("the session gate cannot be used to smuggle an ungated procedure", () => {
+  const wired = Array.from(sessionRouter.matchAll(/sessionProcedure\("([^"]+)"\)/g)).map(m => m[1]!);
+
+  it("mounts exactly the four declared session procedures, and no more", () => {
+    // B23.2 moved this from three to four: `session.acceptInvitation` is the
+    // one People & Access act whose caller holds nothing in the organization
+    // they are joining, which is the case this gate exists for.
+    expect(Object.keys(SESSION_PROCEDURE_PERMISSIONS).sort()).toEqual([
+      "session.acceptInvitation",
+      "session.context",
+      "session.selectOrganization",
+      "session.selectWorkspace",
+    ]);
+    expect(wired.sort()).toEqual(Object.keys(SESSION_PROCEDURE_PERMISSIONS).sort());
+  });
+
+  it("uses the gate nowhere else in the router surface", () => {
+    const everyRouter = [OPERATIONAL_SOURCES, recordsRouter, portalRouter].join("\n");
+    expect((everyRouter.match(/sessionProcedure\(/g) ?? []).length).toBe(0);
+  });
+
+  it("carries only the self-scoped universal permission, never an operational one", () => {
+    // `portal.compose_own` is universal precisely because it is self-scoped in
+    // code: these procedures read `ctx.user.id` and the grants the gate loaded,
+    // and nobody composes somebody else\'s session. Anything else here would be
+    // an operational grant handed to every signed-in account.
+    for (const [name, permission] of Object.entries(SESSION_PROCEDURE_PERMISSIONS)) {
+      expect(permission, name).toBe("portal.compose_own");
+    }
+  });
+
+  it("has no bare protectedProcedure or publicProcedure in the session surface", () => {
+    expect(countBuilders(sessionRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(sessionRouter, "publicProcedure")).toBe(0);
   });
 });
 

@@ -16,7 +16,10 @@ import { externalProcedure, router, type ExternalContext } from "./_core/trpc";
 import { getDb } from "./db";
 import { CUSTOMER_ALERT_KINDS, changeOrders, clientAdjustments, customerAccounts, customerCredits, customerPurchaseOrders, disposalTickets, disputeCases, externalAccessLog, externalAlertPreferences, externalIdentities, facilities, fieldTicketDocuments, fieldTicketEvents, fieldTicketRevisions, fieldTickets, invoices, jobs, loads, paymentAllocations, portalSubmissions, quoteLines, quotes, rfis, roadHazardObservations, safetyEvents, trips, vendorBills, vendors, weatherObservations, workflowNotifications, invoiceLines } from "../drizzle/schema";
 import { intakeDisposalTicket, intakeVendorBill, type ExternalIdentity } from "./_core/portalIntake";
-import { ROTATION_GRACE_MS, TOKEN_TTL_MS, decryptSecret, encryptSecret, mfaKey, newToken, newTotpSecret, sha256, totpVerify } from "./_core/externalIdentityPolicy";
+import { ROTATION_GRACE_MS, TOKEN_TTL_MS, newToken, sha256, totpVerify } from "./_core/externalIdentityPolicy";
+import { legacyMfaKey, secretKeyProvider } from "./_core/secretKeys";
+import { enrollMfaSecret, mfaStorageOf, resolveMfaSeed } from "./mfaSecretService";
+import { ENV } from "./_core/env";
 import { decideAdjustment } from "./_core/clientAdjustments";
 import { noticeFor, operationalState, projectReadiness } from "./_core/customerProjections";
 import { DEFAULT_ON } from "./_core/customerAlerts";
@@ -27,13 +30,20 @@ import { composeReadiness } from "./readinessComposer";
 import { closeoutState, type EventType } from "./_core/siteCloseout";
 import { storageRead } from "./storage";
 import { invoiceBalanceCents } from "./_core/accountsReceivable";
-import { decideLine, loadTicket, recordSignature, snapshotFor } from "./closeoutRouter";
+import { decideLine, loadTicket, recordSignature, snapshotFor, unsignedMessage } from "./closeoutRouter";
 import { whyTheseHours, type PostSiteAuthorization, type SiteSnapshot, type Supplement } from "./_core/siteCloseout";
-import { signatoryAuthorities } from "../drizzle/schema";
+import { fieldTicketSignatures, signatoryAuthorities } from "../drizzle/schema";
+import { fieldTicketSignatureVerdict } from "./_core/fieldTicketSignature";
+import { ATTEST_INPUT_KINDS, ATTEST_MARK_KINDS, CONSENT_VERSION_V1 } from "../shared/attest";
+import { AttestRefusal, declineSession, listRevisions, submitSession, viewRevision, type RefusalCode } from "./_core/attest/attestService";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const ext = (ctx: unknown) => (ctx as { external: ExternalContext }).external;
+const ATTEST_CODE: Record<RefusalCode, TRPCError["code"]> = { not_found: "NOT_FOUND", bad_request: "BAD_REQUEST", conflict: "CONFLICT", precondition: "PRECONDITION_FAILED", forbidden: "FORBIDDEN" };
+async function attestRefusing<T>(work: () => Promise<T>): Promise<T> {
+  try { return await work(); } catch (err) { if (err instanceof AttestRefusal) throw new TRPCError({ code: ATTEST_CODE[err.code], message: err.message }); throw err; }
+}
 
 async function submit(external: ExternalContext, kind: "vendor_bill" | "disposal_ticket" | "invoice_dispute", payload: unknown) {
   const db = await getDb();
@@ -275,7 +285,7 @@ export const portalRouter = router({
       for (const l of jobLoads) { const k = l.material ?? "unspecified"; const cur = material.get(k) ?? { quantity: 0, unit: l.quantityUnit ?? "" }; cur.quantity += Number(l.quantity ?? 0); material.set(k, cur); }
       const holds = x.events.filter(ev => ["standby", "customer_hold", "weather_hold"].includes(ev.eventType));
       const firstSite = x.events.filter(ev => ev.eventType === "site_work").sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime())[0];
-      const state = closeoutState({ events: x.events as never, lines: x.lines as never, siteWorkCompleteAt: x.t.completedAt, signature: x.signature ? { signedAt: x.signature.capturedAt, signerName: x.signature.signerName ?? "signer", result: x.signature.result } : null, supplement: null, postSiteRequired: x.t.postSiteRequired, loadsWithDisposalEvidence: 0, loads: jobLoads.length });
+      const state = closeoutState({ events: x.events as never, lines: x.lines as never, siteWorkCompleteAt: x.t.completedAt, signature: x.signatureVerdict, supplement: null, postSiteRequired: x.t.postSiteRequired, loadsWithDisposalEvidence: 0, loads: jobLoads.length });
       rows.push({
         ticketNumber: t.ticketNumber, jobCode: jobRow?.jobCode ?? null, site: jobRow?.location ?? null, purchaseOrder: t.afeNumber ? { afeNumber: t.afeNumber } : null, unitId: t.unitId,
         operational: st,
@@ -336,27 +346,34 @@ export const portalRouter = router({
     return { identityRef: e.identityRef, token, tokenExpiresAt: new Date(now.getTime() + TOKEN_TTL_MS), note: "Shown once. Stored only as a hash." };
   }),
 
-  /** Start MFA: the secret is returned once for the authenticator and stored encrypted; nothing is enforced until confirmed. */
+  /**
+   * Start MFA: the secret is returned once for the authenticator and stored in the canonical
+   * secret store; nothing is enforced until confirmed.
+   *
+   * 0193 — the seed now goes to `encryptedSecrets` under purpose `MFA_SECRET` and the identity
+   * keeps only a reference. `mfaSecretEnc` is cleared by the same write, so re-enrolling can never
+   * leave the replaced seed behind as a reactivation path.
+   */
   mfaEnroll: externalProcedure("portal.mfaEnroll").mutation(async ({ ctx }) => {
     const e = ext(ctx);
-    const key = mfaKey();
-    if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "MFA requires LEASEOS_PORTAL_MFA_KEY on the server; it is not configured" });
-    const db = await getDb();
-    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-    const secret = newTotpSecret();
-    await db.update(externalIdentities).set({ mfaSecretEnc: encryptSecret(secret, key), mfaEnabled: false }).where(eq(externalIdentities.id, e.identityId));
+    const keys = secretKeyProvider();
+    if (!keys.getActiveKey("MFA_SECRET")) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "MFA requires an MFA secret key on the server; it is not configured" });
+    }
+    const { secret } = await enrollMfaSecret(e.identityId, { keys, legacyKey: legacyMfaKey(), isProduction: ENV.isProduction });
     await logAccess(e, "mfa_enroll", "externalIdentity", e.identityRef, null, null);
     return { secret, otpauth: `otpauth://totp/LeaseOS:${encodeURIComponent(e.displayName)}?secret=${secret}&issuer=LeaseOS&digits=6&period=30`, note: "Shown once." };
   }),
 
   mfaConfirm: externalProcedure("portal.mfaConfirm").input(z.object({ code: z.string().min(6).max(8) })).mutation(async ({ ctx, input }) => {
     const e = ext(ctx);
-    const key = mfaKey();
     const db = await getDb();
-    if (!db || !key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "MFA is not available on this server" });
-    const row = (await db.select({ enc: externalIdentities.mfaSecretEnc }).from(externalIdentities).where(eq(externalIdentities.id, e.identityId)).limit(1))[0];
-    if (!row?.enc) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Enroll first" });
-    if (!totpVerify(decryptSecret(row.enc, key), input.code, new Date())) throw new TRPCError({ code: "FORBIDDEN", message: "Code rejected" });
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const row = (await db.select({ mfaSecretEnc: externalIdentities.mfaSecretEnc, mfaSecretRef: externalIdentities.mfaSecretRef }).from(externalIdentities).where(eq(externalIdentities.id, e.identityId)).limit(1))[0];
+    if (!row || mfaStorageOf(row) === "none") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Enroll first" });
+    // Resolution may throw — a present-but-broken reference must fail, not fall back to legacy.
+    const seed = await resolveMfaSeed(row, { keys: secretKeyProvider(), legacyKey: legacyMfaKey(), isProduction: ENV.isProduction });
+    if (!totpVerify(seed, input.code, new Date())) throw new TRPCError({ code: "FORBIDDEN", message: "Code rejected" });
     await db.update(externalIdentities).set({ mfaEnabled: true }).where(eq(externalIdentities.id, e.identityId));
     await logAccess(e, "mfa_confirm", "externalIdentity", e.identityRef, null, null);
     return { mfaEnabled: true as const };
@@ -385,7 +402,7 @@ export const portalRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const x = await ownTicket(e, input.ticketNumber);
-      if (!x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The ticket is not signed — an adjustment is added to a signed ticket, and after R1 it becomes a later revision" });
+      if (!x.signature || !x.signatureVerdict.satisfied) throw new TRPCError({ code: "PRECONDITION_FAILED", message: unsignedMessage("The ticket is not signed — an adjustment is added to a signed ticket, and after R1 it becomes a later revision", x.signatureVerdict) });
       const site = JSON.parse(x.revisions[0]!.snapshotJson) as { siteBillableHours: number };
       const d = decideAdjustment({ kind: input.kind, amountCents: input.amountCents, percent: input.percent, hourEquivalent: input.hourEquivalent, recipientIntent: input.recipientIntent, namedWorkers: input.namedWorkers, reason: input.reason }, { siteSubtotalCents: Math.round(site.siteBillableHours * (input.agreedHourlyRateCents ?? 0)), siteBillableHours: site.siteBillableHours, agreedHourlyRateCents: input.agreedHourlyRateCents ?? null });
       if (!d.permitted) throw new TRPCError({ code: "BAD_REQUEST", message: d.refusals.join("; ") });
@@ -447,13 +464,19 @@ export const portalRouter = router({
       ids.length ? db.select().from(weatherObservations).where(and(inArray(weatherObservations.fieldTicketId, ids), eq(weatherObservations.customerVisible, true))) : [],
       ids.length ? db.select().from(roadHazardObservations).where(and(inArray(roadHazardObservations.fieldTicketId, ids), eq(roadHazardObservations.customerVisible, true))) : [],
     ]);
+    // SPINE item 2 — "signed" is the site sign-off's verdict per ticket, not the denormalized column.
+    const [sigRows, revRows] = ids.length ? await Promise.all([
+      db.select().from(fieldTicketSignatures).where(inArray(fieldTicketSignatures.fieldTicketId, ids)),
+      db.select().from(fieldTicketRevisions).where(inArray(fieldTicketRevisions.fieldTicketId, ids)),
+    ]) : [[], []];
+    const signedCount = tickets.filter(t => fieldTicketSignatureVerdict({ ticket: t, signatures: sigRows.filter(r => r.fieldTicketId === t.id), revisions: revRows.filter(r => r.fieldTicketId === t.id) }).satisfied).length;
     const adj = ids.length ? await db.select().from(clientAdjustments).where(and(inArray(clientAdjustments.fieldTicketId, ids), eq(clientAdjustments.status, "authorized"))) : [];
     const material = new Map<string, { quantity: number; unit: string }>();
     for (const l of dayLoads) { const k = l.material ?? "unspecified"; const cur = material.get(k) ?? { quantity: 0, unit: l.quantityUnit ?? "" }; cur.quantity += Number(l.quantity ?? 0); material.set(k, cur); }
     await logAccess(e, "view", "dailyReport", input.date, null, null);
     return {
       date: input.date,
-      tickets: { total: tickets.filter(t => events.some(ev => ev.fieldTicketId === t.id)).length, signed: tickets.filter(t => t.signatureStatus === "accepted" || t.signatureStatus === "partially_accepted").length },
+      tickets: { total: tickets.filter(t => events.some(ev => ev.fieldTicketId === t.id)).length, signed: signedCount },
       hours: { customerBillable: round2(byAnswer.yes), underReview: round2(byAnswer.review), companyInternalNotBilled: round2(byAnswer.no) },
       loads: dayLoads.length,
       material: Array.from(material.entries()).map(([m, v]) => ({ material: m, quantity: round2(v.quantity), unit: v.unit })),
@@ -577,6 +600,49 @@ export const portalRouter = router({
       const supp = [...x.revisions].reverse().find(r => r.kind === "post_site_supplement");
       const supplement = supp ? (JSON.parse(supp.snapshotJson) as { supplement: Supplement }).supplement : null;
       return { tickets, detail: { ticket: t, snapshot: snap, snapshotHash: x.revisions[0]?.snapshotHash ?? snapshotFor(x).hash, lines: x.lines, signature: x.signature ? { signerName: x.signature.signerName, signedAt: x.signature.capturedAt, exercised: x.signature.authoritiesExercised ? JSON.parse(x.signature.authoritiesExercised) : [], withinAuthority: x.signature.withinAuthority, method: x.signature.signatureMethod } : null, revisions, why: whyTheseHours(snap, x.signature?.signerName ?? null, supplement) } };
+    }),
+
+  /* ---- SA1: Sign & Attest through the portal. The identity's scope is the signer row that names it; the request never says whose document. ---- */
+  attestList: externalProcedure("portal.attestList")
+    .input(z.object({ limit: z.number().int().positive().max(200).optional() }).strict().optional())
+    .query(async ({ ctx, input }) => {
+      const e = ext(ctx); const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      await logAccess(e, "view", "attestRevisions", "mine", null, null);
+      return listRevisions(db as never, { externalIdentityId: e.identityId }, { limit: input?.limit });
+    }),
+  attestView: externalProcedure("portal.attestView")
+    .input(z.object({ revisionRef: z.string().min(3).max(120) }).strict())
+    .query(async ({ ctx, input }) => {
+      const e = ext(ctx); const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const view = await attestRefusing(() => viewRevision(db as never, { externalIdentityId: e.identityId }, input.revisionRef));
+      await logAccess(e, "view", "attestRevision", input.revisionRef, view.revision.revisionHash, null);
+      return view;
+    }),
+  /** The identity signs its OWN assigned fields; a field assigned to anyone else is refused and the attempt is a row. */
+  attestSign: externalProcedure("portal.attestSign")
+    .input(z.object({
+      revisionRef: z.string().min(3).max(120), signerRef: z.string().min(3).max(120), revisionHashAtStart: z.string().regex(/^[a-f0-9]{64}$/),
+      consentVersion: z.string().min(1).max(40).default(CONSENT_VERSION_V1),
+      marks: z.array(z.object({ fieldKey: z.string().min(1).max(80), markKind: z.enum(ATTEST_MARK_KINDS), inputKind: z.enum(ATTEST_INPUT_KINDS), valueText: z.string().max(500).nullable().optional(), strokeEvidenceRecordId: z.number().int().positive().nullable().optional(), strokeHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(), renderedEvidenceRecordId: z.number().int().positive().nullable().optional(), renderedHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional() }).strict()).min(1).max(200),
+      gps: z.object({ latitude: z.number(), longitude: z.number() }).strict().nullable().optional(), sessionRef: z.string().min(8).max(120).nullable().optional(),
+    }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const e = ext(ctx); const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const r = await attestRefusing(() => submitSession(db as never, { kind: "external", externalIdentityId: e.identityId }, { externalIdentityId: e.identityId }, { ...input, authMethod: "portal_link" }));
+      await logAccess(e, "sign", "attestRevision", input.revisionRef, input.revisionHashAtStart, r.sessionRef);
+      return r;
+    }),
+  attestDecline: externalProcedure("portal.attestDecline")
+    .input(z.object({ revisionRef: z.string().min(3).max(120), signerRef: z.string().min(3).max(120), reason: z.string().min(3).max(500) }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const e = ext(ctx); const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const r = await attestRefusing(() => declineSession(db as never, { kind: "external", externalIdentityId: e.identityId }, { externalIdentityId: e.identityId }, input));
+      await logAccess(e, "decide", "attestRevision", input.revisionRef, null, "declined");
+      return r;
     }),
 
   /** The consultant signs on their own device. Authority comes from the binding, never the request. */

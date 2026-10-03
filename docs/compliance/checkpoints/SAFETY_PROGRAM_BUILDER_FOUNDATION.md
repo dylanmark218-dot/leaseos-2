@@ -1,6 +1,11 @@
-# Safety & Compliance Program Builder — foundation (0182)
+# Safety & Compliance Program Builder — foundation (0228)
 
-Status: **complete on branch `claude/safety-compliance-program-builder-2qnty0`**, not merged. This is the
+Status: **complete on branch `claude/safety-compliance-program-builder-2qnty0`** (PR #99), with main (`48a64e1`) merged in.
+
+**Migration slot.** Drafted as `0182`. On merging main, document control had claimed `0182` and main's head was
+`0227`, so the migration moved to `0228` — the first slot above every slot in use on main and all 131 remote
+branches. It creates only new tables and depends on nothing after `0174`. The register and
+`server/migrationSlots.test.ts` record the move. This is the
 data model and template engine, plus the first two categories of the Alberta Commercial/Oilfield content
 pack: company foundation (19 templates), occupational health and safety (39), commercial trucking / National
 Safety Code (41) and oilfield and industrial operations (36), loaded as drafts.
@@ -21,7 +26,7 @@ The 0036 pair `writtenProgramVersions` / `programAcknowledgements` is untouched:
 registry's record that a program was published (`compliance.programPublish`). This is where a program is
 authored, versioned by section, acknowledged per version and measured.
 
-## Tables (14, migration `0182_safety_program_builder.sql`)
+## Tables (14, migration `0228_safety_program_builder.sql`)
 
 | Table | What it is |
 |---|---|
@@ -41,7 +46,7 @@ authored, versioned by section, acknowledged per version and measured.
 | `safetyProgramEvents` | Append-only, hash-chained ledger of every write; `events({ verifyChain: true })` walks it |
 
 `scopeKey = COALESCE(orgRef, 'platform')` on the tables whose unique indexes must see the tenant split.
-Schema/migration parity: **424 / 424**. Column parity was run against the applied migration (MariaDB 10.11).
+Schema/migration parity after merging main: **479 / 479**. Column parity was run against the applied migration (MariaDB 10.11).
 
 ## Engine (`server/_core/safetyProgram.ts`, pure)
 
@@ -144,7 +149,7 @@ policy is **not found**, never forbidden. The catalog and references are platfor
 | `safety_program.read_own` (`myPolicies`) | universal, self-scoped | no |
 | `safety_program.acknowledge_own` (`acknowledge`) | universal, self-scoped | yes |
 
-Operational procedure map: 634 → **672**. Universal permissions: 13 → 15. Bare `protectedProcedure`: 0.
+Operational procedure map: +38 (634 → 672 on the branch; 820 → **858** after merging main). Router surface: 898 → **936** after merging main. Universal permissions: 13 → 15. Bare `protectedProcedure`: 0.
 
 ## Evidence the matrix and readiness read
 

@@ -3,8 +3,10 @@
  *
  * Pure. No network, no database.
  *
- * Composes `Person` and `Assignment` from `shiftReadiness`, approved leave from
- * `timeOff`, and rotation availability from `crewCoverage`. It re-decides none
+ * Composes approved leave from `timeOff`, rotation from `calendarProjection`,
+ * the licence standing from the licence read adapter (`licenceReads`, over the canonical
+ * `driverLicenceVerdict`) and qualification standing from the qualification read adapter. It
+ * re-decides none
  * of them: whether somebody holds a qualification, whether they are on leave,
  * whether they are rostered — all already answered elsewhere, and a second
  * opinion in a job-posting screen is how a person is shown as eligible for work
@@ -23,9 +25,9 @@
  * fix before the shift.
  */
 
-import { isAvailable, type CrewMember } from "./crewCoverage";
+import { isOnShift, type RotationPattern } from "./calendarProjection";
+import { windowsOverlap } from "./bookingConflict";
 import { isAbsent, type LeaveRequest } from "./timeOff";
-import type { Assignment } from "./shiftReadiness";
 
 export type ShiftPost = {
   postRef: string;
@@ -39,13 +41,69 @@ export type ShiftPost = {
   seats: number;
   /** Assigned posts are dispatch's decision; open posts invite interest first. */
   kind: "assigned" | "open";
+  /**
+   * Only an open post takes interest. Absent in pure planning, where every post is open. Open Work's
+   * `draft` and `closed` (0206) are not open either, and refuse the same way.
+   */
+  status?: PostStatus;
 };
 
+/**
+ * SPINE item 2 (owner's ruling): this is the one answer to "may this person take this shift?".
+ * It is the union of what the engine and the router used to refuse separately — the router now
+ * reads the records below and enforces this verdict; it decides nothing itself.
+ */
 export type IneligibilityCode =
-  | "wrong_role" | "missing_qualification" | "on_approved_leave"
-  | "not_rostered" | "overlaps_existing";
+  | "not_in_organization"
+  | "wrong_role" | "not_rostered" | "on_approved_leave" | "overlaps_existing"
+  | "no_licence_recorded" | "licence_expired" | "licence_not_established"
+  | "qualification_unknown" | "qualification_unverified" | "qualification_expired";
 
 export type Ineligibility = { code: IneligibilityCode; detail: string };
+
+/** A qualification's standing as the qualification read adapter reports it (`effectiveQualifications`). */
+export type QualificationStanding = { code: string; held: boolean; notHeld: string | null; reason: string };
+
+/**
+ * A licence's standing at the shift, from the canonical verdict (`driverLicenceVerdict`), already
+ * narrowed by the read adapter. The rule maps it; it never reads a date.
+ *
+ *   none        — no operator record, or one with no licence documents and no legacy date
+ *   ambiguous   — more than one operator record; no licence is chosen between them
+ *   in_force    — in force or expiring, but not yet expired, at the shift
+ *   lapsed      — expired, or an unverified claim whose own date has passed, by the shift
+ *   not_established — on record but not established: unverified (including the legacy date),
+ *                 verified with no expiry, rejected, or not yet effective. Unknown refuses.
+ */
+export type LicenceStanding =
+  | { kind: "none" }
+  | { kind: "ambiguous" }
+  | { kind: "in_force" }
+  | { kind: "lapsed"; expiresAt: Date | null }
+  | { kind: "not_established"; reason: string };
+
+/** An existing commitment over some window — a confirmed or tentative booking. */
+export type Commitment = { assignmentRef: string; startsAt: Date; endsAt: Date };
+
+/**
+ * Everything the rule reads about one person, all of it from records — never from the person
+ * asking. A fact that could not be established is given as its absence, and absence refuses.
+ */
+export type PersonFacts = {
+  userId: number;
+  name: string;
+  /** An active member of the organization that owns the post. */
+  inOrganization: boolean;
+  roles: readonly string[];
+  /** Active crew memberships in the organization. None means not on its roster. */
+  rosters: readonly { rotation: RotationPattern | null }[];
+  leave: readonly LeaveRequest[];
+  commitments: readonly Commitment[];
+  /** The person's licence at the shift, as `licenceReads.driverLicenceStanding` reports it. */
+  licence: LicenceStanding;
+  /** One standing per code the post requires. A required code with no standing is unknown. */
+  qualifications: readonly QualificationStanding[];
+};
 
 export type Candidate = {
   userId: number;
@@ -55,51 +113,72 @@ export type Candidate = {
   reasons: Ineligibility[];
 };
 
-const overlaps = (a: { startsAt: Date; endsAt: Date }, b: Assignment) =>
-  a.startsAt < b.endsAt && b.startsAt < a.endsAt;
 
 /**
- * Who could take this shift, and why the rest could not.
+ * Whether one person could take one post, and every reason they could not.
  *
- * Every reason is collected rather than stopping at the first, because a person
- * missing two qualifications is a different planning problem from one missing
- * one.
+ * Every reason is collected rather than stopping at the first, because a person missing two
+ * qualifications is a different planning problem from one missing one. The one exception is a
+ * person outside the organization: nothing else about them is read, so nothing else is said.
  */
-export function candidatesFor(args: {
-  post: ShiftPost;
-  crew: readonly CrewMember[];
-  leave: readonly LeaveRequest[];
-}): Candidate[] {
-  return args.crew.map(member => {
-    const reasons: Ineligibility[] = [];
+export function shiftEligibility(post: ShiftPost, p: PersonFacts): Candidate {
+  if (!p.inOrganization) {
+    return { userId: p.userId, name: p.name, eligible: false, reasons: [{ code: "not_in_organization", detail: "Not an active member of the organization that posted this shift" }] };
+  }
+  const reasons: Ineligibility[] = [];
 
-    if (!member.roles.includes(args.post.requiredRole)) {
-      reasons.push({ code: "wrong_role", detail: `Holds ${member.roles.join(", ") || "no role"}; this post needs ${args.post.requiredRole}` });
-    }
+  if (!p.roles.includes(post.requiredRole)) {
+    reasons.push({ code: "wrong_role", detail: `Holds ${p.roles.join(", ") || "no role"}; this post needs ${post.requiredRole}` });
+  }
 
-    // An absent qualification is an absent qualification, whether it expired or
-    // nobody ever recorded one. Unknown is not eligible.
-    const missing = args.post.requiredQualifications.filter(q => !member.currentQualifications.includes(q));
-    if (missing.length) {
-      reasons.push({ code: "missing_qualification", detail: `No current ${missing.join(", ")}` });
-    }
+  // Rostered means an active crew membership whose rotation has them working that day. No pattern
+  // is not the same as not working; no membership at all is not being on the roster.
+  if (!p.rosters.some(r => !r.rotation || isOnShift(r.rotation, post.startsAt))) {
+    reasons.push({ code: "not_rostered", detail: p.rosters.length ? "Off-hitch on this date" : "Not on this organization's roster" });
+  }
 
-    if (args.leave.some(l => l.userId === member.userId && isAbsent(l) && !l.partialDay
-      && l.from <= args.post.startsAt && args.post.startsAt <= l.to)) {
-      reasons.push({ code: "on_approved_leave", detail: "Away on approved leave that day" });
-    }
+  if (p.leave.some(l => l.userId === p.userId && isAbsent(l) && !l.partialDay
+    && l.from <= post.startsAt && post.startsAt <= l.to)) {
+    reasons.push({ code: "on_approved_leave", detail: "Away that day on leave already recorded" });
+  }
 
-    if (!isAvailable(member, args.post.startsAt)) {
-      reasons.push({ code: "not_rostered", detail: "Off-hitch on this date" });
-    }
+  const clash = p.commitments.find(c => windowsOverlap(post, c));   // the one rule: _core/bookingConflict.ts
+  if (clash) reasons.push({ code: "overlaps_existing", detail: `Already on ${clash.assignmentRef} over this window` });
 
-    const clash = member.existingAssignments.find(a => overlaps(args.post, a));
-    if (clash) {
-      reasons.push({ code: "overlaps_existing", detail: `Already on ${clash.assignmentRef} over this window` });
-    }
+  switch (p.licence.kind) {
+    case "none":
+      reasons.push({ code: "no_licence_recorded", detail: "No licence on record — this cannot be established as current" });
+      break;
+    case "ambiguous":
+      reasons.push({ code: "no_licence_recorded", detail: "More than one operator record for this person — no licence is chosen between them" });
+      break;
+    case "lapsed":
+      reasons.push({ code: "licence_expired", detail: p.licence.expiresAt ? `Licence expires ${p.licence.expiresAt.toISOString().slice(0, 10)}, before this shift` : "Licence expired before this shift" });
+      break;
+    case "not_established":
+      reasons.push({ code: "licence_not_established", detail: `Licence not established — ${p.licence.reason}` });
+      break;
+    case "in_force":
+      break;
+  }
 
-    return { userId: member.userId, name: member.name, eligible: reasons.length === 0, reasons };
-  });
+  // From the adapter's structured verdict, never from its prose. A required code with no standing
+  // at all is unknown, and unknown blocks exactly as expired does.
+  for (const code of post.requiredQualifications) {
+    const q = p.qualifications.find(x => x.code === code);
+    if (q?.held) continue;
+    reasons.push({
+      code: q?.notHeld === "expired" ? "qualification_expired" : q?.notHeld === "unverified" ? "qualification_unverified" : "qualification_unknown",
+      detail: q?.reason ?? `No ${code} on record — unknown is not satisfied`,
+    });
+  }
+
+  return { userId: p.userId, name: p.name, eligible: reasons.length === 0, reasons };
+}
+
+/** Who could take this shift, and why the rest could not — the same rule, over many people. */
+export function candidatesFor(args: { post: ShiftPost; people: readonly PersonFacts[] }): Candidate[] {
+  return args.people.map(p => shiftEligibility(args.post, p));
 }
 
 export type PostSummary = {
@@ -158,11 +237,14 @@ export class NotEligible extends Error {}
  * has to re-filter by hand, which is the job this was supposed to do.
  */
 export function expressInterest(args: { post: ShiftPost; candidate: Candidate; at: Date }): Interest {
-  if (!args.candidate.eligible) {
-    throw new NotEligible(`${args.candidate.name} cannot take ${args.post.postRef}: ${args.candidate.reasons.map(r => r.detail).join("; ")}`);
-  }
   if (args.post.kind !== "open") {
     throw new NotEligible(`${args.post.postRef} is an assigned post; interest is not how it is filled`);
+  }
+  if (args.post.status && args.post.status !== "open") {
+    throw new NotEligible(`${args.post.postRef} is ${args.post.status}; only an open post takes interest`);
+  }
+  if (!args.candidate.eligible) {
+    throw new NotEligible(`${args.candidate.name} cannot take ${args.post.postRef}: ${args.candidate.reasons.map(r => r.detail).join("; ")}`);
   }
   return {
     postRef: args.post.postRef, userId: args.candidate.userId, expressedAt: args.at,
@@ -199,4 +281,149 @@ export function intendToAssign(args: { post: ShiftPost; candidate: Candidate; in
     interestExpressed: args.interests.some(i => i.postRef === args.post.postRef && i.userId === args.candidate.userId),
     note: "Dispatch's decision, pending the readiness check. Interest is context and confers no claim.",
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* 0206 — the post's life, and the offer's                              */
+/* ------------------------------------------------------------------ */
+
+export type PostStatus = "draft" | "open" | "closed" | "filled" | "cancelled" | "expired";
+
+/**
+ * Where a post may go from where it is. Beside `POSTING_TRANSITIONS` in dispatchLifecycle and
+ * tested the same way. `filled` is reached only by the award; nothing else writes it.
+ */
+export const POST_TRANSITIONS: Record<PostStatus, readonly PostStatus[]> = {
+  draft: ["open", "cancelled"],
+  open: ["closed", "filled", "cancelled", "expired"],
+  // Reopening is allowed; filling still needs an award.
+  closed: ["open", "filled", "cancelled"],
+  filled: [],
+  cancelled: [],
+  expired: [],
+};
+
+export function canTransitionPost(from: PostStatus, to: PostStatus): boolean {
+  return POST_TRANSITIONS[from]?.includes(to) ?? false;
+}
+
+/** Terminal: nothing moves out of it. */
+export function isTerminalPost(status: PostStatus): boolean {
+  return POST_TRANSITIONS[status].length === 0;
+}
+
+/**
+ * Expiry is derived on read: an open post whose `closesAt` has passed is expired whether or not a
+ * mutation has persisted it yet. The persisted status catches up at the next mutation.
+ */
+export function effectivePostStatus(post: { status: PostStatus; closesAt: Date | null }, now: Date): PostStatus {
+  if (post.status === "open" && post.closesAt && post.closesAt.getTime() <= now.getTime()) return "expired";
+  return post.status;
+}
+
+/** A person's standing response to a post. One per person per post; a new one replaces it. */
+export type ResponseKind = "interested" | "available" | "request_assignment" | "declined";
+export const RESPONSE_KINDS: readonly ResponseKind[] = ["interested", "available", "request_assignment", "declined"];
+
+/** Responses that put a person in the candidate pool. `declined` records the answer and removes them. */
+export function responseVolunteers(kind: ResponseKind): boolean {
+  return kind !== "declined";
+}
+
+export type OfferStatus = "offered" | "accepted" | "declined" | "withdrawn" | "expired" | "awarded" | "not_selected";
+
+/**
+ * The offer's life. `accepted` is a person's statement and binds nothing; `awarded` and
+ * `not_selected` are written only by the award, under the posting lock.
+ */
+export const OFFER_TRANSITIONS: Record<OfferStatus, readonly OfferStatus[]> = {
+  offered: ["accepted", "declined", "withdrawn", "expired"],
+  accepted: ["withdrawn", "expired", "awarded", "not_selected"],
+  declined: [],
+  withdrawn: [],
+  expired: [],
+  awarded: [],
+  not_selected: [],
+};
+
+export function canTransitionOffer(from: OfferStatus, to: OfferStatus): boolean {
+  return OFFER_TRANSITIONS[from]?.includes(to) ?? false;
+}
+
+/** Live: still awaiting a decision from somebody. */
+export function isLiveOffer(status: OfferStatus): boolean {
+  return status === "offered" || status === "accepted";
+}
+
+/** An offer past its `expiresAt` is expired on read, exactly as a post is. */
+export function effectiveOfferStatus(offer: { status: OfferStatus; expiresAt: Date | null }, now: Date): OfferStatus {
+  if (offer.status === "offered" && offer.expiresAt && offer.expiresAt.getTime() <= now.getTime()) return "expired";
+  return offer.status;
+}
+
+/* ------------------------------------------------------------------ */
+/* 0206 — availability is a declaration                                 */
+/* ------------------------------------------------------------------ */
+
+export type AvailabilityState = "available" | "unavailable" | "on_call" | "available_for_overtime";
+
+export type AvailabilityDeclaration = {
+  state: AvailabilityState;
+  /** Both null = standing. A window is half-open: [starts, ends). */
+  windowStartsAt: Date | null;
+  windowEndsAt: Date | null;
+  preferences: AvailabilityPreferences | null;
+  declaredAt: Date;
+};
+
+export type AvailabilityPreferences = {
+  regions: string[];
+  equipmentClasses: string[];
+  jobTypes: string[];
+  maxDistanceKm: number | null;
+  overnight: boolean | null;
+  nights: boolean | null;
+  weekends: boolean | null;
+  overtime: boolean | null;
+};
+
+/** Whether a declaration covers an instant. A standing declaration covers every instant. */
+export function declarationCovers(d: { windowStartsAt: Date | null; windowEndsAt: Date | null }, at: Date): boolean {
+  if (d.windowStartsAt && d.windowStartsAt.getTime() > at.getTime()) return false;
+  if (d.windowEndsAt && d.windowEndsAt.getTime() <= at.getTime()) return false;
+  return true;
+}
+
+/**
+ * The declaration in force for one instant: the latest declared one that covers it. None is
+ * "undeclared", which is neither available nor unavailable — a candidate pool shows it as such
+ * rather than reading silence as consent.
+ */
+export function declaredStateAt(declarations: readonly AvailabilityDeclaration[], at: Date): AvailabilityState | "undeclared" {
+  const covering = declarations.filter(d => declarationCovers(d, at));
+  if (!covering.length) return "undeclared";
+  covering.sort((a, b) => b.declaredAt.getTime() - a.declaredAt.getTime());
+  return covering[0]!.state;
+}
+
+/**
+ * Whether a declaration puts a person in the pool for a post. Overtime work needs an overtime
+ * declaration or a plain `available`; `on_call` counts; `unavailable` excludes; `undeclared` is
+ * reported, never treated as either.
+ */
+export type AvailabilityReason = { code: "declared_unavailable" | "undeclared" | "declines_overtime" | "outside_region"; detail: string };
+
+export function availabilityReasons(args: {
+  state: AvailabilityState | "undeclared";
+  preferences: AvailabilityPreferences | null;
+  post: { overtime: boolean; regionCode: string | null };
+}): AvailabilityReason[] {
+  const reasons: AvailabilityReason[] = [];
+  if (args.state === "unavailable") reasons.push({ code: "declared_unavailable", detail: "Declared unavailable for this window" });
+  if (args.state === "undeclared") reasons.push({ code: "undeclared", detail: "No availability declared for this window — not the same as available" });
+  if (args.post.overtime && args.preferences?.overtime === false) reasons.push({ code: "declines_overtime", detail: "Declared no overtime" });
+  if (args.post.regionCode && args.preferences?.regions.length && !args.preferences.regions.includes(args.post.regionCode)) {
+    reasons.push({ code: "outside_region", detail: `Declared regions ${args.preferences.regions.join(", ")}; this post is ${args.post.regionCode}` });
+  }
+  return reasons;
 }

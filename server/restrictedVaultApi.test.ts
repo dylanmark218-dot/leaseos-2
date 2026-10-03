@@ -14,7 +14,9 @@ import type { DomainRole } from "./_core/recordsAuthorization";
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let nextId = 960_000 + Math.floor(Math.random() * 30_000);
+// A range of its own: 960k–990k overlapped recordsAuthorizationDb and assistantCommitService, and a shared id
+// collided on the same role grant (userRoleAssignments_activeGrantKey_unique) on a fresh database.
+let nextId = 296_000_000 + Math.floor(Math.random() * 50_000);
 const rnd = () => Math.random().toString(36).slice(2, 8);
 beforeAll(async () => { if (URL) pool = mysql.createPool({ uri: URL, connectionLimit: 4 }); });
 

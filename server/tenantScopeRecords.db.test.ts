@@ -19,7 +19,18 @@ async function org() { const orgRef = `ORG-${rnd()}`; await pool.execute("INSERT
 async function member(orgRef: string | null, roles: string[]) {
   const userId = seq++;
   if (orgRef) await pool.execute("INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'employee','active','2020-01-01',1)", [`MEM-${rnd()}`, orgRef, userId]);
-  for (const role of roles) await pool.execute("INSERT INTO userRoleAssignments (userId, role, scopeType, grantedByUserId, grantedAt) VALUES (?,?,'global',1,NOW())", [userId, role]);
+  // B23.1A: grants are written in the shape 0170 leaves behind — scoped to the
+  // organization that issued them. The fixture used to write `scopeType='global'`,
+  // which after B23.1 means platform-wide authority; a tenant-isolation test that
+  // hands both sides platform authority is testing the wrong thing, and 0170's
+  // backfill produces no such row. A member of nowhere gets the quarantine shape:
+  // preserved, authorizing nothing.
+  for (const role of roles) {
+    await pool.execute(
+      "INSERT INTO userRoleAssignments (userId, role, scopeType, orgRef, grantedByUserId, grantedAt) VALUES (?,?,?,?,1,NOW())",
+      [userId, role, orgRef ? "organization" : "unscoped_legacy", orgRef]
+    );
+  }
   return userId;
 }
 async function jobOwnedBy(orgRef: string | null) { const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, customer, location, status, orgRef) VALUES (?,?,?,?,'dispatched',?)", [`JOB-${rnd()}`, "Hydrovac", "Fixture Energy", "Somewhere", orgRef]); return j.insertId; }
@@ -50,9 +61,21 @@ d("records belong to the organization that owns the job, unit or person", () => 
     await expect(callerFor(safetyA).records.incident.readInvestigation({ incidentNumber })).resolves.toBeTruthy();
     // Work-order release: through the unit.
     await expect(callerFor(mechB).records.maintenance.recordRelease({ workOrderId: uA.workOrderId, releaseType: "full", repairSummary: "brake line replaced and bled", roadTestPerformed: true, technicianIdentifier: "TECH-1" } as never)).rejects.toMatchObject({ code: "NOT_FOUND", message: `Work order ${uA.workOrderId} not found` });
-    await expect(callerFor(mechA).records.maintenance.recordRelease({ workOrderId: uA.workOrderId, releaseType: "full", repairSummary: "brake line replaced and bled", roadTestPerformed: true, technicianIdentifier: "TECH-1" } as never)).resolves.toMatchObject({ released: true });   // the owner's mechanic releases it
-    // Role grant: only to a person in the organization (the grant itself may still be refused by the roles table; scope is checked first).
-    await expect(callerFor(safetyA).records.roles.grant({ targetUserId: personB, role: "driver" } as never)).rejects.toMatchObject({ code: "NOT_FOUND", message: `User ${personB} not found` });
-    await expect(callerFor(safetyA).records.roles.grant({ targetUserId: personA, role: "driver" } as never)).rejects.not.toMatchObject({ message: `User ${personA} not found` });
+    // 0221 — that door is closed (one release door, design S-1). The owner's mechanic is in scope, so they hear why;
+    // they release through shop.workOrderRelease, which scopes the work order the same way.
+    await expect(callerFor(mechA).records.maintenance.recordRelease({ workOrderId: uA.workOrderId, releaseType: "full", repairSummary: "brake line replaced and bled", roadTestPerformed: true, technicianIdentifier: "TECH-1" } as never)).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: expect.stringMatching(/shop\.workOrderRelease/) });
+    await expect(callerFor(mechB).shop.workOrderRelease({ workOrderId: uA.workOrderId, releaseType: "full", repairSummary: "brake line replaced and bled", roadTestPerformed: true })).rejects.toMatchObject({ code: "NOT_FOUND", message: `Work order ${uA.workOrderId} not found` });
+    await expect(callerFor(mechA).shop.workOrderRelease({ workOrderId: uA.workOrderId, releaseType: "full", repairSummary: "brake line replaced and bled", roadTestPerformed: true })).resolves.toMatchObject({ releaseId: expect.any(Number), mechanicReleaseGiven: true });   // the owner's mechanic releases it
+    // Role grant: only to a person in the organization.
+    await expect(callerFor(safetyA).records.roles.grant({ targetUserId: personB, role: "mechanic" } as never)).rejects.toMatchObject({ code: "NOT_FOUND", message: `User ${personB} not found` });
+    // B23.1A: this used to assert only that A's own person was NOT refused as
+    // not-found, and it passed because the grant collided on the old unique key
+    // and rejected for an unrelated reason. Now it states the property directly:
+    // the grant is issued, and it lands in the ACTOR's organization — never
+    // platform-wide, never in B. `mechanic` rather than `driver` because personA
+    // already holds driver in A, and a duplicate would hide the same thing again.
+    await expect(callerFor(safetyA).records.roles.grant({ targetUserId: personA, role: "mechanic" } as never)).resolves.toMatchObject({ granted: true, organization: A });
+    const [grants] = await pool.execute<mysql.RowDataPacket[]>("SELECT scopeType, orgRef FROM userRoleAssignments WHERE userId = ? AND role = 'mechanic' AND revokedAt IS NULL", [personA]);
+    expect(grants).toEqual([{ scopeType: "organization", orgRef: A }]);
   }, 60_000);
 });

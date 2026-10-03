@@ -19,15 +19,26 @@ const rnd = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 const STARTS = new Date("2027-03-02T06:00:00Z");
 const ENDS = new Date("2027-03-02T18:00:00Z");
 
+/**
+ * The person's own operator record (linked through operators.userId) and, when there is an expiry,
+ * a verified driver_licence document. SPINE item 2: the licence is the canonical verdict on those
+ * documents; the legacy licenseExpiresAt alone is an unverified claim, and readiness used to read the
+ * operator whose id happened to equal the user id — which this fixture used to rely on.
+ */
 async function operatorRow(userId: number, licenceExpires: Date | null) {
-  await pool.execute("INSERT INTO operators (id, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,NOW())",
+  const [o] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,NOW())",
     [userId, `Op ${rnd()}`, "1", licenceExpires]);
+  if (licenceExpires) {
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Licence', ?, ?, 'verified')",
+      [o.insertId, new Date("2026-01-01T00:00:00Z"), licenceExpires]);
+  }
 }
 async function ticket(userId: number, code: string, expiresAt: Date | null, state = "verified") {
   await pool.execute(
-    `INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, verificationState, expiresAt, recordedByUserId, recordedAt)
-     VALUES (?,?,?,?,?,?,?,NOW())`,
-    [`WQ-${rnd()}${rnd()}`, "default", userId, code, state, expiresAt, 1]);
+    `INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, verificationState, expiresAt, recordedByUserId, recordedAt, verifiedByUserId, verifiedAt)
+     VALUES (?,?,?,?,?,?,?,NOW(),?,?)`,
+    // C1b-3: a legacy holding counts as verified only with a recorded verifier.
+    [`WQ-${rnd()}${rnd()}`, "default", userId, code, state, expiresAt, 1, state === "verified" ? 1 : null, state === "verified" ? new Date() : null]);
 }
 const postShift = (dispatcher: number, quals: string[] = []) =>
   caller(dispatcher).shifts.post({ title: "Shift", startsAt: STARTS, endsAt: ENDS, requiredRole: "driver", requiredQualifications: quals });

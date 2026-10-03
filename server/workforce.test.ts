@@ -1,4 +1,9 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { vi, beforeAll, describe, expect, it } from "vitest";
+
+// F1.1 — this suite exercises a deployment that is one ownership domain (no organization yet), where the
+// ownerless serialized tools are provably the single tenant's. The predicate itself, and the refusal once organizations
+// exist, are proved against the real database in tenantScopeFinance.db.test.ts.
+vi.mock("./ownershipDomain", async importOriginal => ({ ...(await importOriginal<typeof import("./ownershipDomain")>()), singleOwnershipDomain: async () => true, requireProvableOwnership: async () => undefined }));
 import mysql from "mysql2/promise";
 import { COURSE_CREDENTIALS, competencyDecision, hireReadiness, offboardingClose, onboardingGaps, probationDecision, screeningRecordDecision, trainingVerification } from "./_core/workforce";
 import { appRouter } from "./routers";
@@ -6,7 +11,12 @@ import { appRouter } from "./routers";
 // real clock, so a start date fixed on the calendar goes overdue the day the
 // calendar passes it (which is how this was found, at 01:25 UTC on the 17th).
 const START = new Date(Math.floor(Date.now() / 86_400_000) * 86_400_000 + 7 * 86_400_000);
+// The probation extension must land after START + 90 days, so it moves with START. It was fixed at
+// 2027-01-15, which stopped being later than START + 90 on 2026-10-10 and would have been refused as
+// "An extension ends after the current probation end" — correctly (CI-0.2).
+const EXTENDED_TO = new Date(START.getTime() + 120 * 86_400_000);
 import { grantUserRole } from "./db";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { authorize, type DomainRole } from "./_core/recordsAuthorization";
 
 const at = (iso: string) => new Date(iso);
@@ -79,7 +89,13 @@ let userSeq = 3_400_000 + Math.floor(Math.random() * 50_000);
 const nextUser = () => userSeq++;
 beforeAll(async () => { if (!URL) return; pool = mysql.createPool({ uri: URL, connectionLimit: 6 }); });
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
-async function withRole(role: DomainRole) { const id = nextUser(); await grantUserRole({ userId: id, role, scopeType: "global", grantedByUserId: 1, grantedAt: new Date() }); return id; }
+// B23.1A: organization-scoped, which is the shape 0170 leaves behind and the
+// only shape `records.roles.grant` now writes. These fixtures have no
+// membership row, so their acting scope is the historical single tenant —
+// exactly what `resolveActingScope` resolves such callers to. Granting
+// `scopeType: "global"` here would hand every test actor platform-wide
+// authority and hide any organization boundary the procedures apply.
+async function withRole(role: DomainRole) { const id = nextUser(); await grantUserRole({ userId: id, role, scopeType: "organization", orgRef: SINGLE_TENANT_ID, grantedByUserId: 1, grantedAt: new Date() }); return id; }
 
 d("a person, hired to offboarded", () => {
   it("is screened with evidence, refused a hire while a screening is pending, hired into a plan, credentialed into the registry by a second person, signed off, decided by two people on probation, and offboarded only when every door is shut", async () => {
@@ -140,12 +156,12 @@ d("a person, hired to offboarded", () => {
     // Probation: recommended by the supervisor, decided by HR — who may differ; the supervisor cannot decide; the recommender is named on the difference.
     const rec = await callerFor(supervisor).workforce.probationRecommend({ planRef: hire.planRef!, recommendation: "confirm", note: "Reliable, safe, learns fast" });
     await expect(callerFor(supervisor).workforce.probationDecide({ reviewId: rec.reviewId, decision: "confirm", note: "agree" })).rejects.toBeTruthy();
-    const dec = await callerFor(hr).workforce.probationDecide({ reviewId: rec.reviewId, decision: "extend", note: "TDG practical not yet observed", extendedTo: new Date("2027-01-15T00:00:00Z") });
+    const dec = await callerFor(hr).workforce.probationDecide({ reviewId: rec.reviewId, decision: "extend", note: "TDG practical not yet observed", extendedTo: EXTENDED_TO });
     expect(dec).toMatchObject({ decision: "extend", differsFromRecommendation: true });
-    expect((await callerFor(hr).workforce.onboardingStatus({ planRef: hire.planRef! })).probationEndsAt?.toISOString().slice(0, 10)).toBe("2027-01-15");
+    expect((await callerFor(hr).workforce.onboardingStatus({ planRef: hire.planRef! })).probationEndsAt?.toISOString()).toBe(EXTENDED_TO.toISOString());
 
     // Offboarding: opened; the driver still holds a role, a device and a tool; close is refused with each door named; access revoked as one act; the tool returned; then closed.
-    await grantUserRole({ userId: newUser, role: "driver", scopeType: "global", grantedByUserId: hr, grantedAt: new Date() });
+    await grantUserRole({ userId: newUser, role: "driver", scopeType: "organization", orgRef: SINGLE_TENANT_ID, grantedByUserId: hr, grantedAt: new Date() });
     await pool.execute("INSERT INTO fieldDevices (deviceRef, userId, platform, keyFingerprint, keystoreAttestation, encryptedStorageAttested, status, enrolledAt, enrolledByUserId, createdAt) VALUES (?, ?, 'ios', ?, 'unknown', 0, 'active', NOW(), ?, NOW())", [`DEV-${newUser}`, newUser, `fp-${newUser}`, hr]);
     const mech = await withRole("mechanic");
     const toolSerial = `T-${newUser}`;
@@ -159,7 +175,11 @@ d("a person, hired to offboarded", () => {
     expect(st.toolsOut).toEqual([toolSerial]);
     await expect(callerFor(hr).workforce.offboardingClose({ offboardingRef: off.offboardingRef, finalPayProposed: true })).rejects.toThrow(/Cannot close: 1 role grant\(s\) still active/);
     const rev = await callerFor(hr).workforce.offboardingRevokeAccess({ offboardingRef: off.offboardingRef });
-    expect(rev).toEqual({ offboardingRef: off.offboardingRef, rolesRevoked: 1, devicesRevoked: 1 });
+    // B23.1A: the revoke reports what it could not shut. Zero here, and it has
+    // to be asserted rather than omitted — a platform-wide grant survives an
+    // offboarding untouched, and a number nobody looks at is the same as no
+    // number at all.
+    expect(rev).toEqual({ offboardingRef: off.offboardingRef, rolesRevoked: 1, devicesRevoked: 1, platformWideGrantsUntouched: 0 });
     expect(authorize({ userId: newUser, roles: [], permission: "dispatch.read" }).allowed).toBe(false);
     const [rr] = await pool.execute<mysql.RowDataPacket[]>("SELECT revokeReason FROM userRoleAssignments WHERE userId = ? AND role = 'driver'", [newUser]);
     expect(rr[0].revokeReason).toContain(off.offboardingRef);

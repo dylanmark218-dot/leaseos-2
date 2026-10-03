@@ -9,27 +9,34 @@ vi.mock("./storage", () => ({
   storageRead: async (relKey: string) => { const b = objects.get(relKey); if (!b) throw new Error(`no object ${relKey}`); return b; },
 }));
 import { disputeResolution, draftFromTicket, finalizeCheck, snapshotHash, voidCheck, type TicketLineForInvoice } from "./_core/invoiceDraft";
+import { fieldTicketSignatureVerdict } from "./_core/fieldTicketSignature";
 import { appRouter } from "./routers";
 import { grantUserRole } from "./db";
 import type { DomainRole } from "./_core/recordsAuthorization";
 
 const priced = (id: number, description: string, amountCents: number, disposition: TicketLineForInvoice["disposition"] = "accepted"): TicketLineForInvoice => ({ id, description, serviceCode: "hydrovac", disposition, quantity: 4, quantityUnit: "hour", decision: { decisionRef: `PR-${id}`, outcome: "priced", amountCents, billableQuantityMillis: 4_000, rateMillis: 320_000, unit: "hour", quantityMillis: 4_000, scopeLevel: "customer_contract", reasons: [] } });
 
+// Verdicts from the site sign-off's one rule — the draft consumes them, it does not decide "signed".
+const sigRow = { revision: 1, result: "accepted" as const, payloadHash: "h1", capturedAt: new Date("2026-09-10T17:14:00Z"), signerName: "M. Johnson" };
+const UNSIGNED = fieldTicketSignatureVerdict({ ticket: { status: "presented", signatureStatus: "unsigned" }, signatures: [], revisions: [] });
+const SIGNED = fieldTicketSignatureVerdict({ ticket: { status: "closed", signatureStatus: "accepted" }, signatures: [sigRow], revisions: [{ revision: 1, kind: "site_signed", snapshotHash: "h1" }] });
+const AMENDED = fieldTicketSignatureVerdict({ ticket: { status: "amended_after_signature", signatureStatus: "accepted" }, signatures: [sigRow], revisions: [{ revision: 1, kind: "site_signed", snapshotHash: "h1" }] });
+
 describe("the draft takes accepted, priced lines and names everything else", () => {
   it("blocks an unsigned ticket, holds a disputed line under partial acceptance, blocks it otherwise, and excludes a note", () => {
     const lines: TicketLineForInvoice[] = [priced(1, "Truck time", 128_000), priced(2, "Standby", 19_000, "disputed"), { id: 3, description: "Note", serviceCode: null, disposition: "accepted", quantity: null, quantityUnit: null, decision: null }];
-    expect(draftFromTicket({ signed: false, ticketStatus: "presented", lines, partialAcceptanceAllowed: true }).blockers[0]).toContain("not signed");
-    const partial = draftFromTicket({ signed: true, ticketStatus: "closed", lines, partialAcceptanceAllowed: true });
+    expect(draftFromTicket({ signature: UNSIGNED, lines, partialAcceptanceAllowed: true }).blockers[0]).toContain("not signed");
+    const partial = draftFromTicket({ signature: SIGNED, lines, partialAcceptanceAllowed: true });
     expect(partial.blockers).toEqual([]);
     expect(partial.lines.map(l => l.description)).toEqual(["Truck time"]);
     expect(partial.subtotalCents).toBe(128_000);
     expect(partial.excluded.map(e => e.reason.slice(0, 22))).toEqual(["Disputed by the custom", "No service named — a n"]);
-    const whole = draftFromTicket({ signed: true, ticketStatus: "closed", lines, partialAcceptanceAllowed: false });
+    const whole = draftFromTicket({ signature: SIGNED, lines, partialAcceptanceAllowed: false });
     expect(whole.blockers[0]).toContain("does not accept partial invoices");
-    const unpriced = draftFromTicket({ signed: true, ticketStatus: "closed", lines: [{ ...priced(4, "Hose", 0), decision: { ...priced(4, "Hose", 0).decision!, outcome: "unknown_rate", amountCents: null } }], partialAcceptanceAllowed: true });
+    const unpriced = draftFromTicket({ signature: SIGNED, lines: [{ ...priced(4, "Hose", 0), decision: { ...priced(4, "Hose", 0).decision!, outcome: "unknown_rate", amountCents: null } }], partialAcceptanceAllowed: true });
     expect(unpriced.blockers[0]).toBe("Line 4 (Hose): UNKNOWN RATE");
-    expect(draftFromTicket({ signed: true, ticketStatus: "closed", lines: [priced(5, "Not presented", 100, "not_presented")], partialAcceptanceAllowed: true }).blockers[0]).toContain("not presented for acceptance");
-    expect(draftFromTicket({ signed: true, ticketStatus: "amended_after_signature", lines: [priced(1, "x", 100)], partialAcceptanceAllowed: true }).blockers[0]).toContain("amended after signature");
+    expect(draftFromTicket({ signature: SIGNED, lines: [priced(5, "Not presented", 100, "not_presented")], partialAcceptanceAllowed: true }).blockers[0]).toContain("not presented for acceptance");
+    expect(draftFromTicket({ signature: AMENDED, lines: [priced(1, "x", 100)], partialAcceptanceAllowed: true }).blockers[0]).toContain("amended after signature");
   });
   it("finalizes only a draft with a treatment, and a taxable invoice only on a verified rate", () => {
     const base = { status: "draft", jurisdiction: "CA-AB", subtotalCents: 128_000, lineCount: 1 } as const;
@@ -53,7 +60,7 @@ describe("the draft takes accepted, priced lines and names everything else", () 
     expect(disputeResolution({ caseStatus: "raised", outcome: "credited", disputedAmountCents: 10_000, creditAmountCents: 4_000 }).refusals[0]).toContain("partial resolution");
     expect(disputeResolution({ caseStatus: "raised", outcome: "upheld", disputedAmountCents: 10_000, creditAmountCents: null })).toMatchObject({ permitted: true, caseStatus: "resolved_upheld", creditCents: 0 });
     expect(disputeResolution({ caseStatus: "resolved_upheld", outcome: "upheld", disputedAmountCents: 10_000, creditAmountCents: null }).refusals[0]).toBe("Case is resolved_upheld");
-    const already = draftFromTicket({ signed: true, ticketStatus: "closed", lines: [priced(1, "Truck time", 128_000)], partialAcceptanceAllowed: true, alreadyInvoiced: new Map([[1, "INV-1"]]) });
+    const already = draftFromTicket({ signature: SIGNED, lines: [priced(1, "Truck time", 128_000)], partialAcceptanceAllowed: true, alreadyInvoiced: new Map([[1, "INV-1"]]) });
     expect(already.blockers[0]).toContain("Nothing new to invoice");
     expect(already.excluded[0].reason).toBe("Already on invoice INV-1");
   });
@@ -76,7 +83,7 @@ d("an invoice from the ticket's decisions, end to end", () => {
     const office = await withRole("office");
     const controller = await withRole("controller");
     const driver = await withRole("driver");
-    const entityId = 5_100_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const acctRef = key("CUST").slice(0, 40);
     const customerName = `ABC Energy ${acctRef.slice(-5)}`;
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, ?)", [acctRef, entityId, customerName]);
@@ -175,7 +182,7 @@ d("an invoice from the ticket's decisions, end to end", () => {
 
   it("does not accept a disputed invoice over its dispute, and shows nothing to another account", async () => {
     const controller = await withRole("controller");
-    const entityId = 5_200_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const acctRef = key("CUST").slice(0, 40);
     const otherRef = key("CUST").slice(0, 40);
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, 'DEF Oil')", [acctRef, entityId]);
@@ -204,7 +211,7 @@ d("an invoice from the ticket's decisions, end to end", () => {
     const management = await withRole("management");
     const bookkeeper = await withRole("bookkeeper");
     const driver = await withRole("driver");
-    const entityId = 5_300_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const acctRef = key("CUST").slice(0, 40);
     const customerName = `GHI Resources ${acctRef.slice(-5)}`;
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, ?)", [acctRef, entityId, customerName]);

@@ -1,5 +1,5 @@
 /**
- * 0182 — the Safety & Compliance Program Builder, wired.
+ * 0228 — the Safety & Compliance Program Builder, wired.
  *
  * What these prove against a real database: the library seeds idempotently and
  * unverified; a policy's code is minted by the server; a version cannot be
@@ -41,7 +41,7 @@ async function personIn(orgRef: string, role: string, workerType = "EMPLOYEE_DRI
 const code = async (fn: () => Promise<unknown>) => { try { await fn(); return "ok"; } catch (e) { return (e as { code?: string }).code ?? "error"; } };
 const message = async (fn: () => Promise<unknown>) => { try { await fn(); return ""; } catch (e) { return (e as { message?: string }).message ?? ""; } };
 
-d("0182 — Safety & Compliance Program Builder", () => {
+d("0228 — Safety & Compliance Program Builder", () => {
   it("runs the program from library to ledger for one organization, and keeps another organization out", async () => {
     const orgRef = await org();
     const safety = await personIn(orgRef, "safety", "SAFETY_COMPLIANCE");

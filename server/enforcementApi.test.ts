@@ -20,7 +20,35 @@ const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
 let seq = 8_600_000 + Math.floor(Math.random() * 60_000);
-beforeAll(async () => { if (!URL) return; pool = mysql.createPool({ uri: URL, connectionLimit: 4 }); });
+/**
+ * B23.1B — the unit these events are written against, created here rather than
+ * named as a number.
+ *
+ * This fixture used to say `unitId: 127` and rely on unit 127 either not
+ * existing or belonging to nobody. Every enforcement event opens a defect and a
+ * work order against that unit, and `shopRouter` resolves the work order
+ * through `workOrderInScope`, which asks `coreRecordOwnership` who owns the
+ * unit. The moment any other suite created enough units to reach id 127 and
+ * claimed it for an organization, all five releases here failed with
+ * "Work order N not found" — a tenant refusal that was entirely correct about
+ * somebody else's unit, and that reads exactly like an authorization bug.
+ */
+let unitId = 0;
+beforeAll(async () => {
+  if (!URL) return;
+  pool = mysql.createPool({ uri: URL, connectionLimit: 4 });
+  const [u] = await pool.execute<mysql.ResultSetHeader>(
+    "INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')",
+    [`U-ENF-${rnd()}`]
+  );
+  unitId = u.insertId;
+});
+/** CP1.5 — a member confirms a stop on a unit their organization owns; another organization's is not found. */
+async function unitFor(orgRef: string) {
+  const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')", [`U-ENF-${rnd()}`]);
+  await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'unit', ?, 1)", [orgRef, u.insertId]);
+  return Number(u.insertId);
+}
 const caller = (id: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id, role: "user" } as never });
 async function withRole(role: DomainRole) { const id = seq++; await grantUserRole({ userId: id, role, scopeType: "global", grantedByUserId: 1, grantedAt: new Date() }); return id; }
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
@@ -29,7 +57,7 @@ const stop = (over: Record<string, unknown> = {}) => ({
   eventType: "roadside_inspection", jurisdiction: "CA-AB", agency: `agency-${rnd()}`,
   occurredAt: new Date("2026-09-11T08:42:00Z"), inspectionReportNumber: `INSP-${rnd()}`,
   inspectionLevel: "I", inspectionResult: "out_of_service" as const,
-  unitId: 127, subjectRefs: { vehicle: `UNIT-${rnd()}` },
+  unitId, subjectRefs: { vehicle: `UNIT-${rnd()}` },
   violations: [{
     system: "brakes", ownCode: "LEASEOS.BRAKES.CHAMBER", citationIssued: true, outOfService: true,
     oosScope: "vehicle" as const, defectRequired: true, repairRequired: true, courtAction: false,
@@ -176,10 +204,10 @@ d("the shop bridge — a prohibition arrives in the shop queue", () => {
 
     const [defects] = await pool.execute<mysql.RowDataPacket[]>("SELECT severity, status, unitId FROM maintenanceDefects WHERE id = ?", [v.defectId]);
     // A government prohibition is critical work, not advisory.
-    expect(defects[0]).toMatchObject({ severity: "critical", status: "open", unitId: 127 });
+    expect(defects[0]).toMatchObject({ severity: "critical", status: "open", unitId });
 
     const [wos] = await pool.execute<mysql.RowDataPacket[]>("SELECT priority, status, unitId, defectId FROM workOrders WHERE id = ?", [v.workOrderId]);
-    expect(wos[0]).toMatchObject({ priority: "critical", status: "open", unitId: 127, defectId: v.defectId });
+    expect(wos[0]).toMatchObject({ priority: "critical", status: "open", unitId, defectId: v.defectId });
   });
 
   it("raises an inspection-required defect and an urgent work order where no prohibition was issued", async () => {
@@ -481,7 +509,7 @@ d("one organization cannot see or touch another's prohibitions", () => {
     const safetyA = await memberOf("safety", orgA);
     const safetyB = await memberOf("safety", orgB);
 
-    const a = await caller(safetyA).enforcement.eventConfirm(stop());
+    const a = await caller(safetyA).enforcement.eventConfirm(stop({ unitId: await unitFor(orgA) }));
     const listB = await caller(safetyB).enforcement.activeOrders({});
     expect(listB.orders.some(o => o.orderRef === a.orderRefs[0])).toBe(false);
 
@@ -495,7 +523,7 @@ d("one organization cannot see or touch another's prohibitions", () => {
     const orgB = await anOrg();
     const safetyA = await memberOf("safety", orgA);
     const safetyB = await memberOf("safety", orgB);
-    const a = await caller(safetyA).enforcement.eventConfirm(stop());
+    const a = await caller(safetyA).enforcement.eventConfirm(stop({ unitId: await unitFor(orgA) }));
 
     // Whether another organization has a stop by this reference is itself
     // something this caller should not learn.
@@ -508,7 +536,7 @@ d("one organization cannot see or touch another's prohibitions", () => {
     const orgB = await anOrg();
     const safetyA = await memberOf("safety", orgA);
     const safetyB = await memberOf("safety", orgB);
-    const a = await caller(safetyA).enforcement.eventConfirm(stop());
+    const a = await caller(safetyA).enforcement.eventConfirm(stop({ unitId: await unitFor(orgA) }));
     const orderRef = a.orderRefs[0];
 
     await expect(caller(safetyB).enforcement.findingRecord({ orderRef, finding: "satisfied", findingType: "reinspection" }))
@@ -522,7 +550,7 @@ d("one organization cannot see or touch another's prohibitions", () => {
     const orgB = await anOrg();
     const safetyA = await memberOf("safety", orgA);
     const safetyB = await memberOf("safety", orgB);
-    const a = await caller(safetyA).enforcement.eventConfirm(stop());
+    const a = await caller(safetyA).enforcement.eventConfirm(stop({ unitId: await unitFor(orgA) }));
     const unitRef = (await caller(safetyA).enforcement.eventGet({ eventRef: a.eventRef })).orders[0].subjectRef;
 
     const grantB = await caller(safetyB).enforcement.panelGrantIssue({ unitRef, issuedFor: "inspection" });

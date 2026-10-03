@@ -23,9 +23,13 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
+import { commercialScope, jobSnapshotCaptureIfReady } from "./customerCommercialService";
+import { financeScopeFor } from "./_core/entityScope";
 import { getDb, jobInScope, listActiveUserRoleNames } from "./db";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { assertEntityInScope } from "./_core/entityScope";
+import { singleOwnershipDomain } from "./ownershipDomain";
+import { platformAuthorityProven } from "./platformAuthority";
 import { dispatchEligibilityChecks, dispatchEnforcementSettings, dispatchOverrides, dispatchPostings, operators } from "../drizzle/schema";
 import { assertReadinessSubjectInScope, checkInScope, dispatchScopeFor, loadEnforcementMode, loadGrantedOverrides } from "./dispatchEnforcementService";
 import { asFinding, resolveOverridePolicy } from "./_core/complianceFinding";
@@ -71,16 +75,23 @@ async function scopedDb(userId: number) {
 }
 
 /**
- * The enforcement setting a caller may read or write. The global row (no entity) governs the legacy
- * path for everyone, so only the historical single tenant may touch it; an entity row must belong to
- * the caller's organization.
+ * The enforcement setting a caller may read or write. An entity row must belong to the caller's
+ * organization (NOT_FOUND otherwise).
+ *
+ * The global row (no entity) is the fallback for every organization without a mode of its own, and the
+ * mode of the legacy path. F1.3 — it is PLATFORM-GOVERNED: once any organization exists, only platform
+ * authority (`platformAuthorityProven`, read from the users row) may change it. Being unaffiliated is
+ * not authority. While no organization exists, the one tenant governs its own deployment, as before.
+ * Reading it keeps C1a's rule (the single tenant, not an organization), plus platform authority.
  */
-async function assertEnforcementScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, scope: Awaited<ReturnType<typeof dispatchScopeFor>>, financialEntityId: number | null) {
-  if (financialEntityId == null) {
-    if (scope.tenantId !== SINGLE_TENANT_ID) throw new TRPCError({ code: "FORBIDDEN", message: "The global dispatch enforcement setting is not an organization's to change or read — name your own entity" });
-    return;
+async function assertEnforcementScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, scope: Awaited<ReturnType<typeof dispatchScopeFor>>, financialEntityId: number | null, userId: number, access: "read" | "write") {
+  if (financialEntityId != null) return assertEntityInScope(db, financialEntityId, scope);
+  if (await platformAuthorityProven(userId)) return;
+  if (access === "write") {
+    if (await singleOwnershipDomain()) return;
+    throw new TRPCError({ code: "FORBIDDEN", message: "The global dispatch enforcement setting is the fallback for every organization; only platform authority may change it — name your own entity" });
   }
-  await assertEntityInScope(db, financialEntityId, scope);
+  if (scope.tenantId !== SINGLE_TENANT_ID) throw new TRPCError({ code: "FORBIDDEN", message: "The global dispatch enforcement setting is not an organization's to read — name your own entity" });
 }
 
 /** A stored check the caller's organization may act on, or "not found". */
@@ -108,11 +119,22 @@ export const dispatchGateRouter = router({
       distribution: z.enum(["direct_assignment", "public_internal_bid", "invite_only", "selected_pool", "on_call", "emergency", "subcontractor_bid"]).optional(),
       roles: z.array(ROLE_DRAFT).max(40).optional(),
     }))
-    .mutation(async ({ ctx, input }) =>
-      createPosting({
+    .mutation(async ({ ctx, input }) => {
+      const posting = await createPosting({
         jobId: input.jobId, distribution: input.distribution, roles: input.roles,
         actorUserId: ctx.user.id, scope: await scopeOf(ctx.user.id),
-      })),
+      });
+      // v23.31 — the posting is the job's activation point: freeze its commercial basis now, so a
+      // later rate change never moves what this job is billed under. A job with no customer assigned
+      // is not refused here (dispatch owns that decision through the readiness gate); a basis that
+      // cannot be frozen (no governing sheet version, contract not active) is reported, not thrown.
+      // The scope is resolved after the posting exists; a caller whose money scope cannot be established
+      // gets the posting and a refused capture, never a lost posting.
+      const commercial = await commercialScope(ctx.user.id, financeScopeFor)
+        .then(scope => jobSnapshotCaptureIfReady(scope, { userId: ctx.user.id, roles: ((ctx as { roles?: readonly string[] }).roles ?? []) }, input.jobId))
+        .catch((e: unknown) => ({ outcome: "refused" as const, detail: e instanceof Error ? e.message : "commercial scope could not be established" }));
+      return { ...posting, commercial };
+    }),
 
   addRole: roleProcedure("dispatch.addRole")
     .input(z.object({ postingId: z.number().int().positive() }).and(ROLE_DRAFT))
@@ -323,7 +345,15 @@ export const dispatchGateRouter = router({
       // v22.18 — the recompute asks the same question the check asked, route
       // included. Without the route the facts would be a smaller set than the
       // ones the fingerprint was taken over, and every award would refuse.
-      const current = await composeReadiness({ operatorId: check.operatorId, unitId: check.unitId, trailerId: check.trailerId, jobId: posting?.jobId ?? null, routeApprovalRef: check.routeApprovalRef }, now);
+      // The work end is asked here, where it is known: the driver portfolio judges every mandatory
+      // credential through `endsAt`. The work end is not part of the fingerprint, so the check still matches.
+      const current = await composeReadiness({ operatorId: check.operatorId, unitId: check.unitId, trailerId: check.trailerId, jobId: posting?.jobId ?? null, routeApprovalRef: check.routeApprovalRef, workEndsAt: input.endsAt }, now);
+      // The one gate's own finding, not a second decision: a mandatory credential that lapses before
+      // the awarded work ends is a hard block, and no stored check made without the end can clear it.
+      const lapsing = current.driverReadiness.items.filter(i => i.enforcement === "mandatory" && i.state === "expires_during_job");
+      if (lapsing.length) {
+        return { ok: false as const, refusals: lapsing.map(i => `driver_${i.kind}_${i.code}_expires_during_job`), explanation: lapsing.map(i => i.detail).join("; ") };
+      }
       // C1a-3 — the grantor recorded at grant time. This used to read `requestedByUserId` into the grantor.
       const grantedOverrides = await loadGrantedOverrides(db, check.id);
       const roles = await listActiveUserRoleNames(ctx.user.id);
@@ -340,7 +370,7 @@ export const dispatchGateRouter = router({
     .input(z.object({ mode: z.enum(["off", "advisory", "enforced"]), reason: z.string().min(10).max(400), financialEntityId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
       const { db, scope } = await scopedDb(ctx.user.id);
-      await assertEnforcementScope(db, scope, input.financialEntityId ?? null);
+      await assertEnforcementScope(db, scope, input.financialEntityId ?? null, ctx.user.id, "write");
       const before = await loadEnforcementMode(input.financialEntityId ?? null);
       await db.insert(dispatchEnforcementSettings).values({ financialEntityId: input.financialEntityId ?? null, mode: input.mode, reason: input.reason, setByUserId: ctx.user.id, setAt: new Date() });
       return { scope: input.financialEntityId ?? "global", previous: before.mode, mode: input.mode };
@@ -350,7 +380,7 @@ export const dispatchGateRouter = router({
     .input(z.object({ financialEntityId: z.number().int().positive().nullable().optional() }).optional())
     .query(async ({ ctx, input }) => {
       const { db, scope } = await scopedDb(ctx.user.id);
-      await assertEnforcementScope(db, scope, input?.financialEntityId ?? null);
+      await assertEnforcementScope(db, scope, input?.financialEntityId ?? null, ctx.user.id, "read");
       return loadEnforcementMode(input?.financialEntityId ?? null);
     }),
 

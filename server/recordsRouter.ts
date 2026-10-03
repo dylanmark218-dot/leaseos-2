@@ -20,14 +20,30 @@
  */
 
 import { TRPCError } from "@trpc/server";
-import { actingScopeFor, evidenceInScope, incidentInScope, unitInScope, userInScope, workOrderInScope } from "./db";
+import { actingScopeFor, evidenceInScope, incidentInScope, jobInScope, unitInScope, userInScope, workOrderInScope, type TenantScope } from "./db";
+import { requireCallerUnits } from "./unitScope";
+import { orgRefOf } from "./fleetPortfolioService";
+import { actingRoleFor, mayReleaseHold } from "./_core/fleetPortfolio";
 import { z } from "zod";
 import { storageKeyInput } from "./_core/storageKey";
 import { adminProcedure, roleProcedure, router } from "./_core/trpc";
 import {
-  authorizeMechanicRelease,
+  authorize,
   authorizeRecordScope,
+  type Permission,
+  type RoleGrant,
 } from "./_core/recordsAuthorization";
+import {
+  fileVisibility,
+  folderCounts,
+  inFolder,
+  lifecycleStage,
+  matchRecord,
+  readCategoryFor,
+  typeFolderFor,
+  type FolderKey,
+} from "./recordFiles";
+import { storageGetSignedUrl } from "./storage";
 import {
   amendSealedEvidence,
   sealEvidence,
@@ -50,14 +66,20 @@ import {
   planEscalation,
   ROADSIDE_INSPECTION_SCOPE,
 } from "./_core/incidentReport";
-import { currentReleaseEvidenceFor, evaluateMechanicRelease } from "./_core/mechanicRelease";
+import { currentReleaseEvidenceFor } from "./_core/mechanicRelease";
 import * as svc from "./recordsService";
 import {
   bootstrapManagementRole,
   countActiveManagementGrants,
+  countPlatformWideGrants,
+  findUnresolvedLegacyGrant,
   grantUserRole,
+  holdsRoleInOrganization,
   listActiveUserRoles,
+  revokeGrantById,
+  revokeUserRole,
 } from "./db";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
 
 /** Company default policy until a verified statutory source is loaded. */
 const DEFAULT_POLICY: RetentionPolicy = {
@@ -74,6 +96,19 @@ const DEFAULT_POLICY: RetentionPolicy = {
 const forbidden = (message: string) =>
   new TRPCError({ code: "FORBIDDEN", message });
 
+/**
+ * The roles this surface may grant, revoke or resolve.
+ *
+ * B23.1A — one list rather than three copies of the same enum. The finance
+ * roles (bookkeeper, payroll_admin, tax_preparer, controller,
+ * external_accountant) are deliberately absent, as they were before: they are
+ * granted by whatever process owns the books, not from here.
+ */
+export const GRANTABLE_ROLES = [
+  "driver", "dispatcher", "mechanic", "shop_lead", "safety",
+  "office", "management", "hr", "legal", "auditor",
+] as const;
+
 const relationshipInput = z.object({
   entityType: z.enum([
     "unit", "trailer", "equipment", "job", "trip", "load", "manifest",
@@ -84,6 +119,41 @@ const relationshipInput = z.object({
   entityRef: z.string().max(64).optional(),
   role: z.string().max(60).optional(),
 });
+
+/** CP1.5 — a job the caller's organization may not see is not found, in the same words as a job that does not exist. */
+async function requireJobInScope(jobId: number | null | undefined, scope: TenantScope): Promise<void> {
+  if (jobId != null && !(await jobInScope(jobId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${jobId} not found` });
+}
+
+
+/**
+ * The evidence permissions the caller holds globally. Branch-confined grants
+ * do not reach here: a file listing spans the organization, so it cannot
+ * resolve one branch, and `authorize()` refuses to guess.
+ */
+const FILE_PERMISSIONS: readonly Permission[] = [
+  "evidence.read_own", "evidence.read_maintenance", "evidence.read_job_operational",
+  "evidence.read_safety_summary", "evidence.read_commercial", "evidence.read_personnel",
+  "evidence.read_legal", "evidence.verify", "evidence.export",
+];
+function heldFilePermissions(userId: number, grants: readonly RoleGrant[], organization: string | null): Set<Permission> {
+  // B23.1A — decided IN the organization the gate already resolved, like every
+  // other records decision: an organization-confined grant is judged against it,
+  // and a grant in another company answers nothing here.
+  return new Set(FILE_PERMISSIONS.filter(p => authorize({ userId, grants, permission: p, organization }).allowed));
+}
+
+const FOLDER_KEYS = [
+  "all", "field_tickets", "loads_disposal", "photos", "safety", "maintenance", "billing",
+  "personnel", "other", "needs_filing", "needs_review", "legal_hold", "drafts",
+] as const satisfies readonly FolderKey[];
+
+/** The operator relationship is the owner; the seal covers it, so the request cannot. */
+const ownerOperatorOf = (rels: ReadonlyArray<{ entityType: string; entityId: number | null }>) =>
+  rels.find(r => r.entityType === "operator")?.entityId ?? null;
+
+/** `evidenceAccessEvents.actorRole` is forty characters; a long role list is cut, not refused. */
+const actorRoleOf = (roles: readonly string[]) => roles.join(",").slice(0, 40) || "unknown";
 
 export const recordsRouter = router({
   evidence: router({
@@ -116,6 +186,10 @@ export const recordsRouter = router({
           userId: ctx.user.id,
           operatorId: me.operatorId,
           grants: await listActiveUserRoles(ctx.user.id),
+          // B23.1A — the organization the gate already decided in. Without it
+          // `authorize` cannot judge an organization-confined grant and refuses
+          // it, which after 0170 is every grant a real user holds.
+          organization: ctx.organization,
           permission: "evidence.seal",
           // v21.6 — a record is the capturer's until an operator relation says
           // otherwise: the user who uploaded it may seal it from a device that
@@ -234,6 +308,7 @@ export const recordsRouter = router({
             userId: ctx.user.id,
             operatorId: me.operatorId,
             grants,
+            organization: ctx.organization,   // B23.1A — see records.evidence.seal
             permission: "evidence.send",
             subject: { ownerOperatorId: s.ownerOperatorId },
           });
@@ -317,6 +392,7 @@ export const recordsRouter = router({
           userId: ctx.user.id,
           operatorId: me.operatorId,
           grants: await listActiveUserRoles(ctx.user.id),
+          organization: ctx.organization,   // B23.1A — see records.evidence.seal
           permission: "evidence.delete_device_copy",
           subject: { ownerOperatorId: subject.ownerOperatorId },
         });
@@ -461,6 +537,243 @@ export const recordsRouter = router({
       }),
   }),
 
+  /**
+   * Records & File Manager — Phase 1: browse, inspect, download.
+   *
+   * A folder is a saved view over record types and work queues; it is never
+   * the permission. Every record is decided on its own type's category read,
+   * or on `evidence.read_own` for the caller's own records, before any folder
+   * or search is applied — and a record out of reach is absent from the list
+   * and "not found" by id, never "forbidden", so its existence does not leak.
+   */
+  files: router({
+    list: roleProcedure("records.files.list")
+      .input(
+        z.object({
+          folder: z.enum(FOLDER_KEYS).default("all"),
+          query: z.string().max(200).default(""),
+          limit: z.number().int().min(1).max(500).default(200),
+        }).default({ folder: "all", query: "", limit: 200 })
+      )
+      .query(async ({ ctx, input }) => {
+        const scope = await actingScopeFor(ctx.user.id);
+        const me = await svc.resolveOperatorForUser(ctx.user.id);
+        const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id), ctx.organization);
+        // Read one past the window so "there is more" is a fact, not a guess.
+        const candidates = await svc.listFileCandidates(scope, 501);
+        const truncated = candidates.length > 500;
+
+        const visible = candidates.slice(0, 500).flatMap(c => {
+          const ownerOperatorId = ownerOperatorOf(c.relationships);
+          const isOwner =
+            (ownerOperatorId != null && ownerOperatorId === me.operatorId) || c.capturedBy === ctx.user.id;
+          const v = fileVisibility({ held, recordType: c.recordType, isOwner });
+          if (!v.visible) return [];
+          const entityRelationshipCount = c.relationships.filter(r => r.entityType !== "operator").length;
+          return [{ c, basis: v.basis, isOwner, entityRelationshipCount }];
+        });
+
+        const facts = visible.map(({ c, entityRelationshipCount }) => ({ ...c, entityRelationshipCount }));
+        const counts = folderCounts(facts);
+
+        const records = visible
+          .filter(({ c, entityRelationshipCount }) => inFolder(input.folder, { ...c, entityRelationshipCount }))
+          .map(v => ({ ...v, match: matchRecord(input.query, v.c) }))
+          .filter(v => v.match.matched)
+          .slice(0, input.limit)
+          .map(({ c, basis, isOwner, match }) => ({
+            id: c.id,
+            trackingNumber: c.trackingNumber,
+            title: c.title,
+            recordType: c.recordType,
+            category: c.category,
+            folder: typeFolderFor(c.recordType),
+            mimeType: c.mimeType,
+            hasContent: c.hasContent,
+            capturedAt: c.capturedAt,
+            status: c.status,
+            sealState: c.sealState,
+            version: c.currentVersion,
+            legalHold: c.legalHold,
+            lifecycle: lifecycleStage(c),
+            jobId: c.jobId,
+            relationships: c.relationships.filter(r => r.entityType !== "operator"),
+            officeRetainUntil: c.officeRetainUntil,
+            visibleBecause: basis,
+            mine: isOwner,
+            matchReasons: match.reasons,
+          }));
+
+        return {
+          records,
+          counts,
+          truncated,
+          reach: {
+            categories: FILE_PERMISSIONS.filter(p => p.startsWith("evidence.read_") && p !== "evidence.read_own" && held.has(p)),
+            own: held.has("evidence.read_own"),
+            canVerify: held.has("evidence.verify"),
+          },
+        };
+      }),
+
+    get: roleProcedure("records.files.get")
+      .input(z.object({ evidenceId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        const notFound = () => new TRPCError({ code: "NOT_FOUND", message: `Record ${input.evidenceId} not found` });
+        if (!(await evidenceInScope(input.evidenceId, await actingScopeFor(ctx.user.id)))) throw notFound();
+        const d = await svc.loadFileDetail(input.evidenceId);
+        if (!d) throw notFound();
+
+        const me = await svc.resolveOperatorForUser(ctx.user.id);
+        const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id), ctx.organization);
+        const ownerOperatorId = ownerOperatorOf(d.relationships);
+        const isOwner = (ownerOperatorId != null && ownerOperatorId === me.operatorId) || d.rec.capturedBy === ctx.user.id;
+        const v = fileVisibility({ held, recordType: d.rec.recordType, isOwner });
+        if (!v.visible) throw notFound();
+
+        await svc.recordEvidenceAccess({
+          evidenceRecordId: d.rec.id,
+          actorUserId: ctx.user.id,
+          actorRole: actorRoleOf(ctx.roles),
+          action: "viewed",
+          context: "records.files.get",
+        });
+
+        const currentSeal = d.seals.find(s => s.version === d.rec.currentVersion) ?? null;
+        const activeHolds = d.holds.filter(h => h.status === "active");
+        // Who looked at a record is itself sensitive. It is shown to those who
+        // answer for records — export or legal read — and named as withheld otherwise.
+        const mayReadAccess = held.has("evidence.export") || held.has("evidence.read_legal");
+
+        return {
+          id: d.rec.id,
+          trackingNumber: d.rec.trackingNumber ?? null,
+          title: d.rec.title,
+          recordType: d.rec.recordType,
+          category: d.rec.category,
+          readCategory: readCategoryFor(d.rec.recordType),
+          folder: typeFolderFor(d.rec.recordType),
+          mimeType: d.rec.mimeType ?? null,
+          hasContent: Boolean(d.rec.storageKey),
+          capturedAt: d.rec.capturedAt,
+          capturedBy: d.rec.capturedBy ?? null,
+          receivedAt: d.rec.createdAt,
+          latitude: d.rec.latitude ?? null,
+          longitude: d.rec.longitude ?? null,
+          status: d.rec.status,
+          sealState: d.rec.sealState,
+          version: d.rec.currentVersion,
+          notes: d.rec.notes ?? null,
+          lifecycle: lifecycleStage({
+            sealState: d.rec.sealState,
+            syncState: d.latestSync?.state ?? null,
+            sealVerification: currentSeal?.verificationResult ?? null,
+            officeReviewedAt: d.retention?.officeReviewedAt ?? null,
+          }),
+          integrity: currentSeal
+            ? {
+                contentHash: currentSeal.contentHash,
+                manifestHash: currentSeal.manifestHash,
+                algorithm: currentSeal.hashAlgorithm,
+                sealedAt: currentSeal.sealedAt,
+                sealedByUserId: currentSeal.sealedByUserId,
+                deviceId: currentSeal.deviceId ?? null,
+                verification: currentSeal.verificationResult,
+                serverVerifiedAt: currentSeal.serverVerifiedAt ?? null,
+              }
+            : null,
+          relationships: d.relationships.map(r => ({
+            entityType: r.entityType, entityId: r.entityId ?? null, entityRef: r.entityRef ?? null, role: r.role ?? null,
+          })),
+          versions: d.versions.map(x => ({
+            version: x.version,
+            current: x.version === d.rec.currentVersion,
+            supersedesVersion: x.supersedesVersion ?? null,
+            contentHash: x.contentHash,
+            amendmentReason: x.amendmentReason ?? null,
+            createdAt: x.createdAt,
+            hasContent: Boolean(x.storageKey) || (x.version === d.rec.currentVersion && Boolean(d.rec.storageKey)),
+          })),
+          retention: d.retention
+            ? {
+                basis: d.retention.retentionBasis ?? null,
+                months: d.retention.effectiveRetentionMonths ?? null,
+                officeRetainUntil: d.retention.officeRetainUntil ?? null,
+                deviceRetainUntil: d.retention.deviceRetainUntil ?? null,
+                officeReceivedAt: d.retention.officeReceivedAt ?? null,
+                officeIntegrityVerifiedAt: d.retention.officeIntegrityVerifiedAt ?? null,
+                officeReviewedAt: d.retention.officeReviewedAt ?? null,
+                deviceCopyDeletedAt: d.retention.deviceCopyDeletedAt ?? null,
+                // Company policy until a verified statutory source is loaded — said, not implied.
+                statutoryCompliance: "not asserted" as const,
+              }
+            : null,
+          legalHold: {
+            active: d.rec.legalHold || activeHolds.length > 0,
+            holds: d.holds.map(h => ({
+              holdNumber: h.holdNumber, matterRef: h.matterRef ?? null, status: h.status,
+              placedAt: h.placedAt, releasedAt: h.releasedAt ?? null,
+            })),
+          },
+          accessHistory: mayReadAccess
+            ? d.access.map(a => ({ action: a.action, actorUserId: a.actorUserId, actorRole: a.actorRole, context: a.context ?? null, occurredAt: a.occurredAt }))
+            : null,
+          visibleBecause: v.basis,
+          mine: isOwner,
+          actions: {
+            download: Boolean(d.rec.storageKey),
+            verify: held.has("evidence.verify") && d.rec.status === "needs_review",
+            // Evidence is never edited in place: a sealed record is amended into a new version.
+            amend: d.rec.sealState !== "draft",
+          },
+        };
+      }),
+
+    /**
+     * A short-lived signed URL, minted only after the same per-record decision
+     * as `get`, and logged as a download. Never a durable link.
+     */
+    download: roleProcedure("records.files.download")
+      .input(z.object({ evidenceId: z.number().int().positive(), version: z.number().int().positive().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const notFound = () => new TRPCError({ code: "NOT_FOUND", message: `Record ${input.evidenceId} not found` });
+        if (!(await evidenceInScope(input.evidenceId, await actingScopeFor(ctx.user.id)))) throw notFound();
+        const subject = await svc.loadEvidenceSubject(input.evidenceId);
+        if (!subject) throw notFound();
+
+        const me = await svc.resolveOperatorForUser(ctx.user.id);
+        const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id), ctx.organization);
+        const isOwner =
+          (subject.ownerOperatorId != null && subject.ownerOperatorId === me.operatorId) || subject.capturedBy === ctx.user.id;
+        if (!fileVisibility({ held, recordType: subject.recordType, isOwner }).visible) throw notFound();
+
+        const stored = await svc.storageKeyForVersion(subject.id, input.version ?? null);
+        if (!stored?.storageKey) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: input.version ? `Version ${input.version} has no stored file` : "This record has no stored file",
+          });
+        }
+
+        let url: string;
+        try {
+          url = await storageGetSignedUrl(stored.storageKey);
+        } catch {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "File storage is not reachable from this server" });
+        }
+
+        await svc.recordEvidenceAccess({
+          evidenceRecordId: subject.id,
+          actorUserId: ctx.user.id,
+          actorRole: actorRoleOf(ctx.roles),
+          action: "downloaded",
+          context: `records.files.download v${stored.version}`,
+        });
+
+        return { url, mimeType: stored.mimeType, version: stored.version };
+      }),
+  }),
+
   incident: router({
     capture: roleProcedure("records.incident.capture")
       .input(
@@ -492,6 +805,11 @@ export const recordsRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+        // CP1.5 (sweep #19) — an incident's organization is its job's, else its unit's. Both must be the
+        // caller's organization's, proved before anything is written: otherwise one organization could
+        // file an incident that moves to another, or that holds another organization's truck.
+        const scope = await requireCallerUnits(ctx.user.id, { unitId: input.unitId });
+        await requireJobInScope(input.jobId, scope);
         const me = await svc.resolveOperatorForUser(ctx.user.id);
         const facts = {
           incidentType: input.incidentType,
@@ -510,7 +828,7 @@ export const recordsRouter = router({
         const severity = deriveSeverity(facts);
         const plan = planEscalation(facts);
 
-        const id = await svc.insertIncident({
+        const written = await svc.insertIncidentHoldingUnit({
           incidentNumber: input.incidentNumber,
           incidentType: input.incidentType,
           severity,
@@ -532,13 +850,15 @@ export const recordsRouter = router({
           workStopped: input.workStopped,
           unitHeld: plan.holdUnit,
           escalationState: "captured",
-        });
+        }, { orgRef: orgRefOf(scope.tenantId), byUserId: ctx.user.id });
 
         return {
-          incidentId: id ? Number(id) : null,
+          incidentId: written?.id || null,
           incidentNumber: input.incidentNumber,
           severity,
           holdUnit: plan.holdUnit,
+          // The portfolio hold the plan placed on the unit — lifted by this incident's safety review.
+          holdRef: written?.holdRef ?? null,
           notifying: plan.targets,
           legalHoldRecommended: plan.legalHoldRecommended,
         };
@@ -585,11 +905,20 @@ export const recordsRouter = router({
       .mutation(async ({ ctx, input }) => {
       // P4.1: the incident must be in the caller's scope (through its job, unit or operator); otherwise it does not exist here.
       if (!(await incidentInScope(input.incidentNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "No such incident" });
-        await svc.markIncidentReviewed({
+        // CP1.5 — the safety review lifts the hold the incident placed. It is a hold release, so the
+        // hold's rules apply: a second person (never whoever captured the incident and so placed it),
+        // in a role that releases a hold of its type. Refused before anything is recorded.
+        const holds = await svc.activeIncidentHolds(input.incidentNumber);
+        for (const h of holds) {
+          const may = mayReleaseHold({ roles: ctx.roles, holdType: h.holdType, placedByUserId: h.placedByUserId, userId: ctx.user.id, status: h.status });
+          if (!may.allowed) throw new TRPCError({ code: "FORBIDDEN", message: `${may.reason}. Incident ${input.incidentNumber} is reviewed by someone else.` });
+        }
+        const { releasedHoldRefs } = await svc.markIncidentReviewed({
           incidentNumber: input.incidentNumber,
           userId: ctx.user.id,
+          releasing: holds.length ? { holds, byRole: actingRoleFor(ctx.roles, holds[0]!.holdType, "release")! } : undefined,
         });
-        return { reviewed: true };
+        return { reviewed: true, releasedHoldRefs };
       }),
   }),
 
@@ -612,7 +941,9 @@ export const recordsRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
       // P4.1: a near miss on a unit names a unit the caller may see.
-      if (input.unitId != null && !(await unitInScope(input.unitId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
+      // CP1.5 — and its job: an escalated near miss becomes an incident, whose organization is its job's.
+      const scope = await requireCallerUnits(ctx.user.id, { unitId: input.unitId });
+      await requireJobInScope(input.jobId, scope);
         const me = await svc.resolveOperatorForUser(ctx.user.id);
         const outcome = evaluateNearMiss({
           originalStatement: input.statement,
@@ -653,7 +984,7 @@ export const recordsRouter = router({
           dangerousGoodsInvolved: false,
           workStopped: input.workStopped,
         };
-        const incidentId = await svc.insertIncident({
+        const written = await svc.insertIncidentHoldingUnit({
           incidentNumber,
           incidentType: "injury",
           severity: deriveSeverity(facts),
@@ -669,12 +1000,12 @@ export const recordsRouter = router({
           workStopped: input.workStopped,
           unitHeld: planEscalation(facts).holdUnit,
           escalationState: "captured",
-        });
+        }, { orgRef: orgRefOf(scope.tenantId), byUserId: ctx.user.id });
 
-        if (incidentId) {
+        if (written?.id) {
           await svc.linkNearMissToIncident({
             nearMissNumber: input.nearMissNumber,
-            incidentId: Number(incidentId),
+            incidentId: written.id,
           });
         }
 
@@ -701,61 +1032,14 @@ export const recordsRouter = router({
       .mutation(async ({ ctx, input }) => {
       // P4.1: the work order's unit must be in the caller's scope.
       if (!(await workOrderInScope(input.workOrderId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderId} not found` });
-        const grants = await listActiveUserRoles(ctx.user.id);
-
-        // The signature must be the caller's own.
-        const auth = authorizeMechanicRelease({
-          userId: ctx.user.id,
-          grants,
-          technicianUserId: ctx.user.id,
+        // 0221 — retired (design S-1): there is one door that appends a release, `shop.workOrderRelease`.
+        // This one wrote no `resolvedDefectIds`, so a release made here never counted as evidence for the
+        // defect it repaired, and it could not see the work order's tasks. The scope check above stays, so
+        // another organization's work order is still "not found" rather than learning it exists.
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `records.maintenance.recordRelease is closed. Use shop.workOrderRelease for work order ${input.workOrderId} — it names the defects the release repaired, refuses while tasks are open, and is the one door a release comes through.`,
         });
-        if (!auth.allowed) throw forbidden(auth.detail ?? "Cannot record a release");
-
-        const wo = await svc.loadWorkOrderSubject(input.workOrderId);
-        if (!wo) throw new TRPCError({ code: "NOT_FOUND", message: "No such work order" });
-
-        const decision = evaluateMechanicRelease({
-          workOrderStatus: wo.status,
-          // Read from the defect, never from the request.
-          defectSeverity: wo.defectSeverity,
-          releaseType: input.releaseType,
-          restrictionDetail: input.restrictionDetail,
-          repairSummary: input.repairSummary,
-          testProcedure: input.testProcedure,
-          testResult: input.testResult,
-          roadTestPerformed: input.roadTestPerformed,
-          technicianUserId: ctx.user.id,
-          technicianIdentifier: input.technicianIdentifier,
-        });
-
-        if (!decision.valid) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: decision.blockers.map(b => b.label).join("; "),
-          });
-        }
-
-        await svc.appendWorkOrderRelease({
-          workOrderId: wo.id,
-          unitId: wo.unitId,
-          releaseType: input.releaseType,
-          restrictionDetail: input.restrictionDetail ?? null,
-          repairSummary: input.repairSummary,
-          testProcedure: input.testProcedure ?? null,
-          testResult: input.testResult ?? null,
-          roadTestPerformed: input.roadTestPerformed,
-          roadTestNotes: input.roadTestNotes ?? null,
-          technicianUserId: ctx.user.id,
-          technicianIdentifier: input.technicianIdentifier,
-          releasedAt: new Date(),
-        });
-
-        return {
-          released: true,
-          restricted: decision.restricted,
-          unitId: wo.unitId,
-          dispatchRecalculationRequired: true,
-        };
       }),
 
     /**
@@ -829,6 +1113,7 @@ export const recordsRouter = router({
         const changed = await svc.resolveMaintenanceDefect({
           defectId: defect.id, resolvedByUserId: ctx.user.id,
           resolvedByReleaseId: evidenceId, note: input.note, at: new Date(),
+          actorRole: ctx.roles.find(r => r === "mechanic" || r === "shop_lead") ?? ctx.roles[0] ?? "unknown",
         });
         if (!changed) {
           throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Defect ${defect.id} is already resolved` });
@@ -997,40 +1282,219 @@ export const recordsRouter = router({
         if (!result.ok) {
           throw new TRPCError({ code: "FORBIDDEN", message: result.reason });
         }
-        return { bootstrapped: true, targetUserId: input.targetUserId };
+        // B23.1A — the organization the grant landed in is part of the answer.
+        // A bootstrap that does not say which company it opened is a bootstrap
+        // nobody can check afterwards.
+        return {
+          bootstrapped: true,
+          targetUserId: input.targetUserId,
+          organization: result.organization,
+        };
       }),
 
-    /** Whether the bootstrap path is still open. Safe for an admin to read. */
+    /**
+     * Whether the bootstrap path is still open, and whether anybody holds
+     * cross-tenant authority. Safe for a platform admin to read.
+     *
+     * B23.1A — "open" is now a per-organization question, so this reports the
+     * historical single tenant, which is the only organization a deployment
+     * with no `organizations` rows has. A named company's own bootstrap state
+     * is answered when that company's first administrator is appointed, and the
+     * grant that appoints them is scoped to them.
+     */
     bootstrapStatus: adminProcedure.query(async () => {
-      const active = await countActiveManagementGrants();
-      return { open: active === 0, activeManagementGrants: active };
+      const active = await countActiveManagementGrants(SINGLE_TENANT_ID);
+      const platformWide = await countPlatformWideGrants();
+      return {
+        open: active === 0,
+        activeManagementGrants: active,
+        // Should be zero forever: 0170's backfill creates none and no ordinary
+        // path writes one. A non-zero value is worth an operator's attention.
+        platformWideGrants: platformWide,
+      };
     }),
 
     grant: roleProcedure("records.roles.grant")
       .input(
         z.object({
           targetUserId: z.number().int(),
-          role: z.enum([
-            "driver", "dispatcher", "mechanic", "shop_lead", "safety",
-            "office", "management", "hr", "legal", "auditor",
-          ]),
+          role: z.enum(GRANTABLE_ROLES),
           scopeRef: z.string().max(64).optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
-        // P4.1: a role is granted only to a person in the caller's scope.
-        if (!(await userInScope(input.targetUserId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.targetUserId} not found` });
-      // P4.1: a role is granted only to a person in the caller's scope.
-      if (!(await userInScope(input.targetUserId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.targetUserId} not found` });
+        // B23.1 — the organization comes from the ACTOR's verified acting
+        // scope, never from the request. An administrator cannot name the
+        // company a grant lands in, so "I administer somewhere, therefore let
+        // me grant here" has no input to travel on. This is the same rule
+        // `resolveActingScope` applies to every tenant-scoped write.
+        const acting = await actingScopeFor(ctx.user.id);
+
+        // P4.1: a role is granted only to a person in the caller's scope —
+        // which, after B23.1, means a person who is a live member of the same
+        // organization the grant will be written into.
+        if (!(await userInScope(input.targetUserId, acting))) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.targetUserId} not found` });
+        }
+
         const id = await grantUserRole({
           userId: input.targetUserId,
           role: input.role,
-          scopeType: input.scopeRef ? "branch" : "global",
+          scopeType: input.scopeRef ? "branch" : "organization",
+          // For a deployment with no organizations this is SINGLE_TENANT_ID,
+          // which is exactly what `resolveActingScope` resolves such callers
+          // to — so a grant written before organizations existed and one
+          // written now match the same acting scope.
+          orgRef: acting.tenantId,
           scopeRef: input.scopeRef ?? null,
           grantedByUserId: ctx.user.id,
           grantedAt: new Date(),
         });
-        return { granted: true, assignmentId: id ?? null };
+        return { granted: true, assignmentId: id ?? null, organization: acting.tenantId };
+      }),
+
+    /**
+     * B23.1 — take a role away, in one organization.
+     *
+     * There was no revoke procedure at all before this: the only path that
+     * revoked anything was offboarding, and it revoked every grant the account
+     * held anywhere. An administrator who wanted to stop one person driving
+     * had no way to do it that did not also stop them wrenching for a
+     * different company.
+     *
+     * Scoped exactly like the grant: the organization is the actor's own, the
+     * target must be a member of it, and a grant issued by another company is
+     * simply not found here.
+     */
+    revoke: roleProcedure("records.roles.revoke")
+      .input(
+        z.object({
+          targetUserId: z.number().int(),
+          role: z.enum(GRANTABLE_ROLES),
+          reason: z.string().min(3).max(1000),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const acting = await actingScopeFor(ctx.user.id);
+        if (!(await userInScope(input.targetUserId, acting))) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `User ${input.targetUserId} not found` });
+        }
+        const revoked = await revokeUserRole({
+          userId: input.targetUserId,
+          role: input.role,
+          organization: acting.tenantId,
+          revokedByUserId: ctx.user.id,
+          reason: input.reason,
+        });
+        if (revoked === 0) {
+          // Not "already revoked": from here, a grant this organization did not
+          // issue does not exist. Saying so would confirm the person holds it
+          // somewhere else.
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `No active ${input.role} grant issued by this organization`,
+          });
+        }
+        return { revoked, organization: acting.tenantId };
+      }),
+
+    /**
+     * B23.1A — resolve one grant migration 0170 refused to attribute.
+     *
+     * 0170 quarantined every grant whose holder already belonged to more than
+     * one company, because attributing it would have handed real authority to
+     * whichever company the migration guessed. Those people have lost access
+     * until somebody who actually knows says where the grant belongs. This is
+     * the door for saying it.
+     *
+     * It is deliberately NOT "set the organization on that row". The row is
+     * history — it records what was true before organization scope existed —
+     * so resolution issues a NEW, properly scoped grant and revokes the legacy
+     * one with a reason pointing at its replacement. The before and the after
+     * both stay answerable.
+     *
+     * The organization is the ACTOR's, never the request's: an administrator of
+     * ABC resolving a quarantined grant resolves it into ABC, which is the only
+     * company they are entitled to speak for. Resolving it into XYZ is not a
+     * permission they are missing; it is not a thing this procedure can do.
+     *
+     * Repeatable without being dangerous: the legacy row is found only while it
+     * is still quarantined and live, so a second call with the same id finds
+     * nothing and says so rather than issuing a second grant.
+     */
+    resolveLegacy: roleProcedure("records.roles.resolveLegacy")
+      .input(
+        z.object({
+          legacyGrantId: z.number().int().positive(),
+          reason: z.string().min(3).max(1000),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const acting = await actingScopeFor(ctx.user.id);
+
+        const legacy = await findUnresolvedLegacyGrant(input.legacyGrantId);
+        if (!legacy) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "No unresolved legacy grant with that identifier",
+          });
+        }
+
+        // The holder must be someone this organization actually employs. A
+        // quarantined grant belonged to a person in several companies; only the
+        // ones they are still a live member of may claim it.
+        if (!(await userInScope(legacy.userId, acting))) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "No unresolved legacy grant with that identifier",
+          });
+        }
+
+        // Grantable here means grantable at all: the same list `roles.grant`
+        // accepts. A legacy row naming a role outside it is not something to
+        // reissue quietly.
+        if (!GRANTABLE_ROLES.includes(legacy.role as (typeof GRANTABLE_ROLES)[number])) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Role "${legacy.role}" cannot be granted through this surface; revoke the legacy grant instead`,
+          });
+        }
+
+        // Already holds it here — the legacy row is simply redundant. Retire it
+        // rather than failing on the uniqueness key, and say which happened.
+        const already = await holdsRoleInOrganization({
+          userId: legacy.userId,
+          role: legacy.role,
+          organization: acting.tenantId,
+        });
+
+        let assignmentId: number | undefined;
+        if (!already) {
+          assignmentId = await grantUserRole({
+            userId: legacy.userId,
+            role: legacy.role as never,
+            scopeType: "organization",
+            orgRef: acting.tenantId,
+            grantedByUserId: ctx.user.id,
+            grantedAt: new Date(),
+          });
+        }
+
+        await revokeGrantById({
+          grantId: legacy.id,
+          revokedByUserId: ctx.user.id,
+          // The revoke reason is where the two rows are tied together, so an
+          // access review a year from now can follow one to the other.
+          reason: `resolved into ${acting.tenantId}${assignmentId ? ` as grant ${assignmentId}` : " (already held)"} — ${input.reason}`,
+        });
+
+        return {
+          resolved: true,
+          organization: acting.tenantId,
+          role: legacy.role,
+          assignmentId: assignmentId ?? null,
+          alreadyHeld: already,
+        };
       }),
   }),
 });

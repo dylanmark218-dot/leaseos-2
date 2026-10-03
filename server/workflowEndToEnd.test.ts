@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import mysql from "mysql2/promise";
 import {
   applyEventConsequences,
@@ -16,6 +16,12 @@ import {
 } from "./_core/domainEmitters";
 import { startDrainWorker } from "./_core/drainWorker";
 
+// A unit id no test creates. These rows only need a unitId to satisfy the column;
+// the literal 1 used here before collided with whichever suite happened to create
+// the first unit in a fresh database, handing that suite's truck open critical
+// defects (complianceReadinessC1a failed on exactly that, order-dependently).
+const NO_SUCH_UNIT = 2_000_000_000;
+
 /**
  * The chain end to end.
  *
@@ -32,11 +38,18 @@ let pool: mysql.Pool & PoolLike;
 const uid = (p: string) =>
   `${p}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 
+/** Every event this file emits carries this correlation id, so a drain can wait for exactly these. */
+const RUN = `e2e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
 const ctx = (): EmitContext => ({
   tenantId: "T1",
   branchId: "GP",
   actor: { source: "human", userId: "u1", role: "driver" },
+  correlationId: RUN,
 });
+
+// A drain may wait up to 15 s for another suite's worker to finish this file's event.
+vi.setConfig({ testTimeout: 30_000 });
 
 beforeAll(async () => {
   if (!URL) return;
@@ -65,7 +78,24 @@ async function drainAll(workerId = "test-worker") {
     idleIntervalMs: 5,
     batchSize: 10,
   });
+  // Run until this file's own events are processed (or dead-lettered, or deferred to a later
+  // retry), not for a fixed window and not until nothing is merely *unclaimed*. The outbox is shared
+  // by every database suite in the run, and other suites run drain workers of their own: one of them
+  // may claim this file's event, and the wait must last until it is processed, not just taken. Other
+  // suites' events are not waited for — some are deliberately left pending. Bounded, so a stuck
+  // worker cannot hang the suite; the assertions after it still decide the test.
+  const deadline = Date.now() + 15_000;
   await new Promise(r => setTimeout(r, 300));
+  while (Date.now() < deadline) {
+    const [rows] = await pool.query<mysql.RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM domainEventOutbox
+        WHERE correlationId = ? AND processedAt IS NULL AND deadLetteredAt IS NULL
+          AND (retryAvailableAt IS NULL OR retryAvailableAt <= NOW())`,
+      [RUN]
+    );
+    if (Number(rows[0]!.n) === 0) break;
+    await new Promise(r => setTimeout(r, 50));
+  }
   w.stop();
   return w.done;
 }
@@ -94,7 +124,7 @@ d("end to end: critical defect", () => {
     await conn.beginTransaction();
     await conn.execute(
       "INSERT INTO maintenanceDefects (unitId, title, severity, status, reportedAt) VALUES (?,?,?,?,NOW())",
-      [1, `Grinding on start-up — ${unit}`, "critical", "open"]
+      [NO_SUCH_UNIT, `Grinding on start-up — ${unit}`, "critical", "open"]
     );
     await emitCriticalDefectOpened(conn as never, ctx(), {
       unitId: unit,

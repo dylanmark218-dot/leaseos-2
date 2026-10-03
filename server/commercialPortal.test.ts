@@ -102,7 +102,7 @@ describe("the external gate is wired like the role gate", () => {
     // which is the most consequential thing this gate does, and it was the one
     // credential operation outside the set while `portal.credential.manage` —
     // governing the lesser token rotation — was already inside it.
-    expect([...EXTERNAL_SENSITIVE_PERMISSIONS].sort()).toEqual(["portal.credential.manage", "portal.customer.adjust", "portal.customer.commit", "portal.customer.decide", "portal.customer.dispute", "portal.customer.documents", "portal.customer.sign", "portal.facility.submit", "portal.invitation.accept", "portal.vendor.submit"]);
+    expect([...EXTERNAL_SENSITIVE_PERMISSIONS].sort()).toEqual(["portal.attest.sign", "portal.credential.manage", "portal.customer.adjust", "portal.customer.commit", "portal.customer.decide", "portal.customer.dispute", "portal.customer.documents", "portal.customer.sign", "portal.facility.submit", "portal.invitation.accept", "portal.vendor.submit"]);
   });
 
   it("keeps the inside roles that touch the outside narrow", () => {
@@ -128,7 +128,7 @@ d("outside, in", () => {
   it("invites a customer, shows them only their account, refuses a dispute on another's invoice, and blocks an invoice the account requires a PO for", async () => {
     const controller = await withRole("controller");
     const bookkeeper = await withRole("bookkeeper");
-    const entityId = 1_800_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const acctRef = key("CUST").slice(0, 40), otherRef = key("CUST").slice(0, 40);
     const [a] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, 'Acme Energy')", [acctRef, entityId]);
     const [o] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO customerAccounts (accountRef, financialEntityId, name) VALUES (?, ?, 'Bravo Oil')", [otherRef, entityId]);
@@ -191,7 +191,7 @@ d("outside, in", () => {
   it("lets a vendor submit a bill once, lets the office accept it into the four-way match, and shows the vendor its stage", async () => {
     const controller = await withRole("controller");
     const office = await withRole("office");
-    const entityId = 1_900_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const [v] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO vendors (name, category, paymentTermsDays) VALUES (?, 'tires', 30)", [key("V").slice(0, 60)]);
     const inv = await callerFor(controller).portalAdmin.identityInvite({ kind: "vendor", vendorId: Number(v.insertId), email: "ar@tires.example", displayName: "Tire Co AR" });
     const acc0 = await portalCaller(inv.invitationToken).portal.invitationAccept(); const invToken = acc0.token;

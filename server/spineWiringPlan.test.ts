@@ -103,13 +103,21 @@ describe("the reachability census is consistent with it", () => {
 
   it("names only engines the census accounts for, declared or reached", () => {
     const census = readFileSync(CENSUS, "utf8");
-    const production = walk("server", n => /\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n))
-      .filter(p => !p.includes("/_core/"))
-      .map(p => readFileSync(p, "utf8"))
-      .join("\n");
+    const files = walk("server", n => /\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n));
+    const production = files.filter(p => !p.includes("/_core/")).map(p => readFileSync(p, "utf8")).join("\n");
+    // Reached the way the census counts it: imported by production code outside _core, directly
+    // or through another _core module that is. A spine engine wired behind a _core adapter is wired.
+    const coreImports = new Map(files.filter(p => p.includes("/_core/")).map(p => [
+      p.replace(/^.*\/_core\//, "").replace(/\.tsx?$/, ""),
+      Array.from(readFileSync(p, "utf8").matchAll(/from\s+["']\.\/([A-Za-z0-9_/]+)["']/g)).map(m => m[1]!),
+    ]));
+    const reachedSet = new Set(Array.from(production.matchAll(/_core\/([A-Za-z0-9_/]+)["']/g)).map(m => m[1]!));
+    for (const queue = Array.from(reachedSet); queue.length;) {
+      for (const next of coreImports.get(queue.pop()!) ?? []) if (!reachedSet.has(next)) { reachedSet.add(next); queue.push(next); }
+    }
     for (const name of spineEngines()) {
       const declared = new RegExp(`^\\s*"?${name}"?:`, "m").test(census);
-      const reached = new RegExp(`_core/${name}["']`).test(production);
+      const reached = reachedSet.has(name);
       expect(declared || reached, `${name} is on the spine, and the census neither declares nor reaches it`).toBe(true);
     }
   });
