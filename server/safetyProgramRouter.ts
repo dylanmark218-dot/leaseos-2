@@ -21,12 +21,15 @@ import { roleProcedure, router } from "./_core/trpc";
 import { getDb, ownershipScopeWhere } from "./db";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { financialEntities } from "../drizzle/schema";
+import { effectiveQualifications } from "./qualificationReads";
+import { complianceDocumentValidity } from "./_core/complianceDocumentValidity";
+import { assertEntityInScope } from "./_core/entityScope";
 import {
-  academyQualifications, clientPolicyOverlays, companyPolicies, companySafetyPrograms, companyTrainingMatrix, complianceDocuments,
+  clientPolicyOverlays, companyPolicies, companySafetyPrograms, companyTrainingMatrix, complianceDocuments,
   correctiveActions, incidentActions, incidentReports, inspections, nearMissReports, operators, organizationWorkers,
   policyAcknowledgements, policyRegulatoryLinks, policyReviews, policyTemplates, policyVersions, regulatoryReferences,
   safetyEvents, safetyProgramEvents, safetyProgramModules, tailgateMeetings, trainingRecords, trainingRequirements, units,
-  userRoleAssignments, workerQualifications,
+  userRoleAssignments,
 } from "../drizzle/schema";
 import {
   POLICY_TEMPLATE_SEEDS, REGULATORY_REFERENCE_SEEDS, SAFETY_PACKS, SAFETY_PROGRAM_MODULES, moduleByKey,
@@ -113,17 +116,28 @@ async function workforce(db: Db, orgRef: string | null): Promise<{ userId: numbe
   return Array.from(seen, ([userId, positionCode]) => ({ userId, positionCode }));
 }
 
-async function holdingsFor(db: Db, userIds: number[]): Promise<Map<number, MatrixHolding[]>> {
+/**
+ * What each person holds, for the matrix. Qualifications are read ONLY through the canonical adapter
+ * (`effectiveQualifications`), which applies the Academy-over-legacy rule, the evidence-document check and
+ * the organization boundary; this function maps its verdict and never re-decides it. Company training
+ * records are read directly: they are not a qualification store the adapter covers.
+ */
+async function holdingsFor(db: Db, orgRef: string | null, userIds: number[], codes: readonly string[], at: Date): Promise<Map<number, MatrixHolding[]>> {
   const out = new Map<number, MatrixHolding[]>();
   if (userIds.length === 0) return out;
   const add = (u: number, h: MatrixHolding) => { const a = out.get(u) ?? []; a.push(h); out.set(u, a); };
-  for (const q of await db.select().from(workerQualifications).where(inArray(workerQualifications.userId, userIds))) {
-    if (q.verificationState === "rejected" || q.verificationState === "superseded") continue;
-    add(q.userId, { kind: "worker_qualification", ref: q.holdingRef, code: q.code, issuedAt: q.issuedAt, expiresAt: q.expiresAt, verified: q.verificationState === "verified" });
-  }
-  for (const q of await db.select().from(academyQualifications).where(inArray(academyQualifications.userId, userIds))) {
-    if (q.status === "revoked" || q.status === "rejected") continue;
-    add(q.userId, { kind: "academy_qualification", ref: q.qualificationRef, code: q.qualificationCode, issuedAt: q.validFrom, expiresAt: q.expiresAt, verified: q.status === "current" || q.status === "expired" });
+  const tenantId = orgRef ?? SINGLE_TENANT_ID;
+  if (codes.length) for (const userId of userIds) {
+    for (const q of await effectiveQualifications(db, { tenantId, userId, at, codes })) {
+      if (q.source == null || q.state === "none" || q.state === "rejected") continue;
+      add(userId, {
+        kind: q.source === "ACADEMY_QUALIFICATION" ? "academy_qualification" : "worker_qualification",
+        ref: q.sourceRef ?? q.code, code: q.code, issuedAt: q.issuedAt,
+        // An expired verdict is expired even when the source carries no end date: the engine reads it from expiresAt.
+        expiresAt: q.state === "expired" ? (q.expiresAt ?? at) : q.expiresAt,
+        verified: q.state === "expired" ? true : q.held,
+      });
+    }
   }
   for (const t of await db.select().from(trainingRecords).where(inArray(trainingRecords.userId, userIds))) {
     if (t.verificationStatus === "rejected") continue;
@@ -280,6 +294,8 @@ export const safetyProgramRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const orgRef = await orgOf(db, ctx.user.id);
+      // A program may name the company's financial entity; the entity must be one the caller's organization owns.
+      if (input.financialEntityId != null) await assertEntityInScope(db as never, input.financialEntityId, tenantOf(orgRef));
       const profile = input.profile as OperationsProfile;
       const modules = input.moduleKeys?.length ? input.moduleKeys : recommendedModules(profile);
       const assembly = assembleProgram({ packKeys: input.packKeys, moduleKeys: modules }, await templatesFor(db, orgRef));
@@ -738,9 +754,10 @@ export const safetyProgramRouter = router({
       const reqRows = await db.select().from(trainingRequirements).where(and(inArray(trainingRequirements.scopeKey, [scopeKeyOf(orgRef), "platform"]), eq(trainingRequirements.active, true)));
       const requirements: MatrixRequirement[] = reqRows.map(r => ({ requirementRef: r.requirementRef, positionCode: r.positionCode, requirementKind: r.requirementKind, qualificationCode: r.qualificationCode, policyRef: r.policyRef, renewalMonths: r.renewalMonths, warnDaysBeforeExpiry: r.warnDaysBeforeExpiry, enforcement: r.enforcement, title: r.title }));
       const ids = people.map(w => w.userId);
-      const [holdings, acks] = await Promise.all([holdingsFor(db, ids), acknowledgementsFor(db, orgRef, ids)]);
-      const workers: MatrixWorker[] = people.map(w => ({ userId: w.userId, positionCode: w.positionCode, holdings: holdings.get(w.userId) ?? [], acknowledgements: acks.get(w.userId) ?? [] }));
       const now = new Date();
+      const codes = Array.from(new Set(requirements.map(r => r.qualificationCode).filter((c): c is string => !!c)));
+      const [holdings, acks] = await Promise.all([holdingsFor(db, orgRef, ids, codes, now), acknowledgementsFor(db, orgRef, ids)]);
+      const workers: MatrixWorker[] = people.map(w => ({ userId: w.userId, positionCode: w.positionCode, holdings: holdings.get(w.userId) ?? [], acknowledgements: acks.get(w.userId) ?? [] }));
       const rows = trainingMatrixFor(requirements, workers, now);
       const computationRef = ref("TMX");
       await db.update(companyTrainingMatrix).set({ current: false }).where(and(scopeWhere(companyTrainingMatrix.orgRef, orgRef), eq(companyTrainingMatrix.current, true)));
@@ -870,13 +887,16 @@ export const safetyProgramRouter = router({
     const program = await activeProgram(db, orgRef);
     const policies = await db.select().from(companyPolicies).where(and(eq(companyPolicies.scopeKey, scopeKeyOf(orgRef)), eq(companyPolicies.status, "active")));
     const approved = policies.filter(p => p.currentVersionId != null);
+    // Documents are judged by the canonical verdict (complianceDocumentValidity), never by a date comparison here.
     const carrierDoc = async (docType: string) => {
-      if (!program?.financialEntityId) return { present: false, expiresAt: null };
-      const [d] = await db.select({ expiresAt: complianceDocuments.expiresAt }).from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, "carrier"), eq(complianceDocuments.ownerId, program.financialEntityId), eq(complianceDocuments.docType, docType), eq(complianceDocuments.verificationStatus, "verified"))).orderBy(desc(complianceDocuments.expiresAt)).limit(1);
-      return { present: !!d, expiresAt: d?.expiresAt ?? null };
+      if (!program?.financialEntityId) return { present: false, expiresAt: null, note: "no financial entity on the program" };
+      const rows = await db.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, "carrier"), eq(complianceDocuments.ownerId, program.financialEntityId), eq(complianceDocuments.docType, docType)));
+      const v = complianceDocumentValidity(rows, docType, now);
+      return { present: v.state === "in_force" || v.state === "expiring" || v.state === "expired", expiresAt: v.expiresAt, note: v.state === "unverified" ? "on file, not verified" : undefined };
     };
     const unitIds = (await db.select({ id: units.id }).from(units).where(ownershipScopeWhere("unit", units.id, scope))).map(u => u.id);
-    const cvipCurrent = unitIds.length ? await count(db, db.select({ n: sql`COUNT(DISTINCT ${complianceDocuments.ownerId})` }).from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, "unit"), inArray(complianceDocuments.ownerId, unitIds), eq(complianceDocuments.docType, "cvip_certificate"), eq(complianceDocuments.verificationStatus, "verified"), sql`(${complianceDocuments.expiresAt} IS NULL OR ${complianceDocuments.expiresAt} > NOW())`))) : 0;
+    const cvipRows = unitIds.length ? await db.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, "unit"), inArray(complianceDocuments.ownerId, unitIds), eq(complianceDocuments.docType, "cvip_certificate"))) : [];
+    const cvipCurrent = unitIds.filter(id => { const st = complianceDocumentValidity(cvipRows.filter(r => r.ownerId === id), "cvip_certificate", now).state; return st === "in_force" || st === "expiring"; }).length;
     const driversN = await count(db, db.select({ n: sql`COUNT(*)` }).from(operators).where(ownershipScopeWhere("operator", operators.id, scope)));
     const declarationsPolicy = approved.find(p => p.templateKey === "vendor_prequalification.signed_declarations");
     const declarationsSigned = declarationsPolicy ? await count(db, db.select({ n: sql`COUNT(*)` }).from(policyAcknowledgements).where(and(eq(policyAcknowledgements.policyVersionId, declarationsPolicy.currentVersionId!), sql`${policyAcknowledgements.signedAt} IS NOT NULL`))) : 0;

@@ -393,13 +393,16 @@ export function corReadiness(e: CorEvidence): { overall: CorElementStatus; eleme
 
 /* ---------------- vendor compliance package ---------------- */
 
+/** A carrier document as the canonical verdict reported it; `note` explains an absence (for example "on file, not verified"). */
+export type DatedDocument = { present: boolean; expiresAt: Date | null; note?: string };
+
 export type VendorPackageInputs = {
   companyProfile: boolean;
   safetyManual: { activePolicies: number; assembled: boolean };
-  corOrSecor: { present: boolean; expiresAt: Date | null };
-  wcbClearance: { present: boolean; expiresAt: Date | null };
-  insurance: { present: boolean; expiresAt: Date | null };
-  safetyFitnessCertificate: { present: boolean; expiresAt: Date | null };
+  corOrSecor: DatedDocument;
+  wcbClearance: DatedDocument;
+  insurance: DatedDocument;
+  safetyFitnessCertificate: DatedDocument;
   trainingMatrix: ReturnType<typeof matrixSummary> | null;
   driverQualifications: number;
   fleetList: number;
@@ -416,10 +419,10 @@ export type ManifestSection = { key: string; title: string; present: boolean; de
 
 /** The package is compiled from records the program already holds. A missing section is named, never papered over. */
 export function vendorPackageManifest(i: VendorPackageInputs): { sections: ManifestSection[]; complete: boolean; missing: string[]; manifestHash: string } {
-  const dated = (x: { present: boolean; expiresAt: Date | null }, label: string): ManifestSection => ({
+  const dated = (x: DatedDocument, label: string): ManifestSection => ({
     key: label.toLowerCase().replace(/[^a-z0-9]+/g, "_"), title: label,
     present: x.present && (!x.expiresAt || x.expiresAt.getTime() > i.now.getTime()),
-    detail: !x.present ? "not on file" : x.expiresAt && x.expiresAt.getTime() <= i.now.getTime() ? `expired ${x.expiresAt.toISOString().slice(0, 10)}` : x.expiresAt ? `valid to ${x.expiresAt.toISOString().slice(0, 10)}` : "on file",
+    detail: !x.present ? (x.note ?? "not on file") : x.expiresAt && x.expiresAt.getTime() <= i.now.getTime() ? `expired ${x.expiresAt.toISOString().slice(0, 10)}` : x.expiresAt ? `valid to ${x.expiresAt.toISOString().slice(0, 10)}` : "on file",
   });
   const m = i.trainingMatrix;
   const sections: ManifestSection[] = [

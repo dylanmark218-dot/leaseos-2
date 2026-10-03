@@ -2,6 +2,12 @@
 
 Status: **complete on branch `claude/safety-compliance-program-builder-2qnty0`** (PR #99), with main (`48a64e1`) merged in.
 
+**Integrating with main.** Merging main brought four guards this branch had not met, and the router now uses
+the paths they require: qualifications through `effectiveQualifications`; carrier and unit documents through
+`complianceDocumentValidity` (registered as a known reader); the program's financial entity proved with
+`assertEntityInScope`; and the database suite draws user ids from its own band (228,000,000), clear of every
+other suite's.
+
 **Migration slot.** Drafted as `0182`. On merging main, document control had claimed `0182` and main's head was
 `0227`, so the migration moved to `0228` — the first slot above every slot in use on main and all 131 remote
 branches. It creates only new tables and depends on nothing after `0174`. The register and
@@ -153,11 +159,13 @@ Operational procedure map: +38 (634 → 672 on the branch; 820 → **858** after
 
 ## Evidence the matrix and readiness read
 
-Training matrix holdings: `workerQualifications` (verified = `verificationState = verified`),
-`academyQualifications` (verified = `current` or `expired`; `pending` is pending verification),
-`trainingRecords` (verified = `verificationStatus = verified`), and `policyAcknowledgements` against each
-policy's current version. Workforce: `organizationWorkers` (active, with a user) for an organization; in the
-single tenant, everyone holding an active role.
+Training matrix holdings: qualifications come only through main's canonical adapter,
+`effectiveQualifications` (`server/qualificationReads.ts`), which applies the Academy-over-legacy rule, the
+evidence-document check and the organization boundary; the matrix maps its verdict (held → verified;
+expired → expired; unverified or pending → pending verification; none or rejected → not held) and never
+re-decides it. Company `trainingRecords` are read directly (verified = `verificationStatus = verified`), and
+`policyAcknowledgements` against each policy's current version. Workforce: `organizationWorkers` (active, with
+a user) for an organization; in the single tenant, everyone holding an active role.
 
 COR readiness interim sources, named in the response (`evidenceSources`): hazard assessments =
 `tailgateMeetings` (90 days); safety meetings = `safetyEvents` typed `safety_meeting` / `toolbox_talk` (90
@@ -168,9 +176,13 @@ rows with no job are not counted for a multi-tenant organization. A dedicated ha
 a drill record are follow-ups, not this checkpoint.
 
 Vendor package documents: `complianceDocuments` on the program's `financialEntityId` (`cor_certificate`,
-`wcb_clearance`, `insurance_proof`, `safety_fitness_certificate`), `cvip_certificate` per unit in scope.
-`cor_certificate` is not yet a seeded requirement doc type; the manifest names it as missing until one is filed.
-The PDF/ZIP archive is not built here — the manifest is.
+`wcb_clearance`, `insurance_proof`, `safety_fitness_certificate`) and `cvip_certificate` per unit in scope, each
+judged by main's canonical `complianceDocumentValidity` rather than a date comparison here; the router is
+registered as a known `complianceDocuments` reader in `server/complianceValidityGuard.test.ts`. `programSet`
+proves a named financial entity belongs to the caller's organization with `assertEntityInScope` before storing
+it, so the manifest only ever reads the caller's own entity. `cor_certificate` is not yet a seeded requirement
+doc type; the manifest names it as missing until one is filed. The PDF/ZIP archive is not built here — the
+manifest is.
 
 ## Tests
 

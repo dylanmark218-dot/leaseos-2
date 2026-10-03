@@ -18,7 +18,7 @@ import { appRouter } from "./routers";
 const DB_URL = process.env.DATABASE_URL;
 const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let seq = 190_000_000 + Math.floor(Math.random() * 50_000);
+let seq = 228_000_000 + Math.floor(Math.random() * 50_000);   // its own band (0228); 190M is widgetsBoard's
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
 
 beforeAll(async () => { if (!DB_URL) return; pool = mysql.createPool({ uri: DB_URL, connectionLimit: 2 }); });
@@ -201,6 +201,11 @@ d("0228 — Safety & Compliance Program Builder", () => {
     const run2 = await S.safetyProgram.trainingMatrixCompute();
     expect(run2.summary.missing).toBe(2);
     expect((await A.safetyProgram.trainingMatrix()).computationRef).toBe(run2.computationRef);   // the earlier run is history, not current
+    // A verified H2S holding reaches the matrix through the canonical qualification adapter, never a direct read.
+    await pool.execute("INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, issuedAt, expiresAt, verificationState, verifiedByUserId, verifiedAt, recordedByUserId, recordedAt) VALUES (?,?,?,'H2S',NOW(),DATE_ADD(NOW(), INTERVAL 900 DAY),'verified',?,NOW(),?,NOW())", [`WQ-${rnd()}`, orgRef, driver, safety, safety]);
+    const run3 = await S.safetyProgram.trainingMatrixCompute();
+    expect(run3.summary).toMatchObject({ total: 2, compliant: 1, missing: 1 });
+    expect((await A.safetyProgram.trainingMatrix({ userId: driver })).rows.find(r => r.status === "compliant")).toMatchObject({ evidenceKind: "worker_qualification" });
 
     // --- reviews, overlays, corrective actions
     const rv = await S.safetyProgram.reviewSchedule({ policyRef: p1.policyRef, reviewType: "post_incident" });
