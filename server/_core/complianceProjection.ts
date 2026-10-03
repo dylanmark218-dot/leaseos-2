@@ -10,14 +10,15 @@
  * Kept: id, owner, type, dates and verification state — what the validity verdict, the expiry tile
  * and dispatch need. Expiry is administrative; the document's content is not.
  */
-import { PRIVATE_CREDENTIAL_FIELDS_NEVER_PROJECTED } from "./compliancePassport";
+import { isMedicalDocType, PRIVATE_CREDENTIAL_FIELDS_NEVER_PROJECTED } from "./compliancePassport";
 
-/** Document types that are private by nature, whatever flag a row was stored with. */
-const PRIVATE_DOC_TYPES: ReadonlySet<string> = new Set(["medical_fitness"]);
-
-/** The single rule for which documents are private; creation and credential recording both read it. */
+/**
+ * Document types that are private by nature, whatever flag a row was stored with. This is
+ * compliancePassport's `isMedicalDocType` — the rule creation and credential recording already use —
+ * so the list, the creation path and the projection cannot disagree about what is medical.
+ */
 export function isPrivateDocType(docType: string): boolean {
-  return PRIVATE_DOC_TYPES.has(docType);
+  return isMedicalDocType(docType);
 }
 
 type Projectable = { docType: string; privateDetail?: boolean | number | null } & Partial<Record<(typeof PRIVATE_CREDENTIAL_FIELDS_NEVER_PROJECTED)[number], unknown>>;

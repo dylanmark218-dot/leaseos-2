@@ -376,13 +376,15 @@ export async function createDutyRecord(input: InsertDutyRecord) {
   const result = await db.insert(dutyRecords).values(input);
   return result[0]?.insertId;
 }
-export async function listWorkOrders(unitId?: number) {
+export async function listWorkOrders(unitId: number | undefined, scope: TenantScope) {
   const db = await getDb();
   if (!db) return [];
+  // 0199 — scoped through the unit, as every other unit-keyed list is.
+  const inScope = ownershipScopeWhere("unit", workOrders.unitId, scope);
   return db
     .select()
     .from(workOrders)
-    .where(unitId ? eq(workOrders.unitId, unitId) : undefined)
+    .where(unitId ? and(eq(workOrders.unitId, unitId), inScope) : inScope)
     .orderBy(desc(workOrders.updatedAt))
     .limit(200);
 }
@@ -725,23 +727,11 @@ export async function createComplianceDocument(
   return result[0]?.insertId;
 }
 
-export async function reviewComplianceDocument(
-  id: number,
-  status: "verified" | "rejected",
-  scope: TenantScope,
-) {
-  const db = await getDb();
-  if (!db) return false;
-  // P4.1: only a document whose owner (operator, unit, job) is in scope can be reviewed here; otherwise "not found".
-  const inScope = (await db.select({ id: complianceDocuments.id }).from(complianceDocuments)
-    .where(and(eq(complianceDocuments.id, id), scope.tenantId === SINGLE_TENANT_ID ? isNull(documentOwnerOrg) : eq(documentOwnerOrg, scope.tenantId))).limit(1))[0];
-  if (!inScope) return false;
-  await db
-    .update(complianceDocuments)
-    .set({ verificationStatus: status })
-    .where(eq(complianceDocuments.id, id));
-  return true;
-}
+/*
+ * reviewComplianceDocument was removed: it set verificationStatus with no separation of duties, no
+ * state check and no verifier recorded. documents.review now decides through
+ * credentialVerificationService.decideComplianceCredential, the one verification door.
+ */
 
 /**
  * P4.1 router 2 — units and operators are scoped through coreRecordOwnership,

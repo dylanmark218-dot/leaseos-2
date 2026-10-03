@@ -28,6 +28,39 @@ list_tests() {
 }
 if [ "${1:-}" = "--list-tests" ]; then list_tests; exit $?; fi
 
+# --metrics [PATH] — the test totals, as a generated artifact rather than a committed line (CI-STATE-1).
+#
+# Until 2026-10-03 the document carried `Test files / cases` as numbers. They were the most
+# volatile thing in it by far: of the 105 commits that had ever changed this document, every one
+# changed that row and 69 changed nothing else. Almost every pull request adds a test, so every open
+# branch rewrote the same committed line and every merge into main put the others in conflict —
+# PR #105 had to be re-synced three times in one morning for that line alone. The architecture rows
+# (tables, migrations, procedures, permissions) stay in the document: they move when the
+# architecture does, and a pull request that changes them should say so where everyone reads it.
+#
+# The measurement is not dropped, it is moved. Same list (the runner's own, fail-closed), same
+# arithmetic, written to a file the gate prints and nothing commits. Deterministic for a given tree:
+# no timestamp, no host, fixed key order — so two runs over one tree are byte-identical and a
+# difference always means the tree differs.
+if [ "${1:-}" = "--metrics" ]; then
+  METRICS_OUT="${2:-artifacts/current-state-metrics.json}"
+  if [ -s LEASEOS_RELEASE ]; then
+    METRICS_RELEASE="$(tr -d '\r\n' < LEASEOS_RELEASE)"
+  else
+    echo "LEASEOS_RELEASE is missing or empty; the metrics name the release they describe" >&2
+    exit 1
+  fi
+  METRICS_LIST=$(list_tests) || exit 1
+  METRICS_FILES=$(printf '%s\n' "$METRICS_LIST" | grep -c . || true)
+  # `it(` occurrences in source: a loop that generates cases counts once here and many at run time,
+  # so the runner reports more. That was the document's caveat and it stays this file's.
+  METRICS_CASES=$(printf '%s\n' "$METRICS_LIST" | xargs cat | grep -cE '^\s*it\(' || true)
+  mkdir -p "$(dirname "$METRICS_OUT")"
+  printf '{\n  "release": "%s",\n  "testFiles": %d,\n  "testCases": %d\n}\n' "$METRICS_RELEASE" "$METRICS_FILES" "$METRICS_CASES" > "$METRICS_OUT"
+  echo "wrote $METRICS_OUT" >&2
+  exit 0
+fi
+
 # Captured before line 23's `set -- $PERMS`, which overwrites the positional
 # parameters to unpack a count triple. Reading $2 after that point returns a
 # permission count, which is how this script briefly tried to write the
@@ -58,10 +91,7 @@ const sensN=arr("SENSITIVE_PERMISSIONS"), uniN=arr("UNIVERSAL_PERMISSIONS");
 console.log(perms.size+" "+sensN+" "+uniN);')
 # This clobbers $1/$2; OUT and RELEASE are captured at the top for that reason.
 set -- $PERMS; PERM_COUNT=$1; SENS_COUNT=$2; UNI_COUNT=$3
-# The runner's own list — see list_tests above for why not a find or a glob.
-TEST_FILE_LIST=$(list_tests)
-TEST_FILES=$(printf '%s\n' "$TEST_FILE_LIST" | grep -c . || true)
-TEST_CASES=$(printf '%s\n' "$TEST_FILE_LIST" | xargs cat | grep -cE '^\s*it\(' || true)
+# No test totals here: they are emitted by `--metrics` (above), not committed. See there for why.
 NATIVE=$(grep -o 'NotOnDeviceError(' client/src/runtime/adapters/capacitor.ts | wc -l | tr -d ' ')
 
 # The document body is a quoted heredoc: bash interprets none of it.
@@ -72,7 +102,7 @@ NATIVE=$(grep -o 'NotOnDeviceError(' client/src/runtime/adapters/capacitor.ts | 
 TEMPLATE="$(mktemp)"
 # Unconditional: the unresolved-placeholder check exits before any later line.
 trap 'rm -f "$TEMPLATE"' EXIT
-export BARE EXT_PROCS INB_PROCS MIGRATIONS NATIVE PERM_COUNT PROCS RELEASE SENS_COUNT TABLES TEST_CASES TEST_FILES UNI_COUNT
+export BARE EXT_PROCS INB_PROCS MIGRATIONS NATIVE PERM_COUNT PROCS RELEASE SENS_COUNT TABLES UNI_COUNT
 cat > "$TEMPLATE" <<'MD'
 # LeaseOS — Current State (generated; do not edit by hand)
 
@@ -92,7 +122,7 @@ here can be added rather than read.
 | Permissions | **@@PERM_COUNT@@** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **@@SENS_COUNT@@** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **@@UNI_COUNT@@** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **@@TEST_FILES@@ / @@TEST_CASES@@** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **computed by the gate, not committed** | `scripts/current-state.sh --metrics` → `artifacts/current-state-metrics.json`, printed by gate 8. Files are the runner's own list; cases are `it(` occurrences in source. Not committed because nearly every pull request changes them |
 | Native-only runtime bindings | **@@NATIVE@@ throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -118,10 +148,22 @@ not hold, ends access with the membership rather than with the grant, and
 verifies a named organization against the membership table before it scopes
 anything · payroll, finance, tax
 rules (unverified) · geospatial source registry (8 verified licences, 10
-blocked) · AI Secretary typed commits, OCR forms, fingerprinting · secure
+blocked) · approved external source registry (a publisher is contacted only
+through an endpoint a person approved — exact host, port, method and path,
+for a named purpose, until a review-by date — by someone who neither asked
+for the approval nor made the revision it covers; an edit to what may be
+contacted reopens review, a revocation stops the next request, every step
+is append-only evidence; the facility directory's ArcGIS importer runs
+through it and then through the egress guard, which it can only narrow, and
+records the source, endpoint, revision and approval of every import) · AI
+Secretary typed commits, OCR forms, fingerprinting · secure
 field runtime protocol (server half) · fuel ledger, bulk fuel, card
 statements, anomalies · roadside, purchasing, AP · compliance registry,
-requirement engine, packs, calibration · insurance and risk · universal
+requirement engine, packs, calibration · safety & compliance program builder
+(module and pack library, controlled policies with chained versions, stepwise
+acknowledgements, client overlays, reviews, training requirements and matrix
+snapshots, corrective actions, COR readiness, vendor package manifest; 0228) ·
+insurance and risk · universal
 surfaces (exceptions, inbox, my day, search, timeline) · dispatch gate with
 enforcement setting · IFTA · GST/HST · period close · bank reconciliation ·
 accounts receivable, credits, collections, write-offs · customer identity ·
@@ -143,7 +185,31 @@ existing queue, chain of custody, approval queue, timeline, completion
 package, vendor and facility shells) · fleet shop (parts ledger with cores
 and counts, tires by serial and axle position, warranty policies and
 two-person claims, serialized tools, recalls held unverified, work-order
-and unit cost that names what it cannot know) · capital assets (one
+and unit cost that names what it cannot know) · fleet maintenance,
+checkpoint 1 (a work order owned by a person holding a shop role, with
+every assignment kept as history; a cancelled work order that repairs
+nothing, releases nothing and leaves its defect open; a legacy update that
+can no longer move a status; a forward-only advance that stamps when work
+started and finished and keeps its note; telematics answering not-found
+across an organization) · fleet maintenance, checkpoint 2 (a defect from
+the reporter's words to an independent return to service: the proposal
+kept apart from the triage decision, a reported critical holding the unit
+at once, the work order and its first task opened together, tasks that
+only move forward, one release door that waits for every task, and a
+return to service refused to the technician who signed the release that
+resolves the defect, lifts its hold, closes its roadside event and the
+work order in one act, every step an event) · Fleet & Equipment Portfolio foundation (typed
+holds whose effect is a warning, a block releasable only under an approved
+policy, or — for a safety hold — out of service with no override, placed
+and released by different people with the hold's type deciding who, never
+edited and never deleted, read into dispatch readiness and its
+fingerprint; a unit's meters read where each figure already lives —
+telemetry, work orders, fuel, trips, tire service — beside a ledger for
+readings with no other home, nothing copied, a reading that went below an
+accepted one kept as evidence while any service count from before it
+answers METER_REGRESSION rather than a due figure; the unit's operational
+state derived on every read, indeterminate when a source cannot be read,
+and naming what it does not evaluate) · capital assets (one
 identity per unit, two-person capital review, CCA class as a verified
 candidate, pool arithmetic with the claim UNKNOWN until the rate is
 verified, year-end schedule reviewed by a second person, the asset twin) ·
@@ -1129,7 +1195,7 @@ MD
 # Only the named placeholders may change the document. Anything else that
 # looks like one is a mistake, and this refuses rather than shipping a page
 # with @@SOMETHING@@ printed in the middle of it.
-ALLOWED="BARE EXT_PROCS INB_PROCS MIGRATIONS NATIVE PERM_COUNT PROCS RELEASE SENS_COUNT TABLES TEST_CASES TEST_FILES UNI_COUNT" python3 - "$TEMPLATE" "$OUT" <<'PY'
+ALLOWED="BARE EXT_PROCS INB_PROCS MIGRATIONS NATIVE PERM_COUNT PROCS RELEASE SENS_COUNT TABLES UNI_COUNT" python3 - "$TEMPLATE" "$OUT" <<'PY'
 import os, re, sys
 template, out = sys.argv[1], sys.argv[2]
 text = open(template).read()

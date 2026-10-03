@@ -43,6 +43,12 @@ beforeAll(async () => {
   );
   unitId = u.insertId;
 });
+/** CP1.5 — a member confirms a stop on a unit their organization owns; another organization's is not found. */
+async function unitFor(orgRef: string) {
+  const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')", [`U-ENF-${rnd()}`]);
+  await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'unit', ?, 1)", [orgRef, u.insertId]);
+  return Number(u.insertId);
+}
 const caller = (id: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id, role: "user" } as never });
 async function withRole(role: DomainRole) { const id = seq++; await grantUserRole({ userId: id, role, scopeType: "global", grantedByUserId: 1, grantedAt: new Date() }); return id; }
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
@@ -503,7 +509,7 @@ d("one organization cannot see or touch another's prohibitions", () => {
     const safetyA = await memberOf("safety", orgA);
     const safetyB = await memberOf("safety", orgB);
 
-    const a = await caller(safetyA).enforcement.eventConfirm(stop());
+    const a = await caller(safetyA).enforcement.eventConfirm(stop({ unitId: await unitFor(orgA) }));
     const listB = await caller(safetyB).enforcement.activeOrders({});
     expect(listB.orders.some(o => o.orderRef === a.orderRefs[0])).toBe(false);
 
@@ -517,7 +523,7 @@ d("one organization cannot see or touch another's prohibitions", () => {
     const orgB = await anOrg();
     const safetyA = await memberOf("safety", orgA);
     const safetyB = await memberOf("safety", orgB);
-    const a = await caller(safetyA).enforcement.eventConfirm(stop());
+    const a = await caller(safetyA).enforcement.eventConfirm(stop({ unitId: await unitFor(orgA) }));
 
     // Whether another organization has a stop by this reference is itself
     // something this caller should not learn.
@@ -530,7 +536,7 @@ d("one organization cannot see or touch another's prohibitions", () => {
     const orgB = await anOrg();
     const safetyA = await memberOf("safety", orgA);
     const safetyB = await memberOf("safety", orgB);
-    const a = await caller(safetyA).enforcement.eventConfirm(stop());
+    const a = await caller(safetyA).enforcement.eventConfirm(stop({ unitId: await unitFor(orgA) }));
     const orderRef = a.orderRefs[0];
 
     await expect(caller(safetyB).enforcement.findingRecord({ orderRef, finding: "satisfied", findingType: "reinspection" }))
@@ -544,7 +550,7 @@ d("one organization cannot see or touch another's prohibitions", () => {
     const orgB = await anOrg();
     const safetyA = await memberOf("safety", orgA);
     const safetyB = await memberOf("safety", orgB);
-    const a = await caller(safetyA).enforcement.eventConfirm(stop());
+    const a = await caller(safetyA).enforcement.eventConfirm(stop({ unitId: await unitFor(orgA) }));
     const unitRef = (await caller(safetyA).enforcement.eventGet({ eventRef: a.eventRef })).orders[0].subjectRef;
 
     const grantB = await caller(safetyB).enforcement.panelGrantIssue({ unitRef, issuedFor: "inspection" });

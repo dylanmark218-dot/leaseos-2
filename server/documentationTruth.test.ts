@@ -74,11 +74,12 @@ describe("the generated current state agrees with the tree", () => {
   it("names as implemented every subsystem whose router exists — a lost narrative fails the gate", () => {
     const implemented = state.slice(state.indexOf("## Implemented on the server"), state.indexOf("## Implemented on the client"));
     const must: [string, RegExp][] = [
-      ["server/portalRouter.ts", /portal/i], ["server/closeoutRouter.ts", /sign-off chain/i], ["server/shopRouter.ts", /fleet shop/i], ["server/assetRouter.ts", /capital assets/i],
+      ["server/portalRouter.ts", /portal/i], ["server/closeoutRouter.ts", /sign-off chain/i], ["server/shopRouter.ts", /fleet shop/i], ["server/maintenanceRouter.ts", /fleet maintenance/i], ["server/fleetPortfolioRouter.ts", /fleet & equipment portfolio/i], ["server/assetRouter.ts", /capital assets/i],
       ["server/projectRouter.ts", /commercial projects/i], ["server/integrationRouter.ts", /integration gateway/i], ["server/telematicsRouter.ts", /telematics/i],
       ["server/workforceRouter.ts", /workforce lifecycle/i], ["server/auditRouter.ts", /audit packages/i], ["server/spatialRouter.ts", /spatial foundation/i],
       ["server/_core/contractTerms.ts", /contract terms/i], ["server/_core/money.ts", /money precision/i], ["server/customerAlertService.ts", /customer transaction/i],
       ["client/src/lib/showcaseGuard.ts", /operational truth boundary/i], ["server/commercialSetupRouter.ts", /rate resolution/i], ["server/invoicingRouter.ts", /invoice path/i], ["server/geoRouter.ts", /mapping foundation/i], ["server/_core/roadGraph.ts", /routing graph/i], ["server/commercialSetupRouter.ts", /commercial setup/i],
+      ["server/sourceRegistryRouter.ts", /approved external source registry/i],
     ];
     for (const [path, phrase] of must) if (existsSync(path)) expect(implemented, `${path} exists but the state's server narrative does not mention ${phrase.source}`).toMatch(phrase);
   });
