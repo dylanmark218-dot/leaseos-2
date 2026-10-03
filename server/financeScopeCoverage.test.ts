@@ -28,10 +28,10 @@ const procs = (appRouter as unknown as { _def: { procedures: Record<string, Proc
 
 /**
  * The ten F1 routers as mounted (CCA lives under `asset`), plus insurance (F1.1), plus projects (P0-A3),
- * plus payroll and contractor settlement (payroll P0, D2) and compensation agreements (payroll P1): every procedure in those two namespaces carries
+ * plus payroll and contractor settlement (payroll P0, D2) compensation agreements (payroll P1) and pay schedules (payroll P2): every procedure in those two namespaces carries
  * `ctx.money` and proves each named record with the 0146 helpers. `finance` keeps the in-handler convention.
  */
-const MONEY_NAMESPACES = ["bank", "ar", "period", "gst", "roadside", "purchasing", "vendor", "recovery", "invoicing", "asset", "fuel", "ifta", "commercial", "portalAdmin", "audit", "insurance", "project", "payroll", "contractors", "payrollCompensation"];
+const MONEY_NAMESPACES = ["bank", "ar", "period", "gst", "roadside", "purchasing", "vendor", "recovery", "invoicing", "asset", "fuel", "ifta", "commercial", "portalAdmin", "audit", "insurance", "project", "payroll", "contractors", "payrollCompensation", "payrollSchedule"];
 /**
  * Keys that name a money record wherever they appear. Generic names that other domains reuse for
  * something else (`deviceRef` is also a field device, `policyRef` a comms policy, `claimRef` a funding
@@ -112,13 +112,14 @@ const source = (p: Proc) => String(p._def.resolver);
 describe("F1 / F1.1 — every money procedure is money-scoped, structurally", () => {
   const money = Object.entries(procs).filter(([k]) => MONEY_NAMESPACES.includes(k.split(".")[0]!));
 
-  it("finds the procedures it is guarding: 72 in the ten F1 routers, 12 in insurance, 9 in projects, 25 in payroll, 3 in contractors and 11 in compensation", () => {
+  it("finds the procedures it is guarding: 72 in the ten F1 routers, 12 in insurance, 9 in projects, 25 in payroll, 3 in contractors, 11 in compensation and 12 in schedules", () => {
     expect(money.filter(([k]) => k.startsWith("insurance.")).length).toBe(12);
     expect(money.filter(([k]) => k.startsWith("project.")).length).toBe(9);
     expect(money.filter(([k]) => k.startsWith("payroll.")).length).toBe(25);   // payroll P0: 22 + runCollect, runSubmit, earningApprove
     expect(money.filter(([k]) => k.startsWith("contractors.")).length).toBe(3);
     expect(money.filter(([k]) => k.startsWith("payrollCompensation.")).length).toBe(11);   // payroll P1 (0226)
-    expect(money.length).toBe(132);
+    expect(money.filter(([k]) => k.startsWith("payrollSchedule.")).length).toBe(12);   // payroll P2 (0227)
+    expect(money.length).toBe(144);
   });
 
   it("marks every one of them moneyScoped", () => {

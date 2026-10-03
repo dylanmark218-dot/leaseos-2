@@ -84,7 +84,10 @@ d("units and operators belong to an organization through the ownership table", (
 
   it("shows unowned legacy units only to the default scope", async () => {
     const a = await org(); const officeA = await member(a, "office"); const legacyUser = await member(null, "office");
-    const unitNumber = `U-LEGACY-${rnd()}`;
+    // units.list returns the first 100 visible units by unitNumber, and the shared test database holds
+    // every suite's unowned units: a probe named "U-…" fell off the end once enough sorted before it.
+    // "000-" sorts ahead of the letters and digits other suites use.
+    const unitNumber = `000-LEGACY-${rnd()}`;
     await pool.execute("INSERT INTO units (unitNumber, vehicleType) VALUES (?,?)", [unitNumber, "hydrovac"]);
     expect((await callerFor(legacyUser).fieldRoute.identity.units.list()).some(u => u.unitNumber === unitNumber)).toBe(true);
     expect((await callerFor(officeA).fieldRoute.identity.units.list()).some(u => u.unitNumber === unitNumber)).toBe(false);

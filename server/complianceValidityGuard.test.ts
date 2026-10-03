@@ -194,8 +194,15 @@ const READERS: Record<string, string> = {
   "server/hosRouter.ts": "files a scanned paper log as a needs_review document; decides nothing",
   "server/workforceRouter.ts": "writes a verified credential from verified training; decides nothing",
   "server/trainingAcademyRouter.ts": "foreign TDG recognition requires the named document in force by complianceRequirementValidity",
+  // Driver portfolio (#16), added on merging main: both hand the operator's rows to driverPortfolio, whose
+  // credential items decide through complianceDocumentValidity. Their own date comparisons are share-link
+  // and requirement-binding windows, not documents.
+  "server/driverPortfolioRouter.ts": "wallet, dispatch view and credential history through driverPortfolio (complianceDocumentValidity); writes a driver-uploaded credential as needs_review",
+  "server/driverPortfolioService.ts": "loads the operator's complianceDocuments rows for driverPortfolio; decides nothing itself",
   // C1b-3's D-05 read adapter (#57), added on merging main.
   "server/qualificationReads.ts": "an Academy grant's evidence document through complianceDocumentValidity; the grant itself through academyVerdict (qualificationValidity)",
+  // 0228 — the Safety & Compliance Program Builder, added on merging main.
+  "server/safetyProgramRouter.ts": "the vendor compliance package manifest: the carrier's COR, WCB, insurance and Safety Fitness documents and each unit's CVIP through complianceDocumentValidity; decides nothing itself",
 };
 
 function readdirTs(dir: string): string[] {

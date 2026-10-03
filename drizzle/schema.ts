@@ -3375,10 +3375,30 @@ export const payPeriods = mysqlTable("payPeriods", {
   financialEntityId: int("financialEntityId").notNull(),
   startsOn: timestamp("startsOn").notNull(),
   endsOn: timestamp("endsOn").notNull(),
-  state: mysqlEnum("state", ["draft", "collecting", "review", "approved", "processing", "paid", "closed", "amended"]).default("draft").notNull(),
+  /** 0227 adds `voided`. The P2 machine: collecting=OPEN, review=REVIEWING, approved=APPROVED (locked), processing, closed=FINALIZED, amended=CORRECTED, voided. `paid` reads as FINALIZED. */
+  state: mysqlEnum("state", ["draft", "collecting", "review", "approved", "processing", "paid", "closed", "amended", "voided"]).default("draft").notNull(),
   lockedAt: timestamp("lockedAt"),
   lockedByUserId: int("lockedByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0227 (P2) — the schedule that generated the period; authoritative calendar dates [start, end); the machine's actors. */
+  payScheduleId: int("payScheduleId"),
+  periodStartDate: date("periodStartDate", { mode: "string" }),
+  periodEndDate: date("periodEndDate", { mode: "string" }),
+  paymentDate: date("paymentDate", { mode: "string" }),
+  cutoffDate: date("cutoffDate", { mode: "string" }),
+  createdByUserId: int("createdByUserId"),
+  submittedByUserId: int("submittedByUserId"),
+  submittedAt: timestamp("submittedAt"),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  finalizedByUserId: int("finalizedByUserId"),
+  finalizedAt: timestamp("finalizedAt"),
+  reopenedByUserId: int("reopenedByUserId"),
+  reopenedAt: timestamp("reopenedAt"),
+  reopenReason: varchar("reopenReason", { length: 400 }),
+  voidedByUserId: int("voidedByUserId"),
+  voidedAt: timestamp("voidedAt"),
+  voidReason: varchar("voidReason", { length: 400 }),
 });
 
 export const payrollTimeEntries = mysqlTable("payrollTimeEntries", {
@@ -10650,3 +10670,440 @@ export const compensationEarningRules = mysqlTable("compensationEarningRules", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type CompensationEarningRuleRow = typeof compensationEarningRules.$inferSelect;
+
+/* ---- 0227: Payroll P2 — pay schedules ---- */
+
+export const PAY_FREQUENCIES = ["weekly", "biweekly", "semi_monthly", "monthly", "custom"] as const;
+
+/** A book's payroll calendar; periods are generated from it on calendar dates (see 0227 for the rules). */
+export const paySchedules = mysqlTable("paySchedules", {
+  id: int("id").autoincrement().primaryKey(),
+  scheduleRef: varchar("scheduleRef", { length: 40 }).notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  name: varchar("name", { length: 120 }).notNull(),
+  frequency: mysqlEnum("frequency", PAY_FREQUENCIES).notNull(),
+  anchorDate: date("anchorDate", { mode: "string" }).notNull(),
+  periodLengthDays: int("periodLengthDays"),
+  paymentLagDays: int("paymentLagDays").default(0).notNull(),
+  cutoffLagDays: int("cutoffLagDays").default(0).notNull(),
+  timezone: varchar("timezone", { length: 64 }).notNull(),
+  status: mysqlEnum("status", ["active", "retired"]).default("active").notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  retiredByUserId: int("retiredByUserId"),
+  retiredAt: timestamp("retiredAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type PayScheduleRow = typeof paySchedules.$inferSelect;
+
+/* ---- 0210/0211: Driver Portfolio and Credential Wallet ---- */
+
+/**
+ * What a customer, a site, a job type, a piece of equipment or the company
+ * itself requires of the operator. `company` binds with subjectCode `*` and
+ * applies to every job; it is also the wallet's baseline. Only a `mandatory`
+ * binding can block dispatch.
+ */
+export const driverRequirementBindings = mysqlTable("driverRequirementBindings", {
+  id: int("id").autoincrement().primaryKey(),
+  bindingRef: varchar("bindingRef", { length: 96 }).notNull().unique(),
+  /** 0212 — an update retires a binding and creates this successor, which names what it replaced. */
+  supersedesBindingRef: varchar("supersedesBindingRef", { length: 96 }),
+  /** NULL = the historical single tenant. Applies only to work of the same organization. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  subjectType: mysqlEnum("subjectType", ["company", "customer", "site", "job_type", "equipment", "job"]).notNull(),
+  subjectCode: varchar("subjectCode", { length: 160 }).notNull(),
+  requirementKind: mysqlEnum("requirementKind", ["credential", "licence_class", "equipment"]).notNull(),
+  requirementCode: varchar("requirementCode", { length: 160 }).notNull(),
+  label: varchar("label", { length: 220 }),
+  enforcement: mysqlEnum("enforcement", ["mandatory", "informational"]).default("mandatory").notNull(),
+  effectiveAt: timestamp("effectiveAt"),
+  expiresAt: timestamp("expiresAt"),
+  active: boolean("active").default(true).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  retiredByUserId: int("retiredByUserId"),
+  retiredAt: timestamp("retiredAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/** Append-only (0211): what happened to a driver's credentials, and who did it. */
+export const driverPortfolioEvents = mysqlTable("driverPortfolioEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 96 }).notNull().unique(),
+  /** 0212 — the organization the event belongs to. NULL = the historical single tenant. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  /** NULL for an organization-level event (a requirement bound, changed or retired). */
+  operatorId: int("operatorId"),
+  credentialId: int("credentialId"),
+  actorUserId: int("actorUserId"),
+  eventType: mysqlEnum("eventType", [
+    "credential_uploaded", "credential_verified", "credential_rejected", "credential_superseded",
+    "requirement_bound", "requirement_modified", "requirement_retired",
+    "wallet_viewed", "portfolio_viewed", "credential_shared", "share_revoked", "share_verified", "used_for_dispatch",
+  ]).notNull(),
+  detail: varchar("detail", { length: 400 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/**
+ * 0212 — a one-credential share. The token is `newToken()` and only its SHA-256
+ * is stored; redeeming re-reads the credential, so a share never outlives the
+ * credential being valid. Revocation is `revokedAt`; the audit is in
+ * `driverPortfolioEvents`.
+ */
+export const driverCredentialShares = mysqlTable("driverCredentialShares", {
+  id: int("id").autoincrement().primaryKey(),
+  shareRef: varchar("shareRef", { length: 96 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  operatorId: int("operatorId").notNull(),
+  credentialId: int("credentialId").notNull(),
+  credentialCode: varchar("credentialCode", { length: 160 }).notNull(),
+  tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
+  audience: varchar("audience", { length: 160 }).notNull(),
+  issuedByUserId: int("issuedByUserId").notNull(),
+  issuedAt: timestamp("issuedAt").notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  revokedAt: timestamp("revokedAt"),
+  revokedByUserId: int("revokedByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/* ==================================================================
+ * 0228 — Safety & Compliance Program Builder (drafted as 0182; renumbered on merging main)
+ *
+ * A company's safety management system as controlled objects rather than a
+ * "Safety Manual" upload box. The library (modules, templates, regulatory
+ * references) is LeaseOS-owned and seeded from code; a company's program,
+ * policies, versions, acknowledgements, overlays, reviews, training
+ * requirements, matrix snapshots and corrective actions are the company's.
+ *
+ * `orgRef` NULL = the historical single tenant (0132). `scopeKey` is
+ * COALESCE(orgRef, 'platform'), maintained by the write path, so a unique
+ * index can see the platform/tenant split a NULL orgRef hides from it.
+ *
+ * The earlier `writtenProgramVersions` / `programAcknowledgements` pair
+ * (0036) stays as the compliance registry's record of a program having been
+ * published; the builder below is where the program is authored, versioned
+ * by section and acknowledged per version.
+ * ================================================================== */
+
+export const safetyProgramModules = mysqlTable("safetyProgramModules", {
+  id: int("id").autoincrement().primaryKey(),
+  moduleKey: varchar("moduleKey", { length: 60 }).notNull().unique(),
+  ordinal: int("ordinal").notNull(),
+  title: varchar("title", { length: 160 }).notNull(),
+  description: text("description"),
+  /** Policy code prefix, e.g. HSE in HSE-POL-001. */
+  codePrefix: varchar("codePrefix", { length: 8 }).notNull(),
+  appliesWhenJson: text("appliesWhenJson"),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type SafetyProgramModuleRow = typeof safetyProgramModules.$inferSelect;
+
+export const policyTemplates = mysqlTable("policyTemplates", {
+  id: int("id").autoincrement().primaryKey(),
+  templateKey: varchar("templateKey", { length: 120 }).notNull().unique(),
+  /** NULL = a LeaseOS platform template; set = a company's own template. */
+  orgRef: varchar("orgRef", { length: 64 }),
+  moduleKey: varchar("moduleKey", { length: 60 }).notNull(),
+  packKey: varchar("packKey", { length: 60 }).notNull(),
+  documentKind: mysqlEnum("documentKind", ["policy", "procedure", "safe_work_practice", "plan", "program", "form", "statement"]).notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  summary: text("summary"),
+  templateVersion: int("templateVersion").default(1).notNull(),
+  /** skeleton = headings only; draft = body written, not reviewed; reviewed = a person reviewed it against the cited sources. */
+  contentStatus: mysqlEnum("contentStatus", ["skeleton", "draft", "reviewed"]).default("skeleton").notNull(),
+  sectionsJson: text("sectionsJson").notNull(),
+  bodyMarkdown: text("bodyMarkdown"),
+  contentHash: varchar("contentHash", { length: 64 }).notNull(),
+  acknowledgementRequired: boolean("acknowledgementRequired").default(false).notNull(),
+  reviewIntervalMonths: int("reviewIntervalMonths").default(12).notNull(),
+  defaultOwnerRole: varchar("defaultOwnerRole", { length: 40 }).notNull(),
+  regulatoryReferenceKeysJson: text("regulatoryReferenceKeysJson").notNull(),
+  regulatoryBasis: mysqlEnum("regulatoryBasis", ["not_inferred_from_template", "verified_source_cited"]).default("not_inferred_from_template").notNull(),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({ moduleIdx: index("policyTemplates_module_pack").on(t.moduleKey, t.packKey) }));
+export type PolicyTemplateRow = typeof policyTemplates.$inferSelect;
+
+export const regulatoryReferences = mysqlTable("regulatoryReferences", {
+  id: int("id").autoincrement().primaryKey(),
+  referenceKey: varchar("referenceKey", { length: 120 }).notNull().unique(),
+  jurisdiction: varchar("jurisdiction", { length: 40 }).notNull(),
+  authority: varchar("authority", { length: 160 }).notNull(),
+  instrument: varchar("instrument", { length: 220 }).notNull(),
+  provision: varchar("provision", { length: 160 }),
+  title: varchar("title", { length: 240 }).notNull(),
+  url: varchar("url", { length: 500 }),
+  summary: text("summary"),
+  /** Seeds are unverified. A person verifies a reference against the current instrument; the recorder never verifies their own. */
+  verificationStatus: mysqlEnum("verificationStatus", ["unverified", "verified", "superseded"]).default("unverified").notNull(),
+  recordedByUserId: int("recordedByUserId"),
+  verifiedByUserId: int("verifiedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  verificationNote: varchar("verificationNote", { length: 400 }),
+  sourceSnapshotHash: varchar("sourceSnapshotHash", { length: 64 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type RegulatoryReferenceRow = typeof regulatoryReferences.$inferSelect;
+
+export const policyRegulatoryLinks = mysqlTable("policyRegulatoryLinks", {
+  id: int("id").autoincrement().primaryKey(),
+  subjectType: mysqlEnum("subjectType", ["template", "policy"]).notNull(),
+  subjectRef: varchar("subjectRef", { length: 120 }).notNull(),
+  referenceKey: varchar("referenceKey", { length: 120 }).notNull(),
+  linkedByUserId: int("linkedByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ subjectUnique: uniqueIndex("policyRegulatoryLinks_subject_ref").on(t.subjectType, t.subjectRef, t.referenceKey) }));
+
+export const companySafetyPrograms = mysqlTable("companySafetyPrograms", {
+  id: int("id").autoincrement().primaryKey(),
+  programRef: varchar("programRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  scopeKey: varchar("scopeKey", { length: 64 }).notNull(),
+  financialEntityId: int("financialEntityId"),
+  name: varchar("name", { length: 220 }).notNull(),
+  jurisdictionPackKeysJson: text("jurisdictionPackKeysJson").notNull(),
+  moduleKeysJson: text("moduleKeysJson").notNull(),
+  operationsProfileJson: text("operationsProfileJson").notNull(),
+  status: mysqlEnum("status", ["draft", "active", "retired"]).default("draft").notNull(),
+  assembledAt: timestamp("assembledAt"),
+  assemblyHash: varchar("assemblyHash", { length: 64 }),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({ scopeIdx: index("companySafetyPrograms_scope").on(t.scopeKey, t.status) }));
+export type CompanySafetyProgramRow = typeof companySafetyPrograms.$inferSelect;
+
+export const companyPolicies = mysqlTable("companyPolicies", {
+  id: int("id").autoincrement().primaryKey(),
+  policyRef: varchar("policyRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  scopeKey: varchar("scopeKey", { length: 64 }).notNull(),
+  programRef: varchar("programRef", { length: 64 }),
+  /** HSE-POL-001: module prefix, document-kind code, sequence — minted by the server, never typed. */
+  policyCode: varchar("policyCode", { length: 40 }).notNull(),
+  templateKey: varchar("templateKey", { length: 120 }),
+  templateVersion: int("templateVersion"),
+  moduleKey: varchar("moduleKey", { length: 60 }).notNull(),
+  packKey: varchar("packKey", { length: 60 }).notNull(),
+  documentKind: mysqlEnum("documentKind", ["policy", "procedure", "safe_work_practice", "plan", "program", "form", "statement"]).notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  appliesTo: varchar("appliesTo", { length: 300 }).notNull(),
+  ownerRole: varchar("ownerRole", { length: 40 }).notNull(),
+  ownerUserId: int("ownerUserId"),
+  approverRole: varchar("approverRole", { length: 40 }).notNull(),
+  status: mysqlEnum("status", ["draft", "active", "retired"]).default("draft").notNull(),
+  currentVersionId: int("currentVersionId"),
+  acknowledgementRequired: boolean("acknowledgementRequired").default(true).notNull(),
+  reviewIntervalMonths: int("reviewIntervalMonths").default(12).notNull(),
+  nextReviewDueAt: timestamp("nextReviewDueAt"),
+  retiredAt: timestamp("retiredAt"),
+  retiredByUserId: int("retiredByUserId"),
+  createdByUserId: int("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({
+  codeUnique: uniqueIndex("companyPolicies_scope_code").on(t.scopeKey, t.policyCode),
+  scopeIdx: index("companyPolicies_scope_status").on(t.scopeKey, t.status, t.moduleKey),
+}));
+export type CompanyPolicyRow = typeof companyPolicies.$inferSelect;
+
+export const policyVersions = mysqlTable("policyVersions", {
+  id: int("id").autoincrement().primaryKey(),
+  versionRef: varchar("versionRef", { length: 64 }).notNull().unique(),
+  companyPolicyId: int("companyPolicyId").notNull(),
+  versionNumber: int("versionNumber").notNull(),
+  versionLabel: varchar("versionLabel", { length: 20 }).notNull(),
+  state: mysqlEnum("state", ["draft", "approved", "superseded", "withdrawn"]).default("draft").notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  sectionsJson: text("sectionsJson").notNull(),
+  bodyMarkdown: text("bodyMarkdown").notNull(),
+  contentHash: varchar("contentHash", { length: 64 }).notNull(),
+  changeSummary: varchar("changeSummary", { length: 500 }),
+  clientOverlayRefsJson: text("clientOverlayRefsJson"),
+  preparedByUserId: int("preparedByUserId").notNull(),
+  preparedAt: timestamp("preparedAt").notNull(),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  approvalNote: varchar("approvalNote", { length: 400 }),
+  effectiveFrom: timestamp("effectiveFrom"),
+  supersededAt: timestamp("supersededAt"),
+  supersedesVersionId: int("supersedesVersionId"),
+  supersededByVersionId: int("supersededByVersionId"),
+  withdrawnAt: timestamp("withdrawnAt"),
+  withdrawnByUserId: int("withdrawnByUserId"),
+  withdrawalReason: varchar("withdrawalReason", { length: 400 }),
+  /** Chain: hash(previousVersionHash + contentHash + versionNumber). A rewritten history breaks the chain. */
+  previousVersionHash: varchar("previousVersionHash", { length: 64 }),
+  versionHash: varchar("versionHash", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ policyVersionUnique: uniqueIndex("policyVersions_policy_number").on(t.companyPolicyId, t.versionNumber) }));
+export type PolicyVersionRow = typeof policyVersions.$inferSelect;
+
+export const policyAcknowledgements = mysqlTable("policyAcknowledgements", {
+  id: int("id").autoincrement().primaryKey(),
+  acknowledgementRef: varchar("acknowledgementRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  companyPolicyId: int("companyPolicyId").notNull(),
+  policyVersionId: int("policyVersionId").notNull(),
+  userId: int("userId").notNull(),
+  versionHash: varchar("versionHash", { length: 64 }).notNull(),
+  contentHash: varchar("contentHash", { length: 64 }).notNull(),
+  readAt: timestamp("readAt"),
+  understoodAt: timestamp("understoodAt"),
+  questionsAnsweredAt: timestamp("questionsAnsweredAt"),
+  questionsNote: varchar("questionsNote", { length: 500 }),
+  signedAt: timestamp("signedAt"),
+  method: mysqlEnum("method", ["in_app", "signed_document", "training_session"]).default("in_app").notNull(),
+  signatureHash: varchar("signatureHash", { length: 64 }),
+  evidenceRecordId: int("evidenceRecordId"),
+  deviceRef: varchar("deviceRef", { length: 64 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({
+  versionUserUnique: uniqueIndex("policyAcknowledgements_version_user").on(t.policyVersionId, t.userId),
+  userIdx: index("policyAcknowledgements_org_user").on(t.orgRef, t.userId),
+}));
+export type PolicyAcknowledgementRow = typeof policyAcknowledgements.$inferSelect;
+
+export const clientPolicyOverlays = mysqlTable("clientPolicyOverlays", {
+  id: int("id").autoincrement().primaryKey(),
+  overlayRef: varchar("overlayRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  clientOrgRef: varchar("clientOrgRef", { length: 64 }),
+  customerAccountId: int("customerAccountId"),
+  clientName: varchar("clientName", { length: 220 }).notNull(),
+  moduleKey: varchar("moduleKey", { length: 60 }),
+  companyPolicyId: int("companyPolicyId"),
+  title: varchar("title", { length: 220 }).notNull(),
+  requirementsJson: text("requirementsJson").notNull(),
+  sourceDescription: varchar("sourceDescription", { length: 400 }),
+  sourceEvidenceRecordId: int("sourceEvidenceRecordId"),
+  status: mysqlEnum("status", ["draft", "active", "retired"]).default("active").notNull(),
+  effectiveFrom: timestamp("effectiveFrom").notNull(),
+  effectiveTo: timestamp("effectiveTo"),
+  recordedByUserId: int("recordedByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({ orgIdx: index("clientPolicyOverlays_org_status").on(t.orgRef, t.status) }));
+export type ClientPolicyOverlayRow = typeof clientPolicyOverlays.$inferSelect;
+
+export const policyReviews = mysqlTable("policyReviews", {
+  id: int("id").autoincrement().primaryKey(),
+  reviewRef: varchar("reviewRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  companyPolicyId: int("companyPolicyId").notNull(),
+  policyVersionId: int("policyVersionId"),
+  reviewType: mysqlEnum("reviewType", ["scheduled", "triggered", "post_incident", "regulatory_change", "client_requirement", "audit_finding"]).notNull(),
+  scheduledFor: timestamp("scheduledFor").notNull(),
+  status: mysqlEnum("status", ["scheduled", "completed", "cancelled"]).default("scheduled").notNull(),
+  completedAt: timestamp("completedAt"),
+  reviewedByUserId: int("reviewedByUserId"),
+  outcome: mysqlEnum("outcome", ["no_change", "revision_required", "retire"]),
+  findings: text("findings"),
+  resultingVersionId: int("resultingVersionId"),
+  nextReviewDueAt: timestamp("nextReviewDueAt"),
+  scheduledByUserId: int("scheduledByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({ policyIdx: index("policyReviews_policy_status").on(t.companyPolicyId, t.status) }));
+export type PolicyReviewRow = typeof policyReviews.$inferSelect;
+
+export const trainingRequirements = mysqlTable("trainingRequirements", {
+  id: int("id").autoincrement().primaryKey(),
+  requirementRef: varchar("requirementRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  scopeKey: varchar("scopeKey", { length: 64 }).notNull(),
+  /** A position code: an organizationWorkers.workerType or a company-defined position. */
+  positionCode: varchar("positionCode", { length: 60 }).notNull(),
+  requirementKind: mysqlEnum("requirementKind", ["external_certificate", "company_training", "client_orientation", "policy_acknowledgement", "equipment_competency"]).notNull(),
+  qualificationCode: varchar("qualificationCode", { length: 100 }),
+  policyRef: varchar("policyRef", { length: 64 }),
+  title: varchar("title", { length: 220 }).notNull(),
+  source: mysqlEnum("source", ["pack", "company", "client_overlay"]).notNull(),
+  packKey: varchar("packKey", { length: 60 }),
+  overlayRef: varchar("overlayRef", { length: 64 }),
+  renewalMonths: int("renewalMonths"),
+  warnDaysBeforeExpiry: int("warnDaysBeforeExpiry").default(60).notNull(),
+  enforcement: mysqlEnum("enforcement", ["block", "review", "inform"]).default("block").notNull(),
+  active: boolean("active").default(true).notNull(),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({ positionIdx: index("trainingRequirements_scope_position").on(t.scopeKey, t.positionCode, t.active) }));
+export type TrainingRequirementRow = typeof trainingRequirements.$inferSelect;
+
+export const companyTrainingMatrix = mysqlTable("companyTrainingMatrix", {
+  id: int("id").autoincrement().primaryKey(),
+  matrixRef: varchar("matrixRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  /** One computation run; every row of a run shares it, so a run can be reproduced or compared. */
+  computationRef: varchar("computationRef", { length: 64 }).notNull(),
+  userId: int("userId").notNull(),
+  positionCode: varchar("positionCode", { length: 60 }).notNull(),
+  requirementRef: varchar("requirementRef", { length: 64 }).notNull(),
+  requirementKind: mysqlEnum("requirementKind", ["external_certificate", "company_training", "client_orientation", "policy_acknowledgement", "equipment_competency"]).notNull(),
+  status: mysqlEnum("status", ["compliant", "expiring", "expired", "missing", "pending_verification"]).notNull(),
+  expiresAt: timestamp("expiresAt"),
+  evidenceKind: mysqlEnum("evidenceKind", ["worker_qualification", "academy_qualification", "training_record", "policy_acknowledgement", "none"]).notNull(),
+  evidenceRef: varchar("evidenceRef", { length: 120 }),
+  detail: varchar("detail", { length: 400 }),
+  current: boolean("current").default(true).notNull(),
+  computedAt: timestamp("computedAt").notNull(),
+  computedByUserId: int("computedByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({
+  orgIdx: index("companyTrainingMatrix_org_current").on(t.orgRef, t.current, t.status),
+  userIdx: index("companyTrainingMatrix_user_current").on(t.userId, t.current),
+}));
+export type CompanyTrainingMatrixRow = typeof companyTrainingMatrix.$inferSelect;
+
+export const correctiveActions = mysqlTable("correctiveActions", {
+  id: int("id").autoincrement().primaryKey(),
+  actionRef: varchar("actionRef", { length: 64 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  sourceType: mysqlEnum("sourceType", ["policy_review", "inspection", "incident", "near_miss", "audit_finding", "cor_gap", "acknowledgement_gap", "training_gap", "observation", "client_requirement", "other"]).notNull(),
+  sourceRef: varchar("sourceRef", { length: 120 }),
+  title: varchar("title", { length: 220 }).notNull(),
+  description: text("description").notNull(),
+  rootCause: text("rootCause"),
+  priority: mysqlEnum("priority", ["low", "medium", "high", "critical"]).default("medium").notNull(),
+  assignedToUserId: int("assignedToUserId").notNull(),
+  dueAt: timestamp("dueAt").notNull(),
+  /** Overdue is derived from dueAt, never stored: a stored flag is a fact that stops being true without anyone changing it. */
+  status: mysqlEnum("status", ["open", "in_progress", "completed", "verified", "cancelled"]).default("open").notNull(),
+  completedAt: timestamp("completedAt"),
+  completedByUserId: int("completedByUserId"),
+  completionNote: varchar("completionNote", { length: 500 }),
+  verifiedAt: timestamp("verifiedAt"),
+  verifiedByUserId: int("verifiedByUserId"),
+  verificationNote: varchar("verificationNote", { length: 500 }),
+  evidenceRecordId: int("evidenceRecordId"),
+  cancelledAt: timestamp("cancelledAt"),
+  cancelledByUserId: int("cancelledByUserId"),
+  cancellationReason: varchar("cancellationReason", { length: 400 }),
+  openedByUserId: int("openedByUserId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({ orgIdx: index("correctiveActions_org_status_due").on(t.orgRef, t.status, t.dueAt) }));
+export type CorrectiveActionRow = typeof correctiveActions.$inferSelect;
+
+export const safetyProgramEvents = mysqlTable("safetyProgramEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  eventRef: varchar("eventRef", { length: 96 }).notNull().unique(),
+  orgRef: varchar("orgRef", { length: 64 }),
+  actorUserId: int("actorUserId"),
+  subjectType: varchar("subjectType", { length: 80 }).notNull(),
+  subjectRef: varchar("subjectRef", { length: 120 }).notNull(),
+  eventType: varchar("eventType", { length: 120 }).notNull(),
+  eventJson: text("eventJson").notNull(),
+  previousHash: varchar("previousHash", { length: 64 }),
+  eventHash: varchar("eventHash", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ subjectIdx: index("safetyProgramEvents_subject").on(t.subjectType, t.subjectRef) }));
+export type SafetyProgramEventRow = typeof safetyProgramEvents.$inferSelect;

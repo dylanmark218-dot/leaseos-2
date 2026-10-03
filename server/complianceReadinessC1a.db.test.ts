@@ -85,6 +85,24 @@ async function approvedOosPolicy(branch: string) {
   await caller(approver).comms.oosPolicyApprove({ policyRef: p.policyRef, decision: "approve" });
 }
 
+d("the award judges the driver's mandatory credentials through the end of the work it awards", () => {
+  it("refuses an award that outlasts a required ticket, and awards the same check for work that ends before it", async () => {
+    const s = await establishedSubject();
+    // A customer requirement (single tenant, as the job is) for a ticket that lapses in 90 minutes.
+    await pool.execute("INSERT INTO driverRequirementBindings (bindingRef, orgRef, subjectType, subjectCode, requirementKind, requirementCode, enforcement, active, createdByUserId, createdAt) VALUES (?, NULL, 'customer', ?, 'credential', 'h2s_alive', 'mandatory', true, 1, NOW())", [key("DRB").slice(0, 60), s.customer]);
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'h2s_alive', 'H2S', DATE_SUB(NOW(), INTERVAL 30 DAY), DATE_ADD(NOW(), INTERVAL 90 MINUTE), 'verified')", [s.operatorId]);
+    const c = await caller(s.dispatcher).dispatch.evaluate({ ...s.subject, postingId: s.postingId });
+    const blockers = c.blockers as Finding[];
+    // Today it holds: nothing about the ticket blocks the check itself.
+    expect(blockers.filter(b => b.dispatchEffect === "BLOCK").map(b => b.code)).toEqual([]);
+    await acknowledgeWarnings(s, c.checkId, blockers);
+    const late = await caller(s.dispatcher).dispatch.award({ checkId: c.checkId, startsAt: new Date(Date.now() + 30 * 60_000), endsAt: new Date(Date.now() + 3 * 3_600_000) });
+    expect(late).toMatchObject({ ok: false, refusals: ["driver_credential_h2s_alive_expires_during_job"] });
+    const early = await caller(s.dispatcher).dispatch.award({ checkId: c.checkId, startsAt: new Date(Date.now() + 10 * 60_000), endsAt: new Date(Date.now() + 60 * 60_000) });
+    expect(early.ok, (early as { refusals?: string[] }).refusals?.join(" | ")).toBe(true);
+  });
+});
+
 d("C1a baseline — an established subject is awardable once its warnings are acknowledged", () => {
   it("has no BLOCK finding, only WARNING_ONLY ones, and awards", async () => {
     const s = await establishedSubject();
