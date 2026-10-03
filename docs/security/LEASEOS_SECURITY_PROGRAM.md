@@ -26,7 +26,7 @@ Everything else keeps the work order's intent; numbers are reassigned so the seq
 | # | Tranche | Closes (baseline §17) | Owner decision first? | Schema change? | Depends on |
 |---|---|---|---|---|---|
 | **SEC-0** | Security boundary survey and threat model — **this run** | — | no | no | — |
-| **SEC-1** | Tenant and resource authorization hardening | V2, V3, V4, V6, V8, V9 (scope and permission halves), V11, V12 (ownership), V15 (port `3c4f997`) | no | no | SEC-0 |
+| **SEC-1** (**merged** `daf3ec6`, PR #114 — see `LEASEOS_SECURITY_SEC-1_CHECKPOINT.md`) | Tenant and resource authorization hardening | V2, V3, V4, V6, V8, V9 (scope and permission halves), V11, V12 (ownership), V15 (port `3c4f997`) | no | no | SEC-0 |
 | **SEC-2** | Session lifecycle and revocation | V1, part of V5, session/device ids in audit (V18) | timeouts; Bearer/preview path | yes: `sessions` | SEC-1 |
 | **SEC-3** | Perimeter and secure defaults | V7, V14, V20, `errorFormatter`, boot assertions, worker assertion | rate-limit values | no | — |
 | **SEC-4** | Privileged access, step-up and elevation (incl. session/device inventory UI) | V10, V19, T4 | step-up set; two-person set | yes: assurance on sessions, `privilegedElevations`, `roleEvents` | SEC-2 |
