@@ -31,8 +31,9 @@ counting every organization's rows. `clientOrgRef` names a counterparty by refer
 writes through it; `sourceRef`, `deviceRef` and `packRef` are labels or catalog keys. Scope helpers are main's
 own (`userInScope`, `evidenceInScope`, `orgScopeWhere`, `assertEntityInScope`).
 
-**One chain under concurrency** (migration `0233`, a follow-up after #99 merged with `0228`; a new file because
-the migration ledger refuses an edited, applied one). `safetyProgramEvents.previousHash` is UNIQUE, so two writers that read the same
+**One chain under concurrency** (migration `0236`, a follow-up after #99 merged with `0228`; drafted as `0233`,
+moved above the slots other branches had since claimed; a new file because the migration ledger refuses an
+edited, applied one). `safetyProgramEvents.previousHash` is UNIQUE, so two writers that read the same
 head cannot both link to it; the loser re-reads the head and retries. Before, concurrent writes could fork the
 chain and `verifyChain` would report a break that was never tampering.
 

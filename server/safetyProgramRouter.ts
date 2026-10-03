@@ -79,7 +79,7 @@ const refuse = (reason: string): never => { throw new TRPCError({ code: "FORBIDD
 const bad = (reason: string): never => { throw new TRPCError({ code: "BAD_REQUEST", message: reason }); };
 
 /**
- * Append one event to the hash chain. `previousHash` is UNIQUE (0228), so two writers that read the same head
+ * Append one event to the hash chain. `previousHash` is UNIQUE (0236), so two writers that read the same head
  * cannot both link to it: the second insert is refused and that writer re-reads the head and tries again. A
  * concurrent write therefore extends the chain instead of forking it — the same discipline main's document
  * register keeps with its unique per-document sequence.
