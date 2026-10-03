@@ -17,6 +17,11 @@ export class Outbox {
 
   /** Save a draft locally. It is on the device and nowhere else. */
   async saveDraft(args: { kind: CaptureKind; formKey: string | null; title: string; category: string; fields: Record<string, unknown>; files?: { bytes: Uint8Array; fileName: string; mimeType: string }[]; gps?: GpsFix | null; jobId?: number | null; unitId?: number | null; capturedAt?: Date; captureAuthorizationClaim?: CaptureAuthorizationClaim; captureAuthorizationReason?: string | null }): Promise<LocalCapture> {
+    // ELD 2d — a duty status is a canonical ELD event, minted by `EldOutbox` with its own UUID,
+    // device sequence and hash chain. A generic `hos_event` capture would be a second, unhashed
+    // identity for the same driver action, sealed as evidence and never projected into the log, so
+    // the capture path refuses it rather than create one.
+    if (args.kind === "hos_event") throw new Error("A duty status is recorded through the ELD outbox (EldOutbox.recordDutyStatus), not as a generic capture");
     const now = this.clock.now().toISOString();
     const files: LocalCapture["files"] = [];
     for (const f of args.files ?? []) {

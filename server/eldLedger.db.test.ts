@@ -17,6 +17,8 @@ import { fingerprintP256Spki } from "./_core/deviceSignature";
 import { canonicalEldBatch, hashEldEvent } from "./_core/eld/ledger";
 import { appendEldEvents } from "./_core/eld/eldLedgerStore";
 import type { EldEventInput } from "../shared/eld/eldEvent";
+import { FlagConnectivity, MemoryKeystore, SettableClock } from "../client/src/runtime/adapters/memory";
+import { canonicalEldBatchText, EldOutbox, MemoryEldEventStore, wireEvent, type EldAppendInput, type EldAppendResponse, type EldTransport } from "../client/src/runtime/eldOutbox";
 
 const URL = process.env.DATABASE_URL;
 
@@ -673,5 +675,186 @@ d("eld.dutyDayDesignate records where a duty day begins, as history that is only
     expect(inFirst.dutyDay).toMatchObject({ designationRef: first.designationRef, window: expect.objectContaining({ timezone: "America/Regina" }) });
     expect(inSecond.dutyDay).toMatchObject({ designationRef: second.designationRef, window: expect.objectContaining({ timezone: "America/Winnipeg", dayStartMinutes: 300 }) });
     expect((await callerFor(safety).eld.dutyDayHistory({ operatorId: s.operatorId })).map(h => h.designationRef)).toEqual([first.designationRef, second.designationRef]);
+  });
+});
+
+/* ================================================================== */
+/* ELD checkpoint 2d — the device outbox against the real ledger       */
+/* ================================================================== */
+
+d("the device ELD outbox delivers to the real ledger", () => {
+  const MIN = 60_000;
+
+  /** A device as the field runtime holds it: its own keystore, enrolled and activated through the production procedures. */
+  async function outboxFor(userId: number, o: { online?: boolean; sendAs?: number } = {}) {
+    const clock = new SettableClock(new Date());
+    const keystore = new MemoryKeystore(clock, "hardware");
+    const en = await callerFor(userId).device.enroll({ platform: "android", publicKeySpkiBase64: await keystore.publicKeySpkiBase64(), keystoreAttestation: "hardware", encryptedStorageAttested: true });
+    await callerFor(userId).device.activate({ deviceRef: en.deviceRef });
+    const store = new MemoryEldEventStore();
+    const connectivity = new FlagConnectivity(o.online ?? true);
+    const sent: EldAppendInput[] = [];
+    let dropAnswer = false;
+    const transport: EldTransport = {
+      async eventsAppend(input) {
+        sent.push(input);
+        const r = await callerFor(o.sendAs ?? userId).eld.eventsAppend(input);
+        if (dropAnswer) { dropAnswer = false; throw new TypeError("connection reset after the server answered"); }
+        return r as EldAppendResponse;
+      },
+    };
+    const outbox = new EldOutbox({ store, keystore, transport, connectivity, clock, deviceRef: async () => en.deviceRef, session: () => ({ orgKey: "acting", userId }), utcOffsetMinutes: () => -360 });
+    // Events are observed at fixed times; the clock is put back to real time to sign, as a device does when signal returns.
+    const at = (iso: string) => clock.set(new Date(iso));
+    const signNow = () => clock.set(new Date());
+    return { deviceRef: en.deviceRef, keystore, store, outbox, connectivity, clock, sent, at, signNow, loseNextAnswer: () => { dropAnswer = true; } };
+  }
+
+  it("an event recorded offline hours earlier reaches the ledger with the device's time, the device user's operator and the device's organization", async () => {
+    const s = await driverScenario();
+    // Another operator with the same name in the same organization: a name is never identity.
+    await operatorFor(await userIn(s.orgRef, "driver"), s.orgRef);
+    const dev = await outboxFor(s.userId, { online: false });
+    dev.at("2026-09-11T05:59:00.000Z");
+    const before = await dev.outbox.recordDutyStatus({ status: "on_duty", actionKey: "late-1" });
+    dev.at("2026-09-11T06:01:00.000Z");
+    const after = await dev.outbox.recordDutyStatus({ status: "off_duty", actionKey: "late-2" });
+    dev.signNow(); dev.connectivity.isOnline = true;
+    expect(await dev.outbox.flush()).toMatchObject({ sent: 2, accepted: 2 });
+    const row = await rowByRef(before.event.eventRef);
+    expect(row).toMatchObject({ orgRef: s.orgRef, operatorId: s.operatorId, eventHash: before.eventHash, payloadHash: before.payloadHash, deviceSequence: 0, dutyStatus: "on_duty", eventUtcOffsetMinutes: -360 });
+    expect(new Date(row.eventAt).toISOString()).toBe("2026-09-11T05:59:00.000Z");
+    expect(new Date(row.receivedAt).getTime()).toBeGreaterThan(Date.parse("2026-09-11T06:01:00.000Z"));
+    expect((await rowByRef(after.event.eventRef)).previousEventHash).toBe(before.eventHash);
+    expect(await dev.outbox.delivery(after.event.eventRef)).toMatchObject({ state: "acknowledged", outcome: "accepted", serverEventId: Number((await rowByRef(after.event.eventRef)).id) });
+  });
+
+  it("a lost acknowledgement and a retry leave exactly one canonical row, acknowledged as IDEMPOTENT", async () => {
+    const s = await driverScenario();
+    const dev = await outboxFor(s.userId);
+    dev.at("2026-09-11T14:00:00.000Z");
+    const e = await dev.outbox.recordDutyStatus({ status: "on_duty", actionKey: "ack-1" });
+    dev.signNow(); dev.loseNextAnswer();
+    expect(await dev.outbox.flush()).toMatchObject({ requeued: 1 });
+    expect(await countByRef(e.event.eventRef)).toBe(1);
+    dev.signNow();
+    expect(await dev.outbox.flush({ ignoreBackoff: true })).toMatchObject({ idempotent: 1 });
+    expect(await dev.outbox.delivery(e.event.eventRef)).toMatchObject({ state: "acknowledged", outcome: "idempotent", code: "replayed" });
+    expect(await countByRef(e.event.eventRef)).toBe(1);
+    expect(dev.sent[1]!.events).toEqual(dev.sent[0]!.events);
+  });
+
+  it("event 1 may reach the server before event 0, and the chain verifies once both are there", async () => {
+    const s = await driverScenario();
+    const dev = await outboxFor(s.userId, { online: false });
+    dev.at("2026-09-11T14:00:00.000Z");
+    const e0 = await dev.outbox.recordDutyStatus({ status: "on_duty", actionKey: "o0" });
+    dev.at("2026-09-11T14:30:00.000Z");
+    const e1 = await dev.outbox.recordDutyStatus({ status: "off_duty", actionKey: "o1" });
+    // Event 1 alone, signed by the same device key, arrives first.
+    const signedAt = new Date(); const nonce = key("n").padEnd(24, "0"); const batchRef = key("ELDB");
+    const events = [wireEvent(e1)];
+    const signatureP1363Base64 = await dev.keystore.signP1363(new TextEncoder().encode(canonicalEldBatchText({ deviceRef: dev.deviceRef, batchRef, signedAt, nonce, events })));
+    accepted(await callerFor(s.userId).eld.eventsAppend({ deviceRef: dev.deviceRef, signedWithFingerprint: await dev.keystore.fingerprint(), signedAt, nonce, signatureP1363Base64, batchRef, events }));
+    expect((await callerFor(await userIn(s.orgRef, "safety")).eld.deviceIntegrity({ deviceRef: dev.deviceRef })).unverifiableLinks).toHaveLength(1);
+    dev.signNow(); dev.connectivity.isOnline = true;
+    expect(await dev.outbox.flush()).toMatchObject({ accepted: 1, idempotent: 1 });
+    expect(await callerFor(await userIn(s.orgRef, "safety")).eld.deviceIntegrity({ deviceRef: dev.deviceRef })).toMatchObject({ verifiedLinks: 1, unverifiableLinks: [], chainMismatches: [], gaps: [] });
+    expect(await countByRef(e0.event.eventRef)).toBe(1);
+  });
+
+  it("a clock set back on the device keeps the sequence, and the ledger reports the regression as observed", async () => {
+    const s = await driverScenario();
+    const dev = await outboxFor(s.userId, { online: false });
+    dev.at("2026-09-11T14:00:00.000Z");
+    await dev.outbox.recordDutyStatus({ status: "on_duty", actionKey: "cr-a" });
+    dev.at("2026-09-11T13:00:00.000Z");
+    const b = await dev.outbox.recordDutyStatus({ status: "off_duty", actionKey: "cr-b" });
+    dev.signNow(); dev.connectivity.isOnline = true;
+    expect(await dev.outbox.flush()).toMatchObject({ accepted: 2 });
+    const integrity = await callerFor(await userIn(s.orgRef, "safety")).eld.deviceIntegrity({ deviceRef: dev.deviceRef });
+    expect(integrity.timingInconsistencies).toEqual([expect.objectContaining({ eventRef: b.event.eventRef, deviceSequence: 1 })]);
+    expect(integrity.verifiedLinks).toBe(1);
+  });
+
+  it("a unit owned by another organization rejects only the event that named it; the others are resent and accepted", async () => {
+    const s = await driverScenario();
+    const foreign = await unitIn(await org());
+    const own = await unitIn(s.orgRef);
+    const dev = await outboxFor(s.userId);
+    dev.at("2026-09-11T14:00:00.000Z");
+    const good = await dev.outbox.record({ eventType: "duty_status_change", recordOrigin: "driver", dutyStatus: "on_duty", unitNumber: own.unitNumber, actionKey: "un-1" });
+    const bad = await dev.outbox.record({ eventType: "duty_status_change", recordOrigin: "driver", dutyStatus: "off_duty", unitNumber: foreign.unitNumber, actionKey: "un-2" });
+    dev.signNow();
+    expect(await dev.outbox.flush()).toMatchObject({ rejected: 1, requeued: 1 });
+    expect(await dev.outbox.delivery(bad.event.eventRef)).toMatchObject({ state: "rejected", code: "unit_not_in_organization" });
+    expect(await countByRef(good.event.eventRef)).toBe(0);                       // nothing in a refused batch is written
+    dev.signNow();
+    expect(await dev.outbox.flush()).toMatchObject({ accepted: 1 });
+    expect((await rowByRef(good.event.eventRef)).unitId).toBe(own.unitId);
+    expect(await countByRef(bad.event.eventRef)).toBe(0);
+    expect(await dev.store.getEvent(bad.event.eventRef)).toEqual(bad);
+  });
+
+  it("an ambiguous operator fails closed: every event rejected with operator_ambiguous, none deleted, none written", async () => {
+    const s = await driverScenario();
+    await operatorFor(s.userId, s.orgRef);                                         // a second operator record for the same user
+    const dev = await outboxFor(s.userId);
+    dev.at("2026-09-11T14:00:00.000Z");
+    const e = await dev.outbox.recordDutyStatus({ status: "on_duty", actionKey: "amb" });
+    dev.signNow();
+    expect(await dev.outbox.flush()).toMatchObject({ rejected: 1 });
+    expect(await dev.outbox.delivery(e.event.eventRef)).toMatchObject({ state: "rejected", code: "operator_ambiguous" });
+    expect(await countByRef(e.event.eventRef)).toBe(0);
+    expect(await dev.store.getEvent(e.event.eventRef)).toEqual(e);
+  });
+
+  it("a device used by another signed-in user is refused, and the event is kept", async () => {
+    const s = await driverScenario();
+    const colleague = await userIn(s.orgRef, "driver");
+    await operatorFor(colleague, s.orgRef);
+    const dev = await outboxFor(s.userId, { sendAs: colleague });
+    dev.at("2026-09-11T14:00:00.000Z");
+    const e = await dev.outbox.recordDutyStatus({ status: "on_duty", actionKey: "who" });
+    dev.signNow();
+    expect(await dev.outbox.flush()).toMatchObject({ rejected: 1 });
+    expect((await dev.outbox.delivery(e.event.eventRef)).state).toBe("rejected");
+    expect(await countByRef(e.event.eventRef)).toBe(0);
+  });
+
+  it("a device bound to one organization cannot deliver into another: refused, kept, releasable later", async () => {
+    const s = await driverScenario();
+    const dev = await outboxFor(s.userId);
+    dev.at("2026-09-11T14:00:00.000Z");
+    const e = await dev.outbox.recordDutyStatus({ status: "on_duty", actionKey: "org" });
+    const other = await org();
+    await pool.execute("UPDATE organizationMemberships SET orgRef = ? WHERE userId = ?", [other, s.userId]);
+    dev.signNow();
+    expect(await dev.outbox.flush()).toMatchObject({ rejected: 1 });
+    expect(await dev.outbox.delivery(e.event.eventRef)).toMatchObject({ state: "rejected", code: "server_forbidden" });
+    expect(await countByRef(e.event.eventRef)).toBe(0);
+    await pool.execute("UPDATE organizationMemberships SET orgRef = ? WHERE userId = ?", [s.orgRef, s.userId]);
+    await dev.outbox.requeue(e.event.eventRef);
+    dev.signNow();
+    expect(await dev.outbox.flush()).toMatchObject({ accepted: 1 });
+    expect((await rowByRef(e.event.eventRef)).orgRef).toBe(s.orgRef);
+  });
+
+  it("an organization or operator written into an event is refused by the strict schema, signature and all", async () => {
+    const s = await driverScenario();
+    const dev = await outboxFor(s.userId);
+    dev.at("2026-09-11T14:00:00.000Z");
+    const e = await dev.outbox.recordDutyStatus({ status: "on_duty", actionKey: "spoof" });
+    const send = async (events: unknown[], extra: Record<string, unknown> = {}) => {
+      const signedAt = new Date(); const nonce = key("n").padEnd(24, "0"); const batchRef = key("ELDB");
+      const signatureP1363Base64 = await dev.keystore.signP1363(new TextEncoder().encode(canonicalEldBatchText({ deviceRef: dev.deviceRef, batchRef, signedAt, nonce, events: events as never })));
+      return callerFor(s.userId).eld.eventsAppend({ deviceRef: dev.deviceRef, signedWithFingerprint: await dev.keystore.fingerprint(), signedAt, nonce, signatureP1363Base64, batchRef, events, ...extra } as never);
+    };
+    const tenant = await send([{ ...wireEvent(e), orgRef: await org() }]);
+    expect(tenant).toMatchObject({ state: "refused", code: "schema_invalid" });
+    const operator = await send([{ ...wireEvent(e), operatorId: 1 }]);
+    expect(operator).toMatchObject({ state: "refused", code: "schema_invalid" });
+    await expect(send([wireEvent(e)], { orgRef: await org() })).rejects.toThrow();
+    expect(await countByRef(e.event.eventRef)).toBe(0);
   });
 });

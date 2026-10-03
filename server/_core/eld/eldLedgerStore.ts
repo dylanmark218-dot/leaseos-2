@@ -115,10 +115,14 @@ export async function appendEldEvents(db: Db, args: EldAppendArgs): Promise<EldA
     const unitIdByNumber = new Map<string, number>();
     if (unitNumbers.length) {
       for (const r of await tx.select({ id: units.id, unitNumber: units.unitNumber }).from(units).where(inArray(units.unitNumber, unitNumbers))) unitIdByNumber.set(r.unitNumber, r.id);
+      // A unit refusal names the events that stated the unit (2d), so a device can hold exactly those
+      // and resend the rest of the batch; nothing in the batch is written either way.
+      const naming = (n: string, code: EldAppendReasonCode, detail: string): BatchProblem[] =>
+        batch.filter(h => h.input.unitNumber === n).map(h => ({ eventRef: h.input.eventRef, deviceSequence: h.input.deviceSequence, code, detail }));
       for (const n of unitNumbers) {
         const id = unitIdByNumber.get(n);
-        if (id == null) return refuse("unit_unknown", `Unit ${n} is not on record`);
-        if (!(await recordBelongsToOrganization(tx, orgRef, "unit", id))) return refuse("unit_not_in_organization", `Unit ${n} is not owned by organization ${orgRef}`);
+        if (id == null) return refuse("unit_unknown", `Unit ${n} is not on record`, naming(n, "unit_unknown", `Unit ${n} is not on record`));
+        if (!(await recordBelongsToOrganization(tx, orgRef, "unit", id))) return refuse("unit_not_in_organization", `Unit ${n} is not owned by organization ${orgRef}`, naming(n, "unit_not_in_organization", `Unit ${n} is not owned by this organization`));
       }
     }
 
