@@ -8,6 +8,39 @@ the paths they require: qualifications through `effectiveQualifications`; carrie
 `assertEntityInScope`; and the database suite draws user ids from its own band (228,000,000), clear of every
 other suite's.
 
+**Tenant boundary review (follow-up to PR #99, which merged at `144c07b` before this review finished).** Every identifier a procedure accepts is proved against the
+caller's organization before anything is stored or read through it, and refuses as NOT FOUND:
+
+| Identifier | Procedures | Proof |
+|---|---|---|
+| `financialEntityId` | `programSet` | `assertEntityInScope` |
+| user ids (`ownerUserId`, `assignedToUserId`, `workers[].userId`) | `policyCreate`, `correctiveActionOpen`, `trainingMatrixCompute` | main's `userInScope` |
+| `customerAccountId` | `overlaySet` | `customerAccounts` through main's `orgScopeWhere` |
+| evidence ids (`sourceEvidenceRecordId`, `evidenceRecordId`) | `overlaySet`, `correctiveActionProgress` | main's `evidenceInScope` |
+| overlay refs (`clientOverlayRefs`, `overlayRef`) | `versionDraft`, `trainingRequirementUpsert` | `clientPolicyOverlays` in the caller's scope |
+| `policyRef`, `versionRef`, `reviewRef`, `overlayRef`, `requirementRef`, `actionRef` | their procedures | the row's own `orgRef` / `scopeKey` |
+
+Before this review, `trainingMatrixCompute` accepted any user id and read that person's training records into
+the caller's matrix, and the other user, customer, evidence and overlay ids were stored unchecked. Three more
+boundaries were tightened: regulatory references are shared by every organization, so `referenceUpsert` and
+`referenceVerify` now run only from the platform (single-tenant) scope; `events` shows an organization its own
+events only, not platform catalog work or who across the platform did it, and a chain break outside the
+caller's organization is reported without its reference; and in the single tenant the workforce and COR counts
+now follow main's 0132 rule (people with no organization membership; jobs with no organization) instead of
+counting every organization's rows. `clientOrgRef` names a counterparty by reference only and nothing reads or
+writes through it; `sourceRef`, `deviceRef` and `packRef` are labels or catalog keys. Scope helpers are main's
+own (`userInScope`, `evidenceInScope`, `orgScopeWhere`, `assertEntityInScope`).
+
+**One chain under concurrency** (migration `0233`, a follow-up after #99 merged with `0228`; a new file because
+the migration ledger refuses an edited, applied one). `safetyProgramEvents.previousHash` is UNIQUE, so two writers that read the same
+head cannot both link to it; the loser re-reads the head and retries. Before, concurrent writes could fork the
+chain and `verifyChain` would report a break that was never tampering.
+
+The database suite's second case proves each refusal from another organization, the platform-only rule for
+references, own-scope events, the single-tenant workforce rule, and an intact, fork-free chain after six
+concurrent writes. Removing the matrix worker check, the reference scope rule or the ledger retry each makes it
+fail.
+
 **Migration slot.** Drafted as `0182`. On merging main, document control had claimed `0182` and main's head was
 `0227`, so the migration moved to `0228` — the first slot above every slot in use on main and all 131 remote
 branches. It creates only new tables and depends on nothing after `0174`. The register and

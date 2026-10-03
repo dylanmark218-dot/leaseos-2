@@ -309,6 +309,9 @@ anywhere is `0193`, so `0194` is the first free everywhere.
 
 ## Change log
 
+* **2026-10-03 (later)**: #99 merged with `0228`. Its follow-up takes `0233` for the event-chain uniqueness index:
+  `0229`–`0232` are the integration hub branch's.
+
 * **2026-10-03**: the Safety & Compliance Program Builder (#99) moves `0182 → 0228` on merging main: document
   control had claimed `0182`, and `0228` was the first slot above every slot in use in any lineage.
 
@@ -387,6 +390,17 @@ A scan of main and all 131 remote branches found every slot from `0180` to `0227
 `0184` and `0204`, and none above `0227`; under the rule of thumb the checkpoint takes the first slot above
 every slot in use, so it moved to `0228`. The migration creates only new tables and depends on nothing after
 `0174`, so the move changes no DDL order. `server/migrationSlots.test.ts` records it and pins the head at `0228`.
+
+## Claim: 0233 (Safety program event chain, 2026-10-03)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0233 | `0233_safety_program_event_chain_unique.sql` | `claude/safety-compliance-program-builder-2qnty0` | follow-up to #99 | `9ec123a` | gated | none | keeps 0233 |
+
+A follow-up to #99, which merged with `0228`. It adds a UNIQUE index to `safetyProgramEvents.previousHash` so the
+hash chain cannot fork under concurrent writes. It is a new file rather than an edit to `0228` because the
+migration ledger refuses a changed, already-applied file. A scan of main and all 133 remote branches found
+`0229`–`0232` held by `claude/integration-hub-subsystem-6nzrkw` and nothing above, so it takes `0233`.
 
 ## Change log (continued)
 

@@ -73,7 +73,10 @@ describe("the real tree", () => {
     // the first slot free on main and on all 131 remote branches at the scan.
     expect(files).toContain("0228_safety_program_builder.sql");
     expect(files.filter(f => f.startsWith("0182_"))).toEqual([]);
-    expect(headSlot(files)).toBe("0228");
+    // Its follow-up, the event-chain uniqueness guard, took 0233: 0229–0232 are held by the integration hub
+    // branch, so head+1 would have collided. It is a new file because the ledger refuses an edited 0228.
+    expect(files).toContain("0233_safety_program_event_chain_unique.sql");
+    expect(headSlot(files)).toBe("0233");
   });
 
   it("keeps the reserved slots empty", () => {
