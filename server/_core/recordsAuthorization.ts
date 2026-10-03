@@ -2930,6 +2930,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "commercialOffice.categoryCreate": "commercial.write",
   "securityIncidents.open": "incident.create",
   "securityIncidents.timelineAppend": "incident.create",
+  "securityIncidents.statusChange": "incident.review",
   "securityIncidents.organizationAffect": "incident.review",
   "securityIncidents.breachAssess": "incident.review",
   "securityIncidents.obligationCreate": "incident.review",
