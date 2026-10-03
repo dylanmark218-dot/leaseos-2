@@ -30,7 +30,7 @@ import {
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
 
 /** Rows read back as the engine's types. The limits travel with their profile, never apart from it. */
-async function loadProfiles(d: Awaited<ReturnType<typeof db>>): Promise<HosRuleProfile[]> {
+export async function loadProfiles(d: Awaited<ReturnType<typeof db>>): Promise<HosRuleProfile[]> {
   const profiles = await d.select().from(hosRuleProfiles);
   const limits = profiles.length ? await d.select().from(hosRuleLimits).where(inArray(hosRuleLimits.profileKey, profiles.map(p => p.profileKey))) : [];
   return profiles.map(p => ({

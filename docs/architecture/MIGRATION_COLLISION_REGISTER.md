@@ -246,10 +246,26 @@ by open branches (`0175` by `claude/driver-portfolio-*` and `claude/training-aca
 | 0174 | `0174_training_compliance_operations.sql` | `claude/training-academy-workforce-q3mdse` | none | open branch | **collides with main's `0174_dispatch_override_provenance.sql`** | renumber at that branch's rebase (its author) |
 | 0179 | `0179_trip_stop_provenance.sql` | `claude/migration-0169-reconciliation` | this PR | first number free on `main` and on every open branch | none | keeps 0179 |
 
+## State at the ELD ledger rebase (2026-09-24, `main` = `1680e94`)
+
+`main` migration head: **`0179_trip_stop_provenance.sql`** (PR #17). The scan in this file's header,
+run against every remote branch, shows claims up to **0186**: `0175`–`0177` (driver portfolio,
+training academy, auth workspace, client portal), `0178`–`0183` (document control, contiguous),
+`0182`–`0184` (communications marketplace, customer contracts, integration hub, safety program),
+`0185` (assistant proposal tenancy, webhook delivery claim), `0186` (external source categories).
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0187 | `0187_eld_event_ledger.sql` | `claude/eld-compliance-intelligence-ramlrd` | none | **superseded — moved to `0220`** (see "Claim: 0220" below); `claude/training-academy-workforce-q3mdse` also took 0187 | — | was: keeps 0187. Written as `0170`, moved to `0179` when main's dispatch role model took `0170`, moved again to `0187` when PR #17 merged `0179` to main. Content unchanged except the header line each time |
+| 0179 | `0179_document_control_register.sql` | `claude/document-control-architecture-jlffzk` | none | open branch | **collides with main's `0179_trip_stop_provenance.sql`** | renumber at that branch's rebase (its author) |
+
 ## Change log
 
 * **2026-09-23 (0169 reconciliation)**: added the cross-repository 0169 row, the academy branch's
   `0174` collision (new since C1a), and 0179. No file renamed.
+* **2026-09-24 (ELD ledger rebase)**: the ELD branch renamed its own ledger migration `0179 → 0187`
+  after PR #17 put `0179_trip_stop_provenance.sql` on main. Recorded the document-control branch's
+  `0179` as a new collision with main. No other branch's file renamed.
 
 ## State at the S2 integration (2026-09-25, `main` = `e291f28`, after PR #45, #47 and #48)
 
@@ -391,3 +407,53 @@ every slot in use, so it moved to `0228`. The migration creates only new tables 
 ## Change log (continued)
 
 * **2026-10-01 (SA1 merge)**: Sign & Attest `0214`–`0216` recorded against `main` `ce27fec`; next free `0220`.
+
+## Claim: 0220 (ELD event ledger, 2026-10-01, `main` = `b35bac4`)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0220 | `0220_eld_event_ledger.sql` | `claude/eld-compliance-intelligence-ramlrd` | none | `b35bac4` (main merged in) | gated | none | keeps 0220 |
+
+Fourth number for the same file, content unchanged except the header line each time: written as `0170`
+(2026-09-23), moved to `0179` when the dispatch role model took `0170`, to `0187` when PR #17 put
+`0179_trip_stop_provenance.sql` on `main`, and now to `0220` because `claude/training-academy-workforce-q3mdse`
+holds `0187` and the highest number held on `main` or any remote branch at the moment of claiming is
+`0219` (`claude/leaseos-customer-contract-rates-jkrw1i`). Recorded in the commit that renames the
+migration, per the 2026-09-25 correction above. No other branch was renumbered.
+
+**Collision found 2026-10-02 at the merge of `main` `240b2dd`:** `claude/integration-hub-subsystem-6nzrkw`
+created `0220_integration_hub_connectors.sql` (and `0221`–`0223`) in `12e9c1b`, 2026-10-01T23:24Z,
+twenty-three minutes after this branch claimed `0220` in `853c82e` (23:01Z) and recorded it here. Neither
+branch is on `main`. Under the rule of thumb at the top of this file, the first to merge keeps `0220` and
+the other renumbers at its own rebase; this branch does not renumber pre-emptively, and does not rename
+the other branch's files.
+
+**At the merge of `main` `db7dc7c` (2026-10-02):** `main`'s head is `0222` (mechanic portal CP2's `0221`/`0222`,
+recorded above, claimed after this branch's `0220` and around it). `0220` is still held only by this branch and
+`claude/integration-hub-subsystem-6nzrkw`, whose `0221`/`0222` now also collide with `main`'s. The ledger applies
+by name, so `0220` runs on a database that already has `0221`–`0222`.
+
+## Claim: 0224 (ELD duty-day designations, 2026-10-02, `main` = `db7dc7c`)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0224 | `0224_eld_duty_day_designations.sql` | `claude/eld-compliance-intelligence-ramlrd` | none | `db7dc7c` (main merged in) | gated | none | keeps 0224 |
+
+Scanned `origin/main` and all 123 remote refs immediately before committing: `main` ends at `0222`, and the
+highest number held anywhere is `0223` (`claude/integration-hub-subsystem-6nzrkw`), so `0224` is the first
+number free everywhere. Recorded in the commit that creates the migration.
+
+**Collision found 2026-10-03 at the merge of `main` `a61ff29`:** `fix/main-ci-stabilization` holds
+`0224_offline_capture_identity_scope.sql` (and `0225_queued_package_identity_scope.sql`), renamed to those numbers
+in `41cab8a`, dated 2026-10-02T02:53Z — forty-one minutes before this branch's `0224` commit (`c731c69`,
+03:34Z). This branch's pre-commit scan did not see it. `main`'s own table (above) already lists the pair as
+"0224 with ELD — first to merge keeps it". Neither file is on `main`; `main` has since taken `0226` (payroll P1).
+Under the rule of thumb, whichever merges first keeps `0224` and the other renumbers at its own rebase. This
+branch does not renumber pre-emptively and does not rename the other branch's file. Checkpoint 2d adds no
+migration.
+
+**At the merge of `main` `9895188` (2026-10-03):** `main` took `0227_payroll_pay_schedules.sql` and
+`0228_safety_program_builder.sql`; neither collides with this branch, whose only migrations above `main`'s are
+still `0220` and `0224`. The `0224` pair with `fix/main-ci-stabilization` stands as recorded above.
+
+**Next free number for new work: `0229`** (re-check with the scan before committing).

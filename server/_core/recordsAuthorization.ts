@@ -192,6 +192,9 @@ export type Permission =
   /* P1.2 — running the seal's third leg against the stored object. */
   | "device.verifySeal"
   | "sync.push_own" | "sync.resolve_conflict"
+  /* 0220 — the ELD event ledger. A device appends its own events (self-scoped in code: the device
+     must be enrolled to the session user); reading a device's chain is an office act. */
+  | "eld.event.record_own" | "eld.read" | "eld.dutyday.designate"
   // v20.21 — compliance master registry. Reading a passport is broad
   // verifying evidence, loading requirements and reading private credential
   // detail are not.
@@ -549,6 +552,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "enforcement.panel.view",
     "enforcement.latch",
     "enforcement.read",
+    "eld.read",
     "hos.read",
     "comms.package.build",
     "comms.package.fetch",
@@ -886,6 +890,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "enforcement.finding.record",
     "enforcement.release",
     "oos.policy.manage",
+    "eld.read",
+    "eld.dutyday.designate",
     "hos.read",
     "comms.package.build",
     "comms.policy.manage",
@@ -1026,6 +1032,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "timeOff.schedulingRead",
     "enforcement.latch",
     "enforcement.read",
+    "eld.read",
     "hos.read",
     "comms.package.build",
     /* v22.17 — communications */
@@ -1274,6 +1281,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "oos.policy.manage",
     "oos.policy.approve",
     "geo.source.review",
+    "eld.read",
+    "eld.dutyday.designate",
     "hos.read",
     "hos.rule.manage",
     "hos.rule.verify",
@@ -1582,6 +1591,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "delivery.read",
     "fleet.read",
     "inspection.read",
+    "eld.read",
     "hos.read",
     "gps.read",
     "route.read",
@@ -2023,6 +2033,8 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   // 0228 — your own policies to acknowledge, your own signature. The router resolves the person from ctx.user.id.
   "safety_program.read_own",
   "safety_program.acknowledge_own",
+  // 0220 — an ELD batch is admitted only for a device enrolled to `ctx.user.id`; the store re-checks it.
+  "eld.event.record_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -2083,6 +2095,8 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "portfolio.submit_own",
   "portfolio.share_own",
   "portfolio.requirement.manage",
+  // ELD 2c (0224) — where an operator's duty day begins decides how every later day is counted.
+  "eld.dutyday.designate",
   "live_assist.use",
   "live_assist.administer",
   "live_assist.review",
@@ -3090,6 +3104,17 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "device.revoke": "device.manage",
   "sync.receivePackage": "sync.push_own",
   "sync.resolveConflict": "sync.resolve_conflict",
+
+  /* ---- 0220: the ELD event ledger ---- */
+  "eld.eventsAppend": "eld.event.record_own",
+  "eld.deviceIntegrity": "eld.read",
+  // 0224: where a duty day begins changes how every later day is counted, so it is safety's and
+  // management's to record, and an audited (sensitive) act. Reading the history is the office's.
+  "eld.dutyDayDesignate": "eld.dutyday.designate",
+  "eld.dutyDayHistory": "eld.read",
+  // ELD checkpoint 2b: the gate is hos.read (a driver reads their own hours); the procedure also
+  // requires eld.read in code before it names another operator.
+  "eld.hosStatus": "hos.read",
 
   /* ---- v20.21: compliance master registry ---- */
   "compliance.passport": "compliance.passport.read",

@@ -60,9 +60,16 @@ describe("the real tree", () => {
     // v23.31 took 0217–0219 (Customer, Contract and Rate Management): 0210–0216 are claimed by open
     // branches, so head+1 would have collided; the register records the scan.
     expect(files).toContain("0219_job_commercial_context.sql");
+    // The ELD event ledger took 0220, its fourth number for the same file (0170 → 0179 → 0187 → 0220):
+    // every lower slot above main's head was held by some open branch when it was claimed, and the
+    // register records each scan.
+    expect(files).toContain("0220_eld_event_ledger.sql");
     // Mechanic Portal CP2 took 0221–0222 (defect lifecycle and its guards): 0220 is claimed by
     // `claude/eld-compliance-intelligence-ramlrd`, so head+1 would have collided; the register records the scan.
     expect(files).toContain("0222_defect_lifecycle_guards.sql");
+    // ELD checkpoint 2c took 0224 (duty-day designations): 0223 is held by
+    // `claude/integration-hub-subsystem-6nzrkw`, so head+1 would have collided; the register records the scan.
+    expect(files).toContain("0224_eld_duty_day_designations.sql");
     // Payroll P1 took 0226 (compensation agreements): 0220–0225 are claimed by open branches (ELD, integration
     // hub, CI stabilization), so head+1 would have collided twice; drafted as 0224 and moved before it was applied.
     expect(files).toContain("0226_payroll_compensation_agreements.sql");

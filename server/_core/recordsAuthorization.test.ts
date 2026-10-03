@@ -541,6 +541,9 @@ describe("payroll and tax authorization boundaries", () => {
       "shifts.availability_own",
       // 0228 — the policies a person must acknowledge, and their own signature on one.
       "safety_program.read_own", "safety_program.acknowledge_own",
+      // 0220 — a device appends its own ELD events: admitted only for a device enrolled to
+      // `ctx.user.id`, and the store re-checks that binding before it writes.
+      "eld.event.record_own",
     ]);
   });
 
