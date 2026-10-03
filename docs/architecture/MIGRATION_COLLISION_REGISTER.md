@@ -101,6 +101,23 @@ Next free number at that time: `0191` (superseded above).
   `0189`, the first number no branch holds, rather than `0175` (named free on 2026-09-23 and claimed by
   four branches since). No other branch renumbered.
 
+## Claim: 0226 (payroll P1 — compensation agreements and earning codes, 2026-10-02)
+
+`main` = `3e44aa9`, migration head **`0222_defect_lifecycle_guards.sql`**. Scan over `origin/main` and every remote
+branch immediately before the P1 commit:
+
+| Number | Migration file | Branch | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|
+| 0220 | `0220_eld_event_ledger.sql` | `claude/eld-compliance-intelligence-ramlrd` | open | with integration hub | first to merge keeps it |
+| 0220–0223 | `0220_integration_hub_connectors.sql` … `0223_integration_hub_conflicts_and_links.sql` | `claude/integration-hub-subsystem-6nzrkw` | open | 0220 with ELD | first to merge keeps it |
+| 0224 | `0224_eld_duty_day_designations.sql` | `claude/eld-compliance-intelligence-ramlrd` | open | with ci-stabilization | first to merge keeps it |
+| 0224, 0225 | `0224_offline_capture_identity_scope.sql`, `0225_queued_package_identity_scope.sql` | `fix/main-ci-stabilization` | open | 0224 with ELD | first to merge keeps it |
+| **0226** | **`0226_payroll_compensation_agreements.sql`** | **`claude/payroll-p1-compensation-agreements`** | **claiming** | **none** | **keeps 0226** |
+
+P1 was drafted as `0224` (free at the first scan of the day) and moved to `0226` before any environment applied it,
+when the pre-commit rescan found `0224` and `0225` claimed. **Next free number for new work: `0227`** (re-check with
+the scan before committing).
+
 ## Claim: 0221, 0222 (mechanic portal CP2 — defect to return to service, 2026-10-01)
 
 | Number | Migration file | Branch | PR | Base | Status | Collision | Intended resolution |
@@ -365,4 +382,13 @@ Scanned `origin/main` and all 123 remote refs immediately before committing: `ma
 highest number held anywhere is `0223` (`claude/integration-hub-subsystem-6nzrkw`), so `0224` is the first
 number free everywhere. Recorded in the commit that creates the migration.
 
-**Next free number for new work: `0225`** (re-check with the scan before committing).
+**Collision found 2026-10-03 at the merge of `main` `a61ff29`:** `fix/main-ci-stabilization` holds
+`0224_offline_capture_identity_scope.sql` (and `0225_queued_package_identity_scope.sql`), renamed to those numbers
+in `41cab8a`, dated 2026-10-02T02:53Z — forty-one minutes before this branch's `0224` commit (`c731c69`,
+03:34Z). This branch's pre-commit scan did not see it. `main`'s own table (above) already lists the pair as
+"0224 with ELD — first to merge keeps it". Neither file is on `main`; `main` has since taken `0226` (payroll P1).
+Under the rule of thumb, whichever merges first keeps `0224` and the other renumbers at its own rebase. This
+branch does not renumber pre-emptively and does not rename the other branch's file. Checkpoint 2d adds no
+migration.
+
+**Next free number for new work: `0227`** (re-check with the scan before committing).

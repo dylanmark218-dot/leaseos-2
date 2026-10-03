@@ -638,3 +638,86 @@ describe("percentage pay applies to eligible revenue", () => {
     expect(e.breakdown[0].label).toBe("Sales tax");
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* P0 — the run lifecycle is executable, and collection is deliberate  */
+/* ------------------------------------------------------------------ */
+
+import { payRunMayCollect, selectCollectible, separationOfDuties, type PayRunState } from "./payrollEngine";
+
+describe("P0 — a run can leave draft, and only along the engine's edges", () => {
+  it("allows draft → collecting and collecting → review", () => {
+    expect(canTransitionPayRun("draft", "collecting")).toBe(true);
+    expect(canTransitionPayRun("collecting", "review")).toBe(true);
+    expect(canTransitionPayRun("review", "approved")).toBe(true);
+  });
+
+  it("refuses the shortcuts a client might try", () => {
+    expect(canTransitionPayRun("draft", "review")).toBe(false);
+    expect(canTransitionPayRun("draft", "approved")).toBe(false);
+    expect(canTransitionPayRun("collecting", "paid")).toBe(false);
+    expect(canTransitionPayRun("review", "paid")).toBe(false);
+    expect(canTransitionPayRun("paid", "review")).toBe(false);
+  });
+
+  it("collects only while the run is draft or collecting", () => {
+    const open: PayRunState[] = ["draft", "collecting"];
+    const closed: PayRunState[] = ["review", "approved", "processing", "paid", "closed", "amended"];
+    for (const s of open) expect(payRunMayCollect(s), s).toBe(true);
+    for (const s of closed) expect(payRunMayCollect(s), s).toBe(false);
+  });
+});
+
+describe("P0 — what a run may collect", () => {
+  const run = { financialEntityId: 10, payPeriodId: 7 };
+  const base = { financialEntityId: 10, payPeriodId: 7, alreadyCollected: false, calculatedAmountCents: 24000 };
+
+  it("takes approved events with an integer amount, in the run's book and period, once", () => {
+    const d = selectCollectible({ run, events: [
+      { id: 1, status: "approved", ...base },
+      { id: 2, status: "pending", ...base },
+      { id: 3, status: "held", ...base },
+      { id: 4, status: "approved", ...base, alreadyCollected: true },
+      { id: 5, status: "approved", ...base, calculatedAmountCents: null },
+      { id: 6, status: "approved", ...base, financialEntityId: 11 },
+      { id: 7, status: "approved", ...base, payPeriodId: 8 },
+      { id: 8, status: "paid", ...base },
+      { id: 9, status: "void", ...base },
+    ] });
+    expect(d.collect.map(e => e.id)).toEqual([1]);
+    expect(Object.fromEntries(d.skipped.map(s => [s.id, s.reason]))).toEqual({
+      2: "status is pending, not approved",
+      3: "status is held, not approved",
+      4: "already collected by a pay run",
+      5: "no integer amount",
+      6: "outside the run's book",
+      7: "outside the run's period",
+      8: "status is paid, not approved",
+      9: "status is void, not approved",
+    });
+  });
+
+  it("collects nothing from nothing, and nothing twice", () => {
+    expect(selectCollectible({ run, events: [] }).collect).toEqual([]);
+    const once = selectCollectible({ run, events: [{ id: 1, status: "approved", ...base }] });
+    const again = selectCollectible({ run, events: once.collect.map(e => ({ ...e, alreadyCollected: true })) });
+    expect(again.collect).toEqual([]);
+    expect(again.skipped[0]!.reason).toBe("already collected by a pay run");
+  });
+});
+
+describe("P0 — creator is not approver, on the record", () => {
+  it("refuses the originator", () => {
+    const r = separationOfDuties({ originatorUserId: 7, actorUserId: 7, act: "approve this pay run" });
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toMatch(/you originated this record/);
+  });
+  it("refuses an unknown originator rather than treating unknown as someone else", () => {
+    const r = separationOfDuties({ originatorUserId: null, actorUserId: 7, act: "approve this pay run" });
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toMatch(/not on the trail/);
+  });
+  it("allows a different person", () => {
+    expect(separationOfDuties({ originatorUserId: 7, actorUserId: 8, act: "approve" })).toEqual({ allowed: true });
+  });
+});

@@ -25,6 +25,8 @@ import { PeopleAccessView, type PeopleAccessViewProps } from "../people/PeopleAc
 import { CustomersView, type CustomerProfile, type CustomersViewProps } from "../pages/CustomersView";
 import { ContractView, type ContractDetail, type ContractViewProps } from "../pages/ContractView";
 import { RateSheetView, type RateSheetDetail, type RateSheetViewProps } from "../pages/RateSheetView";
+import { FileManagerView } from "../records/FileManagerView";
+import { counts as fileCounts, detail as fileDetail, fileManagerProps } from "../test/fileManagerFixtures";
 import { BoardPanelView, type BoardPanelViewProps } from "../portal/panels/BoardPanelView";
 import { presentOpenWork } from "../portal/boardModel";
 
@@ -302,6 +304,12 @@ const surfaces = [
   { name: "board — offline conversation with a queued message and a bulletin to acknowledge", render: () => render(<BoardPanelView {...board()} />) },
   { name: "board — a write the device refused and conversations that failed to load", render: () => render(<BoardPanelView {...board({ online: true, writeNotice: "Not signed in to an organization on this device — nothing was kept", channels: { kind: "failed", message: "Network down" }, visibleChannels: [] })} />) },
   { name: "board — open-work card with an offer", render: () => render(<BoardPanelView {...board({ online: true, tab: "open_work", selectedPost: "OS-1", card: { kind: "loaded", value: boardCard }, pendingResponse: { response: "interested", state: "queued", lastError: null } })} />) },
+  // The Records & File Manager: folders, list and inspector together, then the states that only
+  // exist when something is refused or missing — an alert must be reachable in each.
+  { name: "records — list and inspector", render: () => render(<FileManagerView {...fileManagerProps()} />) },
+  { name: "records — nothing selected, empty folder", render: () => render(<FileManagerView {...fileManagerProps({ folder: "billing", selectedId: null, detail: { kind: "none" }, list: { kind: "loaded", rows: [], counts: fileCounts, truncated: true, reach: { categories: [], own: true, canVerify: false } } })} />) },
+  { name: "records — integrity failure and withheld history", render: () => render(<FileManagerView {...fileManagerProps({ notice: { tone: "error", text: "File storage is not reachable from this server" }, detail: { kind: "loaded", detail: fileDetail({ lifecycle: "integrity_failed", accessHistory: null, legalHold: { active: true, holds: [{ holdNumber: "LH-2201", matterRef: "MAT-221", status: "active", placedAt: new Date("2026-09-12T00:00:00Z"), releasedAt: null }] } }) } })} />) },
+  { name: "records — list failed, record refused", render: () => render(<FileManagerView {...fileManagerProps({ list: { kind: "failed", message: "Database unavailable" }, detail: { kind: "failed", message: "Record 1 not found" } })} />) },
 ];
 
 describe("WCAG A/AA, the rules a renderer-free environment can decide", () => {

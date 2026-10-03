@@ -57,6 +57,9 @@ export type Permission =
   | "evidence.read_commercial"
   | "evidence.read_personnel"
   | "evidence.read_legal"
+  // The file manager's gate. Opening the browser is not reading a record: each
+  // record is still decided on its own category read (or evidence.read_own).
+  | "evidence.browse"
   // Safety
   | "incident.create"
   | "incident.read_summary"
@@ -152,6 +155,13 @@ export type Permission =
   | "payroll.time.submit_own"
   | "payroll.dispute.raise_own"
   | "payroll.profile.write"
+  // Payroll P1 (0226) — compensation agreements and the earning-code catalogue, split by act (D4):
+  // reading compensation, proposing it, approving it, and administering a book's earning codes are
+  // four different authorities. None of them is held by dispatch, a driver, a mechanic or management.
+  | "payroll.compensation.read"
+  | "payroll.compensation.propose"
+  | "payroll.compensation.approve"
+  | "payroll.earning_code.manage"
   // Contractor settlement is its own ledger, never employee payroll.
   | "contractor.read" | "contractor.write" | "contractor.approve"
   | "finance.entity.write"
@@ -425,6 +435,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "evidence.seal",
     "evidence.send",
     "evidence.read_own",
+    "evidence.browse",
     "evidence.delete_device_copy",
     "incident.create",
     "roadside.open",
@@ -532,6 +543,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.read",
     "comms.plan.compute",
     "evidence.read_job_operational",
+    "evidence.browse",
     "incident.create",
     // Summary only. A dispatcher must know a unit is unavailable; they do not
     // need the operator's injury details to reassign a job.
@@ -636,6 +648,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // job the unit was on. It is not granted commercial or personnel reads at
     // all, so nothing has to be subtracted later.
     "evidence.read_maintenance",
+    "evidence.browse",
     "evidence.read_job_operational",
     "maintenance.read_defect",
     "maintenance.write_defect",
@@ -721,6 +734,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.read",
     "comms.unit.capability",
     "evidence.read_maintenance",
+    "evidence.browse",
     "evidence.read_job_operational",
     "maintenance.read_defect",
     "maintenance.write_defect",
@@ -864,6 +878,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.observation.decide",
     "comms.plan.compute",
     "evidence.read_safety_summary",
+    "evidence.browse",
     "evidence.read_job_operational",
     "evidence.read_maintenance",
     "evidence.export",
@@ -1000,6 +1015,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.plan.compute",
     "comms.assignment.record",
     "evidence.read_job_operational",
+    "evidence.browse",
     "evidence.read_commercial",
     "evidence.read_safety_summary",
     "evidence.read_maintenance",
@@ -1255,6 +1271,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.observation.decide",
     "comms.plan.compute",
     "evidence.read_job_operational",
+    "evidence.browse",
     "evidence.read_commercial",
     "evidence.read_safety_summary",
     "evidence.read_maintenance",
@@ -1443,12 +1460,15 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "academy.evaluate",
     "academy.certificate.issue",
     "evidence.read_personnel",
+    "evidence.browse",
     "incident.read_summary",
     "incident.read_investigation",
     "payroll.read",
     "payroll.read_own",
     "payroll.read_employee",
     "payroll.review",
+    "payroll.compensation.read",
+    "payroll.compensation.propose",
     "personnel.read",
     "personnel.write",
     "hos.read",
@@ -1485,6 +1505,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "compliance.requirement.second_approve",
     "compliance.verification.govern",
     "evidence.read_legal",
+    "evidence.browse",
     "evidence.read_safety_summary",
     "evidence.read_job_operational",
     "evidence.export",
@@ -1517,6 +1538,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "document.read",
     "facility.directory.read",
     "evidence.read_job_operational",
+    "evidence.browse",
     "evidence.read_safety_summary",
     "evidence.read_maintenance",
     "evidence.export",
@@ -1593,6 +1615,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "billing.read",
     "compliance.read",
     "evidence.read_commercial",
+    "evidence.browse",
     "evidence.read_job_operational",
     "contractor.read",
     "funding.read",
@@ -1660,8 +1683,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.rate.read",
     "payroll.export",
     "evidence.read_personnel",
+    "evidence.browse",
     "personnel.read",
     "payroll.profile.write",
+    "payroll.compensation.read",
+    "payroll.compensation.propose",
+    "payroll.earning_code.manage",
     "contractor.read",
     "surface.exceptions.read",
     "surface.search",
@@ -1679,6 +1706,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "tax.adjust",
     "tax.export",
     "evidence.read_commercial",
+    "evidence.browse",
     "evidence.export",
     "contractor.read",
     "funding.read",
@@ -1744,7 +1772,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.approve",
     "payroll.rate.read",
     "payroll.rate.write",
+    "payroll.compensation.read",
+    "payroll.compensation.approve",
+    "payroll.earning_code.manage",
     "evidence.read_commercial",
+    "evidence.browse",
     "evidence.export",
     "finance.entity.write",
     "contractor.read",
@@ -1882,6 +1914,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "banking.read",
     "billing.read",
     "evidence.read_commercial",
+    "evidence.browse",
     "evidence.export",
     "contractor.read",
     "funding.read",
@@ -1960,20 +1993,27 @@ export function isUniversalPermission(p: Permission): boolean {
  * mechanic has no commercial read to begin with. They stay because a future
  * grant edit that widens a role should still not silently open these.
  */
+/**
+ * Payroll P1 — every compensation authority, denied by name to the roles that work beside payroll but
+ * must never see or set what a person is paid. Sharing a job, a dispatch or a truck grants none of it.
+ */
+const COMPENSATION_PERMISSIONS: readonly Permission[] = ["payroll.compensation.read", "payroll.compensation.propose", "payroll.compensation.approve", "payroll.earning_code.manage"];
+
 const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
-  mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation"],
-  shop_lead: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation"],
-  dispatcher: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation"],
-  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation"],
-  auditor: ["payroll.read", "billing.write", "personnel.write"],
+  mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  shop_lead: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  dispatcher: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  auditor: ["payroll.read", "billing.write", "personnel.write", ...COMPENSATION_PERMISSIONS],
 
   // The banking and tax-identifier reads are held by nobody in this model.
   // They exist so the permission has a name to be denied under, and so adding
   // a holder is a deliberate, reviewable act rather than a side effect of a
   // broad grant. Same reason `authority_certified` sits empty in the
   // measurement ladder.
-  bookkeeper: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "payroll.approve"],
-  payroll_admin: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.approve", "billing.write"],
+  bookkeeper: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "payroll.approve", ...COMPENSATION_PERMISSIONS],
+  // P1 — the administrator proposes compensation; approving it is the controller's (D4).
+  payroll_admin: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.approve", "billing.write", "payroll.compensation.approve"],
   tax_preparer: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "billing.write", "banking.reconcile"],
   controller: ["payroll.bank.read", "payroll.tax_identifier.read"],
   external_accountant: [
@@ -2191,6 +2231,11 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "assistant.commit",
   // B20.7
   "payroll.profile.write",
+  // P1 — proposing or approving compensation, and changing a book's earning codes, are refused when
+  // their authorization row cannot be written.
+  "payroll.compensation.propose",
+  "payroll.compensation.approve",
+  "payroll.earning_code.manage",
   "contractor.approve",
   "finance.entity.write",
   // B20.13 — a claim ties an expense to a program on the stacking ledger, and
@@ -2601,6 +2646,11 @@ export const RECORDS_PROCEDURE_PERMISSIONS = {
   "records.evidence.amend": "evidence.amend",
   "records.evidence.listForOperator": "evidence.read_own",
   "records.evidence.export": "evidence.export",
+  // The Records & File Manager. The gate opens the browser; each record is then
+  // decided on its own category read, and one out of reach is "not found".
+  "records.files.list": "evidence.browse",
+  "records.files.get": "evidence.browse",
+  "records.files.download": "evidence.browse",
   "records.incident.capture": "incident.create",
   "records.incident.readInvestigation": "incident.read_investigation",
   "records.incident.review": "incident.review",
@@ -2895,12 +2945,31 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   // roles. Neither role can do both.
   "payroll.runsList": "payroll.read_all",
   "payroll.runCreate": "payroll.run",
+  // P0.4 / P0.5 — collecting approved earnings into lines and submitting the run for review are the
+  // payroll administrator's acts; approving it stays the controller's (below). Approving ONE earning is
+  // the reviewer's act (payroll_admin, hr): the human door between a proposed earning and a payable line.
+  "payroll.runCollect": "payroll.run",
+  "payroll.runSubmit": "payroll.run",
+  "payroll.earningApprove": "payroll.review",
   "payroll.runApprove": "payroll.approve",
   "payroll.adjustmentRequest": "payroll.adjust",
   "payroll.adjustmentApprove": "payroll.approve",
   "payroll.export": "payroll.export",
 
   // Contractor settlement — a separate ledger from employee payroll.
+  // Payroll P1 (0226) — compensation agreements and the earning-code catalogue.
+  "payrollCompensation.earningCodesList": "payroll.compensation.read",
+  "payrollCompensation.earningCodeCreate": "payroll.earning_code.manage",
+  "payrollCompensation.earningCodeRetire": "payroll.earning_code.manage",
+  "payrollCompensation.profileClassification": "payroll.compensation.read",
+  "payrollCompensation.agreementsList": "payroll.compensation.read",
+  "payrollCompensation.agreementGet": "payroll.compensation.read",
+  "payrollCompensation.agreementCreate": "payroll.compensation.propose",
+  "payrollCompensation.versionPropose": "payroll.compensation.propose",
+  "payrollCompensation.versionApprove": "payroll.compensation.approve",
+  "payrollCompensation.versionReject": "payroll.compensation.approve",
+  "payrollCompensation.versionInForce": "payroll.compensation.read",
+
   "contractors.settlementsList": "contractor.read",
   "contractors.settlementCreate": "contractor.write",
   "contractors.settlementApprove": "contractor.approve",

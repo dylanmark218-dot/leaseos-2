@@ -69,7 +69,10 @@ describe("the real tree", () => {
     // ELD checkpoint 2c took 0224 (duty-day designations): 0223 is held by
     // `claude/integration-hub-subsystem-6nzrkw`, so head+1 would have collided; the register records the scan.
     expect(files).toContain("0224_eld_duty_day_designations.sql");
-    expect(headSlot(files)).toBe("0224");
+    // Payroll P1 took 0226 (compensation agreements): 0220–0225 are claimed by open branches (ELD, integration
+    // hub, CI stabilization), so head+1 would have collided twice; drafted as 0224 and moved before it was applied.
+    expect(files).toContain("0226_payroll_compensation_agreements.sql");
+    expect(headSlot(files)).toBe("0226");
   });
 
   it("keeps the reserved slots empty", () => {

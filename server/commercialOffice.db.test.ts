@@ -38,8 +38,14 @@ d("the owner's decisions are the seeded defaults", () => {
     expect((await c.commercialOffice.numbering.list()).map(n => n.sequenceType).sort()).toEqual(["CLI", "INV", "MF", "PO", "VEN"]);
     expect(await c.commercialOffice.settings.get()).toMatchObject({ accountingTarget: "quickbooks_online", layer: "default" });
     const ladder = await c.commercialOffice.approvals.policies();
-    expect(ladder.filter(p => p.bookOrgRef === null).length).toBe(18);
-    expect(ladder.every(p => p.source.startsWith("owner_decision_2026-09-17"))).toBe(true);
+    // The commercial office's own ladder: 18 default rows, every one from the owner decision of 2026-09-17.
+    const defaults = ladder.filter(p => p.bookOrgRef === null);
+    const commercial = defaults.filter(p => p.category !== "compensation_agreement");
+    expect(commercial.length).toBe(18);
+    expect(commercial.every(p => p.source.startsWith("owner_decision_2026-09-17"))).toBe(true);
+    // Payroll P1 (0226, owner decision D4 of 2026-10-02) reuses the same ladder for compensation approval: one row.
+    const compensation = defaults.filter(p => p.category === "compensation_agreement");
+    expect(compensation.map(p => [p.approverRole, p.source.startsWith("owner_decision_2026-10-02")])).toEqual([["controller", true]]);
     expect((await c.commercialOffice.categories.list({ kind: "profitability_dimension" })).length).toBe(7);
     expect((await c.commercialOffice.categories.list({ kind: "load_category" })).length).toBe(0);
     expect((await c.commercialOffice.categories.list({ kind: "document_type" })).filter(t => t.builtIn).length).toBeGreaterThanOrEqual(15);   // 0144: the ten canonical kinds LeaseOS itself produces; 0178 (Document Control) adds the five received kinds; the catalog seed adds a built-in row per definition
