@@ -9,11 +9,12 @@
  * never a false sense that the tablet's vault is under them.
  */
 
-import { FlagConnectivity, MemoryKeystore, MemoryStore, MemoryVault } from "../runtime/adapters/memory";
+import { FlagConnectivity, MemoryKeystore, MemoryStore, MemoryVault, memoryProbes } from "../runtime/adapters/memory";
 import { Outbox } from "../runtime/outbox";
 import { SyncEngine } from "../runtime/syncEngine";
 import type { OutboxStatus, QuickCaptureAction } from "./viewModels";
 import type { Transport } from "../runtime/contracts";
+import { captureGate } from "../runtime/capabilities";
 
 export type MountedRuntime = { kind: "native" | "browser_fallback"; outboxStatus: () => Promise<OutboxStatus>; capture: (a: QuickCaptureAction, args?: { jobId?: number | null; unitId?: number | null; fields?: Record<string, unknown>; files?: { bytes: Uint8Array; fileName: string; mimeType: string }[] }) => Promise<{ localId: string }>; syncNow: () => Promise<unknown> };
 
@@ -25,7 +26,8 @@ export function mountBrowserFallbackRuntime(transport: Transport): MountedRuntim
   const vault = new MemoryVault(keystore);
   const store = new MemoryStore();
   const connectivity = new FlagConnectivity(true);
-  const outbox = new Outbox(store, vault, tickingClock);
+  // SPINE item 3: every capture passes HS1 and the one offline rule before it is saved.
+  const outbox = new Outbox(store, vault, tickingClock, captureGate({ probes: memoryProbes(), connectivity }));
   const engine = new SyncEngine({ store, vault, keystore, transport, connectivity, clock: tickingClock, platform: "web" });
   if (typeof window !== "undefined") {
     window.addEventListener("online", () => { connectivity.isOnline = true; void engine.syncOnce(); });
