@@ -25,6 +25,33 @@ import { PeopleAccessView, type PeopleAccessViewProps } from "../people/PeopleAc
 import { CustomersView, type CustomerProfile, type CustomersViewProps } from "../pages/CustomersView";
 import { ContractView, type ContractDetail, type ContractViewProps } from "../pages/ContractView";
 import { RateSheetView, type RateSheetDetail, type RateSheetViewProps } from "../pages/RateSheetView";
+import { FileManagerView } from "../records/FileManagerView";
+import { counts as fileCounts, detail as fileDetail, fileManagerProps } from "../test/fileManagerFixtures";
+import { BoardPanelView, type BoardPanelViewProps } from "../portal/panels/BoardPanelView";
+import { presentOpenWork } from "../portal/boardModel";
+
+/** 0205/0206 — the Board, read in a cab: conversations with a queued message, and an open-work card. */
+function board(o: Partial<BoardPanelViewProps> = {}): BoardPanelViewProps {
+  const at = new Date("2026-10-20T14:00:00Z");
+  const channels = [{ channelRef: "CH-D", type: "dispatch", name: "Dispatch — North", unacknowledged: 0 }, { channelRef: "CH-S", type: "safety", name: "Safety", unacknowledged: 1 }];
+  return {
+    online: false, durableQueue: false, tab: "dispatch", onTab: () => {},
+    channels: { kind: "loaded", value: channels }, visibleChannels: channels.slice(0, 1), selectedChannel: "CH-D", onSelectChannel: () => {},
+    messages: { kind: "loaded", value: [{ messageRef: "MSG-1", authorLabel: "User 7", mine: false, priority: "urgent", body: "Road closed at KM 42", deviceCreatedAt: at, serverReceivedAt: at, requiresAcknowledgement: true, acknowledgedByMe: false, pendingAcknowledgement: null }] },
+    pendingMessages: [{ localId: "L-1", body: "Leaving the lease now", state: "queued", lastError: null, capturedAt: at }],
+    onSend: () => {}, onAcknowledge: () => {},
+    work: { kind: "loaded", value: [{ postRef: "OS-1", title: "Hydrovac operator", requiredRole: "driver", startsAt: new Date("2026-10-21T06:00:00Z"), place: "Hinton area", overtime: true, myResponse: "interested" }] },
+    selectedPost: null, onSelectPost: () => {}, card: { kind: "none" }, myResponse: null, pendingResponse: null, onRespond: () => {},
+    offerAnswer: { kind: "idle" }, onAnswerOffer: () => {}, queueSummary: { waiting: 1, refused: 0 }, onRetry: () => {},
+    ...o,
+  };
+}
+const boardCard = presentOpenWork(
+  { postRef: "OS-1", title: "Hydrovac operator", status: "open", requiredRole: "driver", requiredQualifications: ["H2S", "First Aid"], requiredEquipmentClass: "hydrovac",
+    location: "Hinton area", regionCode: "HINTON", startsAt: new Date("2026-10-21T06:00:00Z"), endsAt: new Date("2026-10-21T18:00:00Z"), estimatedHours: 12, overtime: true, priority: "callout" },
+  { verdict: "unknown", reasons: [{ code: "qualification_unknown", detail: "No First Aid on record — unknown is not satisfied" }], availability: "available", interestExpressed: true, readinessNotEvaluated: ["route restrictions"] },
+  { offerRef: "OFF-1", status: "offered", expiresAt: null },
+);
 import { AnalyticsDashboardView, type AnalyticsDashboardViewProps, type MetricAnswer } from "../analytics/AnalyticsDashboardView";
 
 afterEach(cleanup);
@@ -292,6 +319,17 @@ const surfaces = [
   { name: "people & access — former", render: () => render(<PeopleAccessView {...peopleProps({ section: "former" })} />) },
   { name: "people & access — person detail", render: () => render(<PeopleAccessView {...peopleProps({ selected: { person: PERSON, workspaceOptions: [{ key: "field_workforce", label: "Field Workforce" }] } })} />) },
   { name: "people & access — refusal", render: () => render(<PeopleAccessView {...peopleProps({ error: "This is the last management access in ABC Transport." })} />) },
+
+  // 0205/0206 — the Board, read in a cab: three states, the alert regions included.
+  { name: "board — offline conversation with a queued message and a bulletin to acknowledge", render: () => render(<BoardPanelView {...board()} />) },
+  { name: "board — a write the device refused and conversations that failed to load", render: () => render(<BoardPanelView {...board({ online: true, writeNotice: "Not signed in to an organization on this device — nothing was kept", channels: { kind: "failed", message: "Network down" }, visibleChannels: [] })} />) },
+  { name: "board — open-work card with an offer", render: () => render(<BoardPanelView {...board({ online: true, tab: "open_work", selectedPost: "OS-1", card: { kind: "loaded", value: boardCard }, pendingResponse: { response: "interested", state: "queued", lastError: null } })} />) },
+  // The Records & File Manager: folders, list and inspector together, then the states that only
+  // exist when something is refused or missing — an alert must be reachable in each.
+  { name: "records — list and inspector", render: () => render(<FileManagerView {...fileManagerProps()} />) },
+  { name: "records — nothing selected, empty folder", render: () => render(<FileManagerView {...fileManagerProps({ folder: "billing", selectedId: null, detail: { kind: "none" }, list: { kind: "loaded", rows: [], counts: fileCounts, truncated: true, reach: { categories: [], own: true, canVerify: false } } })} />) },
+  { name: "records — integrity failure and withheld history", render: () => render(<FileManagerView {...fileManagerProps({ notice: { tone: "error", text: "File storage is not reachable from this server" }, detail: { kind: "loaded", detail: fileDetail({ lifecycle: "integrity_failed", accessHistory: null, legalHold: { active: true, holds: [{ holdNumber: "LH-2201", matterRef: "MAT-221", status: "active", placedAt: new Date("2026-09-12T00:00:00Z"), releasedAt: null }] } }) } })} />) },
+  { name: "records — list failed, record refused", render: () => render(<FileManagerView {...fileManagerProps({ list: { kind: "failed", message: "Database unavailable" }, detail: { kind: "failed", message: "Record 1 not found" } })} />) },
   // Analytics Checkpoint C — a manager reads this on a phone in a yard as often as at a desk.
   { name: "analytics — organization tiles", render: () => render(<AnalyticsDashboardView {...analyticsProps()} />) },
   { name: "analytics — drill-down open", render: () => render(<AnalyticsDashboardView {...analyticsProps({ drill: { metricId: "maintenance.defects.open", name: "Open defects", unit: "count", state: { kind: "loaded", answer: metricAnswer(), truncated: false, rows: [{ key: "defect:1", record: { table: "maintenanceDefects", id: 1, ref: null }, label: "Brake chamber leak", at: new Date("2026-09-20T14:00:00Z"), fields: { unitId: 7, severity: "critical", status: "open" } }] } } })} />) },

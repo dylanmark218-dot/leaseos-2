@@ -119,10 +119,9 @@ d("own pay is own pay", () => {
     // the resolved id, and an earlier version of this test matched that and my
     // own comment, which is exactly the kind of false green worth avoiding.
     const src = readFileSync("server/payrollRouter.ts", "utf8");
-    const selfService = src.slice(
-      src.indexOf("myPay: roleProcedure"),
-      src.indexOf("/* ---------------- Administration")
-    );
+    const start = src.indexOf("myPay: moneyScoped(roleProcedure");   // P0: the gate is wrapped in moneyScoped (D2)
+    expect(start).toBeGreaterThan(0);
+    const selfService = src.slice(start, src.indexOf("/* ---------------- Administration"));
     const stripComments = (t: string) =>
       t.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
     const inputSchemas = Array.from(
@@ -134,7 +133,8 @@ d("own pay is own pay", () => {
       expect(schema).not.toContain("employeeNumber");
       expect(schema).not.toContain("userId");
     }
-    expect(selfService).toContain("ownProfileOrThrow(ctx.user.id)");
+    // P0: the profile is still resolved from the session; the caller's books come from ctx.money (F1), never from input.
+    expect(selfService).toContain("ownProfileOrThrow(ctx.user.id, ctx.money)");
   });
 
   it("refuses dispatch every payroll procedure, own pay included", async () => {
@@ -172,6 +172,26 @@ d("running payroll is not approving it", () => {
     expect(
       await attempt(() => caller.payroll.runApprove({ payRunRef: "PR-nope", toState: "approved" }))
     ).toBe("passed_gate");
+  });
+
+  it("lets payroll_admin collect and submit a run, and refuses the controller both (P0.4)", async () => {
+    const admin = callerFor(await userWithRoles(["payroll_admin"]));
+    expect(await attempt(() => admin.payroll.runCollect({ payRunRef: "PR-nope" }))).toBe("passed_gate");
+    expect(await attempt(() => admin.payroll.runSubmit({ payRunRef: "PR-nope" }))).toBe("passed_gate");
+    const controller = callerFor(await userWithRoles(["controller"]));
+    expect(await attempt(() => controller.payroll.runCollect({ payRunRef: "PR-nope" }))).toBe("forbidden");
+    expect(await attempt(() => controller.payroll.runSubmit({ payRunRef: "PR-nope" }))).toBe("forbidden");
+  });
+
+  it("lets a reviewer approve an earning and refuses a driver, a dispatcher and the controller (P0.5)", async () => {
+    for (const role of ["payroll_admin", "hr"] as const) {
+      const c = callerFor(await userWithRoles([role]));
+      expect(await attempt(() => c.payroll.earningApprove({ earningRef: "ERN-nope" })), role).toBe("passed_gate");
+    }
+    for (const role of ["driver", "dispatcher", "controller", "management"] as const) {
+      const c = callerFor(await userWithRoles([role]));
+      expect(await attempt(() => c.payroll.earningApprove({ earningRef: "ERN-nope" })), role).toBe("forbidden");
+    }
   });
 
   it("keeps both permissions off every other role", () => {
@@ -405,7 +425,7 @@ d("coverage and sensitivity", () => {
     const src = readFileSync("server/payrollRouter.ts", "utf8");
     expect(/\w+:\s*protectedProcedure\b/.test(src)).toBe(false);
     const wired = (src.match(/roleProcedure\(/g) ?? []).length;
-    expect(wired).toBe(40);
+    expect(wired).toBe(43);   // P0: +3 payroll.{runCollect,runSubmit,earningApprove}
   });
 
   it("declares a permission for every one of them", () => {

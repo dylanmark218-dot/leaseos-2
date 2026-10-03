@@ -17,7 +17,15 @@ let pool: mysql.Pool;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let db: any;
 let seq = 9_800_000 + Math.floor(Math.random() * 60_000);
-beforeAll(async () => { if (!URL) return; pool = mysql.createPool({ uri: URL, connectionLimit: 4 }); db = await getDb(); });
+// CP1.5 — the stop names a unit of the confirming caller's own (historical, unowned) tenant, not a fixed
+// id that on a shared database is whichever unit another test made.
+let legacyUnit = 0;
+beforeAll(async () => {
+  if (!URL) return;
+  pool = mysql.createPool({ uri: URL, connectionLimit: 4 }); db = await getDb();
+  const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType) VALUES (?, 'hydrovac')", [`U-${Math.random().toString(36).slice(2, 9).toUpperCase()}`]);
+  legacyUnit = Number(u.insertId);
+});
 const caller = (id: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id, role: "user" } as never });
 async function withRole(role: DomainRole) { const id = seq++; await grantUserRole({ userId: id, role, scopeType: "global", grantedByUserId: 1, grantedAt: new Date() }); return id; }
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
@@ -26,7 +34,7 @@ const NOW = new Date("2026-09-11T09:00:00Z");
 const stop = (over: Record<string, unknown> = {}) => ({
   eventType: "roadside_inspection", jurisdiction: "CA-AB", agency: `agency-${rnd()}`,
   occurredAt: new Date("2026-09-11T08:42:00Z"), inspectionReportNumber: `INSP-${rnd()}`,
-  inspectionResult: "out_of_service" as const, unitId: 127, subjectRefs: { vehicle: `UNIT-${rnd()}` },
+  inspectionResult: "out_of_service" as const, unitId: legacyUnit, subjectRefs: { vehicle: `UNIT-${rnd()}` },
   violations: [{
     system: "brakes", ownCode: "LEASEOS.BRAKES.CHAMBER", citationIssued: true, outOfService: true,
     oosScope: "vehicle" as const, defectRequired: true, repairRequired: true, courtAction: false,
@@ -47,7 +55,7 @@ d("§7 — the outbox row lives or dies with the order", () => {
       aggregateId: c.eventRef, tenantId: "default", actorSource: "human", actorUserId: String(safety),
     });
     expect(rows[0].claimedAt).toBeNull();
-    expect(JSON.parse(rows[0].payloadJson)).toMatchObject({ severity: "critical", unitId: 127 });
+    expect(JSON.parse(rows[0].payloadJson)).toMatchObject({ severity: "critical", unitId: legacyUnit });
   });
 
   it("enqueues a confirmation rather than a prohibition when nothing was placed out of service", async () => {

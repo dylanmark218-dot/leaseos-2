@@ -12,6 +12,7 @@ import { z } from "zod";
 import { assertEntityInScope, entityIdsInScope, type MoneyScope } from "./_core/entityScope";
 import { resolveActingScope } from "./_core/actingScope";
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { chargeDefinitions, commercialSetupProfiles, customerAccounts, customerContractTerms, customerPurchaseOrders, fieldTicketLines, fieldTickets, pricingDecisions, units, vendorBillLines, vendorBills, vendors } from "../drizzle/schema";
 import { getDb } from "./db";
@@ -94,6 +95,7 @@ export const commercialSetupRouter = router({
       effectiveFrom: z.coerce.date(), effectiveTo: z.coerce.date().optional(), sourceKind: z.enum(["human", "ai_extracted", "imported", "negotiated"]), sourceDocumentEvidenceId: z.number().int().optional(), sourceClause: z.string().max(160).optional(), notes: z.string().max(600).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       // F1: the financial entity must be in the caller's scope; otherwise it does not exist here.
       { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
       const d = await db();
