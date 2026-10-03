@@ -170,6 +170,10 @@ export type Permission =
   | "payroll.void"
   // Contractor settlement is its own ledger, never employee payroll.
   | "contractor.read" | "contractor.write" | "contractor.approve"
+  // 0237 — the marketplace: a client organization posts work, contractor organizations bid,
+  // the client AWARDS. Posting and bidding are two sides and two permissions, so a company
+  // that only ever tenders work never holds the right to bid on its own postings by accident.
+  | "marketplace.read" | "marketplace.posting.manage" | "marketplace.bid.manage" | "marketplace.award"
   | "finance.entity.write"
   /* --- B20.13: funding & incentives --- */
   // Reading the opportunity pipeline is broad; recording a claim against an
@@ -527,6 +531,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "document.read",
     "document.intake",
     "document.confirm",
+    "marketplace.read",
+    "marketplace.bid.manage",
     "hos.recordScannedLog",
     "hos.attest",
     "automation.policy.read",
@@ -1095,6 +1101,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "hos.write",
     "contractor.read",
     "contractor.write",
+    "marketplace.read",
+    "marketplace.posting.manage",
+    "marketplace.bid.manage",
     "tax.expense.create",
     "funding.read",
     "funding.manage",
@@ -1369,6 +1378,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "contractor.read",
     "contractor.write",
     "contractor.approve",
+    "marketplace.read",
+    "marketplace.posting.manage",
+    "marketplace.bid.manage",
+    "marketplace.award",
     "finance.entity.write",
     "tax.expense.create",
     "funding.read",
@@ -1580,6 +1593,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "attest.export",
     "document.read",
     "safety_program.read",
+    "marketplace.read",
     "facility.directory.read",
     "evidence.read_job_operational",
     "evidence.browse",
@@ -1836,6 +1850,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "finance.entity.write",
     "contractor.read",
     "contractor.approve",
+    "marketplace.read",
+    "marketplace.award",
     "tax.rules.manage",
     "funding.read",
     "funding.manage",
@@ -2352,6 +2368,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "attest.void",
   "attest.supersede",
   "attest.export",
+  // 0237 — an award binds two organizations to a hashed bid; a submission freezes an immutable
+  // revision. Neither may happen with no record of who authorized it.
+  "marketplace.award",
+  "marketplace.bid.manage",
 ] as const;
 
 export function isSensitivePermission(p: Permission): boolean {
@@ -3231,6 +3251,47 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "contractorOperations.payablesMine": "contractor.read",
   "contractorOperations.payableSubmitReview": "contractor.write",
   "contractorOperations.payableApprove": "contractor.approve",
+
+  /* ---- 0237: marketplace — posting + bid + award (checkpoint 1) ---- */
+  "marketplace.postingCreate": "marketplace.posting.manage",
+  "marketplace.postingUpdate": "marketplace.posting.manage",
+  "marketplace.postingPublish": "marketplace.posting.manage",
+  "marketplace.postingOpenBidding": "marketplace.posting.manage",
+  "marketplace.postingCloseBidding": "marketplace.posting.manage",
+  "marketplace.postingCancel": "marketplace.posting.manage",
+  "marketplace.postingInvite": "marketplace.posting.manage",
+  "marketplace.bidShortlist": "marketplace.posting.manage",
+  "marketplace.award": "marketplace.award",
+  "marketplace.postingGet": "marketplace.read",
+  "marketplace.postingsList": "marketplace.read",
+  "marketplace.postingEvents": "marketplace.read",
+  "marketplace.bidsForPosting": "marketplace.read",
+  "marketplace.bidsMine": "marketplace.read",
+  "marketplace.bidReadiness": "marketplace.bid.manage",
+  "marketplace.bidDraftSave": "marketplace.bid.manage",
+  "marketplace.bidSubmit": "marketplace.bid.manage",
+  "marketplace.bidWithdraw": "marketplace.bid.manage",
+  /* ---- 0238: the award → dispatch bridge. Issuing is the client's posting right; dispatching is the
+     contractor's DISPATCH right — the same permission its dispatcher's screen needs to create a posting. ---- */
+  "marketplace.contractIssue": "marketplace.posting.manage",
+  "marketplace.contractDispatch": "dispatch.assign",
+  "marketplace.contractGet": "marketplace.read",
+  "marketplace.contractsMine": "marketplace.read",
+  /* ---- 0239: the social layer — tender discussion, following, profiles, preferred contractors ---- */
+  "marketplace.questionAsk": "marketplace.bid.manage",
+  "marketplace.questionAnswer": "marketplace.posting.manage",
+  "marketplace.clarificationPublish": "marketplace.posting.manage",
+  "marketplace.noticeIssue": "marketplace.posting.manage",
+  "marketplace.clarifications": "marketplace.read",
+  "marketplace.followSet": "marketplace.bid.manage",
+  "marketplace.followRemove": "marketplace.bid.manage",
+  "marketplace.followsMine": "marketplace.read",
+  "marketplace.profileUpsert": "marketplace.bid.manage",
+  "marketplace.profileGet": "marketplace.read",
+  "marketplace.preferredAdd": "marketplace.posting.manage",
+  "marketplace.preferredRemove": "marketplace.posting.manage",
+  "marketplace.preferredList": "marketplace.read",
+  "marketplace.postingInvitePreferred": "marketplace.posting.manage",
 
   /* ---- v21.3: IFTA ---- */
   "ifta.distanceRecord": "ifta.distance.record",

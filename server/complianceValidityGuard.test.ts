@@ -117,7 +117,9 @@ const CONSUMERS: { file: string; name: string; kind: "fn" | "case"; mustCall: bo
   { file: "server/_core/insuranceRisk.ts", name: "proofFromDocuments", kind: "fn", mustCall: true },
   { file: "server/_core/insuranceRisk.ts", name: "assessCoverage", kind: "fn", mustCall: false,
     receiver: r => /\bdocument\b|\bverdict\b|\bproof\b/.test(r.getText()) },
-  { file: "server/insuranceRouter.ts", name: "policiesFor", kind: "fn", mustCall: true },
+  // The marketplace (#109) lifted the router's policiesFor into a shared loader so bids read cover the
+  // same way; the proof read moved with it and is checked where it now lives.
+  { file: "server/_core/insuranceCoverage.ts", name: "policiesForFinancialEntity", kind: "fn", mustCall: true },
   { file: "server/_core/compliancePassport.ts", name: "medicalFitnessForDispatch", kind: "fn", mustCall: false },
   { file: "server/complianceRouter.ts", name: "medicalEligibility", kind: "fn", mustCall: true },
   { file: "server/surfacesService.ts", name: "loadExceptionSources", kind: "fn", mustCall: true },
@@ -204,6 +206,9 @@ const READERS: Record<string, string> = {
   // C1b-3's D-05 read adapter (#57), added on merging main.
   "server/qualificationReads.ts": "an Academy grant's evidence document through complianceDocumentValidity; the grant itself through academyVerdict (qualificationValidity)",
   // 0228 — the Safety & Compliance Program Builder, added on merging main.
+  // Marketplace (#109), added on merging main.
+  "server/_core/insuranceCoverage.ts": "the insurance loader shared by the insurance office and marketplace bids: the owner's proof through proofFromDocuments",
+  "server/_core/marketplaceReadinessFacts.ts": "a bidder's carrier documents, handed to marketplaceReadiness, which decides through complianceDocumentValidity; decides nothing itself",
   "server/safetyProgramRouter.ts": "the vendor compliance package manifest: the carrier's COR, WCB, insurance and Safety Fitness documents and each unit's CVIP through complianceDocumentValidity; decides nothing itself",
 };
 

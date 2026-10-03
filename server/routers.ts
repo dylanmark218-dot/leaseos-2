@@ -150,6 +150,7 @@ import { decideComplianceCredential, recordCredentialEntry } from "./credentialV
 import { dbOrThrow } from "./driverPortfolioService";
 import { isMedicalDocType } from "./_core/compliancePassport";
 import { contractorOperationsRouter } from "./contractorOperationsRouter";
+import { marketplaceRouter } from "./marketplaceRouter";
 import { auditRouter } from "./auditRouter";
 import { spatialRouter } from "./spatialRouter";
 import { closeoutRouter } from "./closeoutRouter";
@@ -390,6 +391,7 @@ export const appRouter = router({
   sourceRegistry: sourceRegistryRouter,
   contractors: contractorRouter,
   contractorOperations: contractorOperationsRouter,
+  marketplace: marketplaceRouter,
   finance: financeRouter,
   portals: portalsRouter,
   funding: fundingRouter,

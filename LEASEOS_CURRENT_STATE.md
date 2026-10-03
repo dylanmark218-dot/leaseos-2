@@ -7,14 +7,14 @@ here can be added rather than read.
 | Measure | Value | Read from |
 |---|---|---|
 | Release | **v23.31** | `LEASEOS_RELEASE` (or explicit argument 1) |
-| Tables | **482** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **207** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **897** | `roleProcedure(` call sites across all routers |
+| Tables | **494** | `mysqlTable(` declarations in `drizzle/schema.ts` |
+| Migrations | **211** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Role-authorized procedures | **933** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **40** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
-| Permissions | **436** | the `Permission` union |
-| Sensitive (fail-closed) permissions | **178** | `SENSITIVE_PERMISSIONS` |
+| Permissions | **440** | the `Permission` union |
+| Sensitive (fail-closed) permissions | **180** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **21** | `UNIVERSAL_PERMISSIONS` |
 | Test files / cases | **computed by the gate, not committed** | `scripts/current-state.sh --metrics` → `artifacts/current-state-metrics.json`, printed by gate 8. Files are the runner's own list; cases are `it(` occurrences in source. Not committed because nearly every pull request changes them |
 | Native-only runtime bindings | **7 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
@@ -215,7 +215,24 @@ the snapshot, sent with the account's terms and an alert, listed, viewed
 and accepted in the customer portal; supplemental drafts for lines released
 by a resolved dispute or a void; disputes resolved upheld, credited or
 partial with the credit approved by a second person in AR; voids recorded,
-never deleted, refused where money is applied).
+never deleted, refused where money is applied) · the marketplace foundation (a
+client organization posts work, contractor organizations bid in write-once hashed
+revisions, the client awards with a reason and never by lowest price; sealed
+pricing withheld in the read model until bidding closes, the deadline enforced by
+the clock, readiness declared-only and saying so, every transition locked,
+versioned and on the trail; the award bridged to the canonical dispatch: the
+client issues a contract that creates the contractor-owned job and its commercial
+chain, and the contractor dispatches it through the one dispatch posting door,
+idempotently; and the social layer — the tender discussion private until the client
+publishes it with the asker withheld, following that matches public work as it opens,
+company profiles declared beside what is recorded, preferred lists invited in one
+act, every notification a row the universal inbox already reads; and bid readiness
+verified against the registries themselves — the financial entity as carrier subject,
+carrier documents by the document engine, cover by the insurance engine, owned units,
+worker holdings by the Academy's rule — unknown hard requirements failing closed, the
+submission picture frozen on the revision beside the picture now, a lapse refusing the
+award with the bid standing, the client reading a projection without identifiers, and
+the dispatch gate untouched: marketplace bid readiness is not dispatch readiness).
 
 ## Implemented on the client (logic proven in Node; platform bindings named)
 
@@ -230,6 +247,7 @@ view-models. Sign-in, organization chooser, workspace chooser and the refusal
 screens at `/login` and `/workspaces`, each rendering only what the server
 offered and each run through the axe WCAG A/AA rules at three widths.
 Training Academy at `/training-academy`: course catalog, My Training, current-version lesson completion, locked/unlocked final assessment, results, certificate/qualification portfolio, and self-signing of pending regulated certificates.
+Marketplace at `/marketplace`: Job Board, My Bids, Invitations, Awards, Active Contracts, Completed Work over the marketplace procedures only — sealed prices as the server withheld them, the client's eligibility projections, a bidder's own readiness rows, submit enabled only on the server's verdict, the award with its reason.
 Customer portal at `/customer`: invitation acceptance, job board,
 pre-clearance, signing screen, chain of custody, adjustments, line disputes,
 approval queue, timeline, alerts and preferences, documents with download,

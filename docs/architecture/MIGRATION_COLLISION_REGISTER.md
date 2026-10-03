@@ -414,6 +414,11 @@ every slot in use, so it moved to `0228`. The migration creates only new tables 
 ## Change log (continued)
 
 * **2026-10-01 (SA1 merge)**: Sign & Attest `0214`–`0216` recorded against `main` `ce27fec`; next free `0220`.
+* **2026-10-03 (Marketplace renumber, PR #109)**: the marketplace branch (`claude/leaseos-marketplace-bidding-h3stdw`)
+  claimed `0189` (2026-10-01; highest held anywhere was `0188`), then `0190`, `0191` and `0192` for checkpoints 2–4.
+  `main` has since taken `0189` (rule ledger), `0191` (encrypted secrets) and `0192` (provider credentials). As the
+  later, unmerged claimant the branch moved all four, unchanged, to `0233`–`0236`, the first numbers free on `main`
+  and every remote ref (the Integration Hub holds `0229`–`0232`). Next free after it: `0237`.
 
 ## State at the Driver Portfolio security hardening (2026-10-03, `main` = `60de8c2`)
 
@@ -427,3 +432,8 @@ before it was ever applied on main. The ledger runner applies it by name.
 **Next free number after this: `0237`** (re-check with the scan before committing).
 
 * **2026-10-03 (Driver Portfolio hardening)**: drafted `0229`, renumbered to `0236` on merging `main` `60de8c2` (0229–0235 claimed by open branches); next free `0237`.
+* **2026-10-03 (Marketplace renumber, second move, PR #109)**: `main` took `0236` for the compliance-document
+  recorder (#135) while the marketplace branch held `0233`–`0236` unmerged, and `0233`–`0235` are now also claimed
+  by other open branches (billing/AR, external source registry and the safety event chain at `0233`; payroll at
+  `0234` and `0235`). As the later, unmerged claimant the marketplace branch moved all four again, unchanged, to
+  `0237`–`0240`, the first contiguous numbers free on `main` and every remote ref. Next free after it: `0241`.

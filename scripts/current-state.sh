@@ -321,7 +321,24 @@ the snapshot, sent with the account's terms and an alert, listed, viewed
 and accepted in the customer portal; supplemental drafts for lines released
 by a resolved dispute or a void; disputes resolved upheld, credited or
 partial with the credit approved by a second person in AR; voids recorded,
-never deleted, refused where money is applied).
+never deleted, refused where money is applied) · the marketplace foundation (a
+client organization posts work, contractor organizations bid in write-once hashed
+revisions, the client awards with a reason and never by lowest price; sealed
+pricing withheld in the read model until bidding closes, the deadline enforced by
+the clock, readiness declared-only and saying so, every transition locked,
+versioned and on the trail; the award bridged to the canonical dispatch: the
+client issues a contract that creates the contractor-owned job and its commercial
+chain, and the contractor dispatches it through the one dispatch posting door,
+idempotently; and the social layer — the tender discussion private until the client
+publishes it with the asker withheld, following that matches public work as it opens,
+company profiles declared beside what is recorded, preferred lists invited in one
+act, every notification a row the universal inbox already reads; and bid readiness
+verified against the registries themselves — the financial entity as carrier subject,
+carrier documents by the document engine, cover by the insurance engine, owned units,
+worker holdings by the Academy's rule — unknown hard requirements failing closed, the
+submission picture frozen on the revision beside the picture now, a lapse refusing the
+award with the bid standing, the client reading a projection without identifiers, and
+the dispatch gate untouched: marketplace bid readiness is not dispatch readiness).
 
 ## Implemented on the client (logic proven in Node; platform bindings named)
 
@@ -336,6 +353,7 @@ view-models. Sign-in, organization chooser, workspace chooser and the refusal
 screens at `/login` and `/workspaces`, each rendering only what the server
 offered and each run through the axe WCAG A/AA rules at three widths.
 Training Academy at `/training-academy`: course catalog, My Training, current-version lesson completion, locked/unlocked final assessment, results, certificate/qualification portfolio, and self-signing of pending regulated certificates.
+Marketplace at `/marketplace`: Job Board, My Bids, Invitations, Awards, Active Contracts, Completed Work over the marketplace procedures only — sealed prices as the server withheld them, the client's eligibility projections, a bidder's own readiness rows, submit enabled only on the server's verdict, the award with its reason.
 Customer portal at `/customer`: invitation acceptance, job board,
 pre-clearance, signing screen, chain of custody, adjustments, line disputes,
 approval queue, timeline, alerts and preferences, documents with download,

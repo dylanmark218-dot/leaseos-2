@@ -41,6 +41,7 @@ import { Building2,
   Factory,
   Timer,
   GraduationCap,
+  Store,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -63,6 +64,7 @@ const menuItems = [
   { icon: Factory, label: "Disposal directory", path: "/disposal-directory" },
   { icon: Timer, label: "Trip operations", path: "/trip-operations" },
   { icon: GraduationCap, label: "Training Academy", path: "/training-academy" },
+  { icon: Store, label: "Marketplace", path: "/marketplace" },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
