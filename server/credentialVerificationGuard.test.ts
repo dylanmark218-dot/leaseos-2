@@ -56,6 +56,6 @@ describe("one verification door for compliance credentials", () => {
       }
     }
     const routers = sources.find(x => x.f === "server/routers.ts")!.src;
-    expect(routers).toMatch(/createComplianceDocument\(\{ \.\.\.input, verificationStatus: "needs_review", recordedByUserId: ctx\.user\.id \}/);
+    expect(routers).toMatch(/createComplianceDocument\(\{ \.\.\.input, verificationStatus: "needs_review", recordedByUserId: ctx\.user\.id, privateDetail \}/);
   });
 });

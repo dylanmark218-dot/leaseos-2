@@ -22,25 +22,39 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, like, or } from "drizzle-orm";
 import { publicProcedure, roleProcedure, router } from "./_core/trpc";
 import { actingScopeFor, evidenceInScope } from "./db";
-import { complianceDocuments, driverCredentialShares, driverRequirementBindings, operators } from "../drizzle/schema";
+import { complianceDocuments, driverCredentialShares, driverPortfolioEvents, driverRequirementBindings, operators } from "../drizzle/schema";
 import {
   bindingProblem, credentialHistory, credentialType, dispatchView, evaluateDriverReadiness, expiryAlerts, normalizeCode,
-  requirementFromBinding, shareLifetimeHours, sharedCredentialView, walletView, SHARE_MAX_HOURS,
+  requirementFromBinding, shareableType, shareLifetimeHours, sharedCredentialView, walletView, SHARE_MAX_HOURS,
 } from "./_core/driverPortfolio";
-import { walletStatusAt } from "../shared/driverWallet";
+import { WALLET_NOT_COVERED, walletStatusAt } from "../shared/driverWallet";
 import { newToken, sha256 } from "./_core/externalIdentityPolicy";
 import { affectedRows } from "./_core/enforcementCommit";
+import { AttemptLimiter } from "./_core/attemptLimiter";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
+import { MEDICAL_FITNESS_DOC_TYPES } from "./_core/compliancePassport";
 import { assertReadinessSubjectInScope } from "./dispatchEnforcementService";
 import { composeReadiness } from "./readinessComposer";
 import { decideComplianceCredential } from "./credentialVerificationService";
 import {
   asBinding, bindingInScopeOrThrow, bindingsInScope, companyBaseline, credentialSummary, dbOrThrow, loadPortfolios, myOperator, newRef,
-  notFound, operatorInScopeOrThrow, operatorsInScope, orgRefFor, portfolioEventsPage, readinessImpact, recordPortfolioEvent,
+  notFound, operatorInScopeOrThrow, operatorOwnerOrg, operatorsInScope, orgRefFor, portfolioEventsPage, readinessImpact, recordPortfolioEvent,
   recordPortfolioView, scopedRequirements, type BindingRow,
 } from "./driverPortfolioService";
+
+/** Public redemption budgets (see shareRedeem). Exported so tests can start each case from zero. */
+export const shareRedeemLimits = {
+  attemptsPerAddress: new AttemptLimiter({ limit: 60, windowMs: 10 * 60_000 }),
+  refusalsPerAddress: new AttemptLimiter({ limit: 15, windowMs: 10 * 60_000 }),
+  redemptionsPerShare: new AttemptLimiter({ limit: 30, windowMs: 60 * 60_000 }),
+  reset() { this.attemptsPerAddress.reset(); this.refusalsPerAddress.reset(); this.redemptionsPerShare.reset(); },
+};
+/** At most one `share_verified` audit row per share in this window; the limiter bounds the rest. */
+export const SHARE_AUDIT_EVERY_MS = 15 * 60_000;
+const tooMany = () => new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Too many attempts; try again later" });
 
 const LIMIT = z.number().int().min(1).max(200).default(50);
 const SUBJECT_TYPE = z.enum(["company", "customer", "site", "job_type", "equipment", "job"]);
@@ -135,6 +149,13 @@ export const driverPortfolioRouter = router({
         verdict: wallet.verdict,
         /** Against the company baseline; the dispatch gate decides any particular job. */
         scope: wallet.scope,
+        /**
+         * The wallet never authorizes dispatch. BASELINE MET means the company's baseline holds; whether
+         * this driver may take a particular job is dispatch readiness's answer for that job
+         * (driverPortfolio.operatorReadiness / dispatch.readiness), which also reads what is listed here.
+         */
+        grantsDispatch: false as const,
+        notCovered: WALLET_NOT_COVERED,
         cards: wallet.cards,
         requirementsForSomeWork: others,
         upcomingExpirations: expiryAlerts([portfolio], now),
@@ -146,7 +167,7 @@ export const driverPortfolioRouter = router({
           offlineAllowanceHours: wallet.freshness.offlineAllowanceHours,
           limitedBy: wallet.freshness.limitedBy,
           limitingCredential: wallet.freshness.limitingCredential,
-          staleRule: "shared/driverWallet.walletStatusAt: READY FOR WORK and ACTION REQUIRED read STALE from validUntil; NOT READY stays NOT READY",
+          staleRule: "shared/driverWallet.walletStatusAt: BASELINE MET and ACTION REQUIRED read STALE from validUntil; NOT READY stays NOT READY",
         },
       };
     }),
@@ -183,6 +204,10 @@ export const driverPortfolioRouter = router({
       const op = await myOperator(db, ctx.user.id, scope);
       if (input.evidenceRecordId != null && !(await evidenceInScope(input.evidenceRecordId, scope))) throw notFound("Evidence record");
       const now = new Date();
+      // A resubmission after a rejection is a new version in needs_review; the audit names what it follows.
+      const [{ rows: held }] = await loadPortfolios(db, [op]);
+      const lastOfType = held.filter(r => credentialType(r.docType)?.code === type.code).sort((a, b) => b.capturedAt.getTime() - a.capturedAt.getTime() || b.id - a.id)[0];
+      const resubmits = lastOfType?.verificationStatus === "rejected" ? ` (resubmitted after credential ${lastOfType.id} was rejected)` : "";
       return db.transaction(async tx => {
         const ins = await tx.insert(complianceDocuments).values({
           ownerType: "operator", ownerId: op.id, docType: type.docTypes[0]!, title: input.title ?? type.label,
@@ -192,7 +217,7 @@ export const driverPortfolioRouter = router({
           evidenceRecordId: input.evidenceRecordId ?? null,
         });
         const credentialId = Number(ins[0]?.insertId ?? 0);
-        await recordPortfolioEvent(tx, { orgRef: orgRefFor(scope), operatorId: op.id, credentialId, actorUserId: ctx.user.id, eventType: "credential_uploaded", detail: `${type.label} submitted by the operator for verification`, at: now });
+        await recordPortfolioEvent(tx, { orgRef: orgRefFor(scope), operatorId: op.id, credentialId, actorUserId: ctx.user.id, eventType: "credential_uploaded", detail: `${type.label} submitted by the operator for verification${resubmits}`, at: now });
         return { credentialId, code: type.code, verificationStatus: "needs_review" as const };
       });
     }),
@@ -222,7 +247,8 @@ export const driverPortfolioRouter = router({
       const row = portfolio.credentials.find(c => c.id === input.credentialId);
       // Another driver's credential, a private one, or none: all the same answer.
       if (!row) throw notFound("Credential");
-      const type = credentialType(row.docType);
+      // The explicit shareability rule, not the private flag: medical and screening records never leave.
+      const type = shareableType(row.docType, row.privateDetail);
       if (!type) throw notFound("Credential");
       const now = new Date();
       const view = sharedCredentialView({ credentialId: row.id, code: type.code, holderName: op.name, credentials: portfolio.credentials, at: now });
@@ -313,7 +339,8 @@ export const driverPortfolioRouter = router({
       const op = await operatorInScopeOrThrow(db, input.operatorId, scope);
       const [{ portfolio, rows }] = await loadPortfolios(db, [op]);
       const privateWithheld = (await db.select({ id: complianceDocuments.id }).from(complianceDocuments)
-        .where(and(eq(complianceDocuments.ownerType, "operator"), eq(complianceDocuments.ownerId, op.id), eq(complianceDocuments.privateDetail, true)))).length;
+        .where(and(eq(complianceDocuments.ownerType, "operator"), eq(complianceDocuments.ownerId, op.id),
+          or(eq(complianceDocuments.privateDetail, true), inArray(complianceDocuments.docType, [...MEDICAL_FITNESS_DOC_TYPES]))))).length;
       const bindings = await bindingsInScope(db, scope);
       const codes = Array.from(new Set(rows.map(r => credentialType(r.docType)?.code).filter((c): c is string => !!c)));
       const byCode = codes.map(code => {
@@ -540,21 +567,49 @@ export const driverPortfolioRouter = router({
    * The one unauthenticated procedure. A 256-bit token names one credential. The answer is
    * re-read now, from the credential itself: a share never outlives the credential being valid,
    * and a revoked, expired or unknown share says so without saying anything else.
+   *
+   * A mutation, so the token travels in the POST body and never in a URL the server, a proxy or
+   * an access log records. The page a QR opens carries the token in its fragment (`/share#<token>`),
+   * which browsers do not send, and posts it here.
+   *
+   * Bounded: attempts per address, refusals per address and redemptions per share are limited
+   * (`_core/attemptLimiter`, in process). A refusal writes nothing durable — one operational log
+   * line naming the reason and a hash prefix; the append-only portfolio audit gets a row only for a
+   * real share, at most one per share per SHARE_AUDIT_EVERY_MS.
    */
   shareRedeem: publicProcedure
     .input(z.object({ token: z.string().min(20).max(200) }))
-    .query(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      const address = ctx.req?.ip ?? ctx.req?.socket?.remoteAddress ?? "unknown";
+      if (shareRedeemLimits.refusalsPerAddress.blocked(address) || !shareRedeemLimits.attemptsPerAddress.take(address)) throw tooMany();
       const db = await dbOrThrow();
       const now = new Date();
-      const s = (await db.select().from(driverCredentialShares).where(eq(driverCredentialShares.tokenHash, sha256(input.token))).limit(1))[0];
-      if (!s) return { valid: false as const, reason: "not_found" as const };
-      if (s.revokedAt) return { valid: false as const, reason: "revoked" as const };
-      if (s.expiresAt.getTime() <= now.getTime()) return { valid: false as const, reason: "expired" as const };
+      const tokenHash = sha256(input.token);
+      const refuse = <R extends "not_found" | "revoked" | "expired" | "unavailable">(reason: R) => {
+        shareRedeemLimits.refusalsPerAddress.take(address);
+        console.warn("[ShareRedeem] refused", JSON.stringify({ reason, address, tokenHash: tokenHash.slice(0, 12) }));
+        return { valid: false as const, reason };
+      };
+      const s = (await db.select().from(driverCredentialShares).where(eq(driverCredentialShares.tokenHash, tokenHash)).limit(1))[0];
+      if (!s) return refuse("not_found");
+      if (!shareRedeemLimits.redemptionsPerShare.take(String(s.id))) throw tooMany();
+      if (s.revokedAt) return refuse("revoked");
+      if (s.expiresAt.getTime() <= now.getTime()) return refuse("expired");
+      // The holder must still belong to the organization that issued the share, and the share names
+      // its one credential: an operator moved to another organization, or a credential that is not
+      // this operator's, shows nothing.
+      if ((await operatorOwnerOrg(db, s.operatorId)) !== (s.orgRef === SINGLE_TENANT_ID ? null : s.orgRef)) return refuse("unavailable");
       const op = (await db.select().from(operators).where(eq(operators.id, s.operatorId)).limit(1))[0];
       const rows = op ? (await loadPortfolios(db, [op]))[0]!.portfolio.credentials : [];
       const view = op ? sharedCredentialView({ credentialId: s.credentialId, code: s.credentialCode, holderName: op.name, credentials: rows, at: now }) : null;
-      if (!view) return { valid: false as const, reason: "unavailable" as const };
-      await recordPortfolioView(db, { orgRef: s.orgRef, operatorId: s.operatorId, credentialId: s.credentialId, actorUserId: null, eventType: "share_verified", detail: `Share ${s.shareRef} redeemed: ${view.state}`, at: now });
+      if (!view) return refuse("unavailable");
+      const recent = await db.select({ id: driverPortfolioEvents.id }).from(driverPortfolioEvents).where(and(
+        eq(driverPortfolioEvents.credentialId, s.credentialId), eq(driverPortfolioEvents.eventType, "share_verified"),
+        like(driverPortfolioEvents.detail, `Share ${s.shareRef} %`), gt(driverPortfolioEvents.occurredAt, new Date(now.getTime() - SHARE_AUDIT_EVERY_MS)),
+      )).limit(1);
+      if (!recent.length) {
+        await recordPortfolioView(db, { orgRef: s.orgRef, operatorId: s.operatorId, credentialId: s.credentialId, actorUserId: null, eventType: "share_verified", detail: `Share ${s.shareRef} redeemed: ${view.state}`, at: now });
+      }
       return {
         valid: view.valid,
         reason: view.valid ? null : view.state,

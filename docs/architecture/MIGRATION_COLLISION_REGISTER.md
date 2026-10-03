@@ -375,3 +375,14 @@ design document is withdrawn (those numbers were taken by other branches).
 ## Change log (continued)
 
 * **2026-10-01 (SA1 merge)**: Sign & Attest `0214`–`0216` recorded against `main` `ce27fec`; next free `0220`.
+
+## State at the Driver Portfolio security hardening (2026-10-03, `main` = `48a64e1`)
+
+`main` migration head: **`0227`**. `0228` is claimed by an open payroll branch. The security-hardening
+branch (`security/driver-portfolio-hardening`) takes **`0229_compliance_document_recorder.sql`** — one
+nullable column, `complianceDocuments.recordedByUserId`, no back-fill (NULL = recorder unknown). Above
+main's head, colliding with nothing on main; the ledger runner applies it by name.
+
+**Next free number after this: `0230`** (re-check with the scan before committing; `0228` stays reserved).
+
+* **2026-10-03 (Driver Portfolio hardening)**: `0229` claimed against `main` `48a64e1`; `0228` reserved for payroll; next free `0230`.

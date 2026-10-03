@@ -18,10 +18,12 @@ import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import {
-  complianceDocuments, driverPortfolioEvents, driverRequirementBindings, operatorEquipmentAuthorizations, operators,
+  complianceDocuments, coreRecordOwnership, driverPortfolioEvents, driverRequirementBindings, operatorEquipmentAuthorizations, operators,
 } from "../drizzle/schema";
 import { getDb, orgScopeWhere, ownershipScopeWhere, type TenantScope } from "./db";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
+import { entityIdsInScope } from "./_core/entityScope";
+import { MEDICAL_FITNESS_DOC_TYPES } from "./_core/compliancePassport";
 import {
   credentialType, normalizeCode, requirementFromBinding,
   type DriverPortfolio, type DriverRequirement, type PortfolioCredential, type RequirementBinding,
@@ -87,20 +89,56 @@ export const asPortfolioCredential = (c: CredentialRow): PortfolioCredential => 
  * anything else marked private) are left out: they reach dispatch only through
  * `medicalFitnessForDispatch`, and nothing in the portfolio projects them.
  */
+/**
+ * A person's equipment authorizations that belong to one organization: held in a book
+ * (financialEntities, the authorization's employer) that organization owns. NULL is the historical
+ * single tenant. A person can hold authorizations from several employers; another organization's
+ * never reaches this one's portfolio or readiness. No books for the organization means none at all.
+ */
+export async function equipmentAuthorizationsInOrg(db: Db | Tx, userIds: readonly number[], orgRef: string | null) {
+  if (!userIds.length) return [];
+  const books = await entityIdsInScope(db as never, { tenantId: orgRef ?? SINGLE_TENANT_ID });
+  if (!books.length) return [];
+  return db.select().from(operatorEquipmentAuthorizations).where(and(
+    inArray(operatorEquipmentAuthorizations.userId, [...userIds]),
+    inArray(operatorEquipmentAuthorizations.financialEntityId, books),
+  ));
+}
+
+/** The organization that owns each operator (coreRecordOwnership); absent = the historical single tenant. */
+async function operatorOwners(db: Db | Tx, operatorIds: readonly number[]): Promise<Map<number, string | null>> {
+  const out = new Map<number, string | null>(operatorIds.map(id => [id, null]));
+  if (!operatorIds.length) return out;
+  const rows = await db.select({ recordId: coreRecordOwnership.recordId, orgRef: coreRecordOwnership.orgRef }).from(coreRecordOwnership)
+    .where(and(eq(coreRecordOwnership.recordType, "operator"), inArray(coreRecordOwnership.recordId, [...operatorIds])));
+  for (const r of rows) out.set(r.recordId, r.orgRef ?? null);
+  return out;
+}
+
+/** The organization that owns one operator now, as orgRefFor spells it (NULL = the single tenant). */
+export async function operatorOwnerOrg(db: Db | Tx, operatorId: number): Promise<string | null> {
+  const org = (await operatorOwners(db, [operatorId])).get(operatorId) ?? null;
+  return org === SINGLE_TENANT_ID ? null : org;
+}
+
 export async function loadPortfolios(db: Db | Tx, ops: readonly OperatorRow[]): Promise<{ portfolio: DriverPortfolio; rows: CredentialRow[] }[]> {
   const creds = await operatorCredentials(db, ops.map(o => o.id));
-  const userIds = ops.map(o => o.userId).filter((u): u is number => u != null);
-  const equipment = userIds.length
-    ? await db.select().from(operatorEquipmentAuthorizations).where(inArray(operatorEquipmentAuthorizations.userId, userIds))
-    : [];
+  // Equipment authorizations are the operator's own organization's, never another employer's.
+  const owners = await operatorOwners(db, ops.map(o => o.id));
+  const equipmentByOrg = new Map<string | null, Awaited<ReturnType<typeof equipmentAuthorizationsInOrg>>>();
+  for (const orgRef of Array.from(new Set(owners.values()))) {
+    const userIds = ops.filter(o => o.userId != null && owners.get(o.id) === orgRef).map(o => o.userId!);
+    equipmentByOrg.set(orgRef, await equipmentAuthorizationsInOrg(db, userIds, orgRef));
+  }
   return ops.map(op => {
-    const rows = creds.filter(c => c.ownerId === op.id && !c.privateDetail);
+    // Medical fitness stays out by type as well as by flag: a mis-flagged medical row is still medical.
+    const rows = creds.filter(c => c.ownerId === op.id && !c.privateDetail && !MEDICAL_FITNESS_DOC_TYPES.includes(c.docType));
     return {
       rows,
       portfolio: {
         operatorId: op.id, name: op.name, licenceClass: op.licenseClass ?? null,
         credentials: rows.map(asPortfolioCredential),
-        equipment: op.userId == null ? [] : equipment.filter(e => e.userId === op.userId)
+        equipment: op.userId == null ? [] : (equipmentByOrg.get(owners.get(op.id) ?? null) ?? []).filter(e => e.userId === op.userId)
           .map(e => ({ equipmentType: e.equipmentType, status: e.status, expiresAt: e.expiresAt, authorizedAt: e.authorizedAt })),
       },
     };

@@ -29,6 +29,7 @@ import { actingScopeFor } from "./db";
 import { affectedRows } from "./_core/enforcementCommit";
 import { verificationRefusal, type CredentialDecision } from "./_core/credentialVerificationPolicy";
 import { credentialHistory, credentialType } from "./_core/driverPortfolio";
+import { MEDICAL_FITNESS_DOC_TYPES } from "./_core/compliancePassport";
 import { requireSubjectInScope, type ComplianceOwnerType } from "./complianceSubjectScope";
 import { dbOrThrow, loadPortfolios, orgRefFor, recordPortfolioEvent, submitterOf, type CredentialRow, type Db } from "./driverPortfolioService";
 
@@ -51,6 +52,27 @@ export async function credentialRecorders(db: Db, doc: Pick<CredentialRow, "id" 
   const submitter = await submitterOf(db, doc.id);
   if (submitter != null) out.add(submitter);
   return Array.from(out);
+}
+
+export type EntryPath = "compliance.credentialRecord" | "documents.create";
+
+/**
+ * The portfolio's entry row for an operator's credential recorded outside the portfolio, so the
+ * audit names who entered it whichever path did (driverPortfolio.submitCredential writes its own).
+ * Private and medical rows get none: the portfolio audit never projects them, and the 0229
+ * `recordedByUserId` column is their provenance. The detail names the type and path, never the
+ * identifier, storage key or contents.
+ */
+export async function recordCredentialEntry(db: Db | Parameters<Parameters<Db["transaction"]>[0]>[0], e: {
+  credentialId: number; ownerType: string; ownerId: number; docType: string; privateDetail: boolean;
+  actorUserId: number; path: EntryPath; at: Date;
+}): Promise<void> {
+  if (e.ownerType !== "operator" || e.privateDetail || MEDICAL_FITNESS_DOC_TYPES.includes(e.docType) || !e.credentialId) return;
+  const label = credentialType(e.docType)?.label ?? e.docType;
+  await recordPortfolioEvent(db, {
+    orgRef: orgRefFor(await actingScopeFor(e.actorUserId)), operatorId: e.ownerId, credentialId: e.credentialId, actorUserId: e.actorUserId,
+    eventType: "credential_uploaded", detail: `${label} recorded via ${e.path} for verification`, at: e.at,
+  });
 }
 
 /** The separation-of-duties and state rule, raised as the procedure's error. */

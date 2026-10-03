@@ -17,7 +17,7 @@ import { actingScopeFor, evidenceInScope, getDb, jobInScope, operatorInScope, un
 import { assertCallerOwnsEntity } from "./_core/entityScope";
 import { requireProvableOwnership } from "./ownershipDomain";
 import { requireSubjectInScope, type ComplianceOwnerType } from "./complianceSubjectScope";
-import { decideComplianceCredential } from "./credentialVerificationService";
+import { decideComplianceCredential, recordCredentialEntry } from "./credentialVerificationService";
 import { carrierProfileReviews, complianceConsents, complianceDocuments, complianceRequirements, writtenProgramVersions } from "../drizzle/schema";
 import {
   abstractRequestPermitted, buildPassport, composeJobPassport, MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch, nextRenewalDue,
@@ -150,16 +150,23 @@ export const complianceRouter = router({
       await requireSubjectInScope(ctx.user.id, input.ownerType, input.ownerId, "Credential owner not found");
       if (input.evidenceRecordId != null && !(await evidenceInScope(input.evidenceRecordId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       // Recorded is not verified. Every credential enters as needs_review.
-      const ins = await db.insert(complianceDocuments).values({
+      const now = new Date();
+      const privateDetail = input.privateDetail || input.docType === "medical_fitness";
+      return db.transaction(async tx => {
+      const ins = await tx.insert(complianceDocuments).values({
         ownerType: input.ownerType, ownerId: input.ownerId, docType: input.docType, requirementKey: input.requirementKey ?? null,
-        title: input.title, identifier: input.identifier ?? null, capturedAt: new Date(), issuedAt: input.issuedAt ?? null,
+        title: input.title, identifier: input.identifier ?? null, capturedAt: now, issuedAt: input.issuedAt ?? null,
         expiresAt: input.expiresAt ?? null, jurisdiction: input.jurisdiction ?? null, verificationStatus: "needs_review",
-        source: input.source ?? null, confidence: "medium", privateDetail: input.privateDetail || input.docType === "medical_fitness",
+        source: input.source ?? null, confidence: "medium", privateDetail,
         evidenceRecordId: input.evidenceRecordId ?? null,
         // 0229 — who entered it, so the same person cannot then verify it.
         recordedByUserId: ctx.user.id,
       });
-      return { credentialId: Number(ins[0]?.insertId ?? 0), verificationStatus: "needs_review" as const };
+      const credentialId = Number(ins[0]?.insertId ?? 0);
+      // The same entry row in the portfolio audit as a driver's own submission.
+      await recordCredentialEntry(tx, { credentialId, ownerType: input.ownerType, ownerId: input.ownerId, docType: input.docType, privateDetail, actorUserId: ctx.user.id, path: "compliance.credentialRecord", at: now });
+      return { credentialId, verificationStatus: "needs_review" as const };
+      });
     }),
 
   credentialVerify: roleProcedure("compliance.credentialVerify")
