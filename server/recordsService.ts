@@ -7,7 +7,9 @@
  * asking about can name itself.
  */
 
-import { and, desc, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/mysql-core";
+import type { Permission } from "./_core/recordsAuthorization";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { getDb, jobScopeSubquery, type TenantScope } from "./db";
 import { placeHold, releaseHold } from "./fleetPortfolioService";
@@ -36,7 +38,7 @@ import {
   attestDocumentRevisions,
   attestMarks,
 } from "../drizzle/schema";
-import { integrityState, signedSubjectCategory, type IntegrityState, type SigningLink } from "./recordFiles";
+import { ALL_FOLDERED_TYPES, READ_CATEGORY_BY_RECORD_TYPE, TYPE_FOLDER_TYPES, integrityState, signedSubjectCategory, type FolderKey, type IntegrityState, type SigningLink } from "./recordFiles";
 
 export type OperatorIdentity = {
   operatorId: number | null;
@@ -910,6 +912,8 @@ export type FileCandidate = {
   mimeType: string | null;
   hasContent: boolean;
   capturedAt: Date;
+  /** Server receipt time: the File Manager's order (with id), and the cursor's position. */
+  createdAt: Date;
   capturedBy: number | null;
   status: "needs_review" | "verified" | "unverified";
   sealState: "draft" | "sealed" | "amended" | "superseded";
@@ -924,19 +928,238 @@ export type FileCandidate = {
   officeRetainUntil: Date | null;
 };
 
+/** Who is asking, as the File Manager needs it: decided by the router from the session, never the request. */
+export type FileReach = {
+  userId: number;
+  operatorId: number | null;
+  /** The evidence permissions authorize() allowed this caller, in the acting organization. */
+  held: ReadonlySet<Permission>;
+};
+
+export type FileQueryFilters = {
+  folder: FolderKey;
+  /** Whitespace-separated terms, every one of which must match somewhere. */
+  terms: readonly string[];
+  /** An effective record type (signing linkage first, then the type column). */
+  recordType: string | null;
+  /** Lifecycle is decided by the projection over three tables; the query only narrows drafts from the rest. */
+  lifecycle: string | null;
+};
+
+type Db = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+const TRUE = sql`1 = 1`;
+const FALSE = sql`1 = 0`;
+
 /**
- * Every evidence record in the caller's organization, newest first, with the
- * facts the file manager presents. Batched: one query per table, not per row.
+ * The signing linkage as subqueries: which evidence ids Sign & Attest's own
+ * tables say are stroke documents, rendered marks, audit receipts and signed
+ * documents. NULLs are excluded so NOT IN means what it says.
  */
-export async function listFileCandidates(scope: TenantScope, limit: number): Promise<FileCandidate[]> {
+function signingSets(db: Db) {
+  const strokes = db.select({ id: attestMarks.strokeEvidenceRecordId }).from(attestMarks).where(isNotNull(attestMarks.strokeEvidenceRecordId));
+  const renders = db.select({ id: attestMarks.renderedEvidenceRecordId }).from(attestMarks).where(isNotNull(attestMarks.renderedEvidenceRecordId));
+  const receipts = db.select({ id: attestArtifacts.evidenceRecordId }).from(attestArtifacts)
+    .where(and(isNotNull(attestArtifacts.evidenceRecordId), eq(attestArtifacts.kind, "audit_receipt")));
+  const signedDocs = db.select({ id: attestArtifacts.evidenceRecordId }).from(attestArtifacts)
+    .where(and(isNotNull(attestArtifacts.evidenceRecordId), inArray(attestArtifacts.kind, ["finalized_pdf", "page_render"])));
+  const artifacts = db.select({ id: attestArtifacts.evidenceRecordId }).from(attestArtifacts).where(isNotNull(attestArtifacts.evidenceRecordId));
+  /** Any signing linkage at all. */
+  const linked = or(
+    inArray(evidenceRecords.id, strokes), inArray(evidenceRecords.id, renders), inArray(evidenceRecords.id, artifacts),
+  )!;
+  return { strokes, renders, receipts, signedDocs, artifacts, linked };
+}
+
+/**
+ * `fileVisibility`, in SQL — so a page is cut from rows the caller may see,
+ * not from a broad set trimmed afterwards. The projection re-checks every row
+ * it returns; the two are the same rule written twice, and the tests hold them
+ * together.
+ *
+ *   excluded  stroke data (by linkage, or by type when unlinked): never shown
+ *   category  rendered mark / receipt → legal; signed document → the category
+ *             of what was signed; anything else → its type's category
+ *   owner     evidence.read_own and (captured it, or is its operator)
+ */
+export function fileVisibilityWhere(db: Db, reach: FileReach): SQL {
+  const sets = signingSets(db);
+  const heldTypes = Object.entries(READ_CATEGORY_BY_RECORD_TYPE)
+    .filter(([, c]) => c !== null && reach.held.has(c))
+    .map(([t]) => t);
+  const legal = reach.held.has("evidence.read_legal") ? TRUE : FALSE;
+  const typeHeld = heldTypes.length ? inArray(evidenceRecords.recordType, heldTypes) : FALSE;
+
+  // A signed document is visible when what it signs is: a held evidence type that is not itself signing
+  // material, a field ticket for job-operational readers, a commercial document for commercial readers.
+  const subject = alias(evidenceRecords, "signedSubject");
+  const signedVisible = db.select({ id: attestArtifacts.evidenceRecordId }).from(attestArtifacts)
+    .innerJoin(attestDocumentRevisions, eq(attestDocumentRevisions.id, attestArtifacts.revisionId))
+    .leftJoin(subject, eq(subject.id, attestDocumentRevisions.subjectId))
+    .where(and(
+      isNotNull(attestArtifacts.evidenceRecordId),
+      inArray(attestArtifacts.kind, ["finalized_pdf", "page_render"]),
+      or(
+        reach.held.has("evidence.read_job_operational") ? eq(attestDocumentRevisions.subjectType, "field_ticket_revision") : FALSE,
+        reach.held.has("evidence.read_commercial") ? eq(attestDocumentRevisions.subjectType, "commercial_document") : FALSE,
+        heldTypes.length
+          ? and(
+              eq(attestDocumentRevisions.subjectType, "evidence_record"),
+              inArray(subject.recordType, heldTypes),
+              notInArray(subject.id, db.select({ id: attestMarks.strokeEvidenceRecordId }).from(attestMarks).where(isNotNull(attestMarks.strokeEvidenceRecordId))),
+              notInArray(subject.id, db.select({ id: attestMarks.renderedEvidenceRecordId }).from(attestMarks).where(isNotNull(attestMarks.renderedEvidenceRecordId))),
+              notInArray(subject.id, db.select({ id: attestArtifacts.evidenceRecordId }).from(attestArtifacts).where(isNotNull(attestArtifacts.evidenceRecordId))),
+            )
+          : FALSE,
+      ),
+    ));
+
+  const excluded = or(
+    inArray(evidenceRecords.id, sets.strokes),
+    and(sql`NOT (${sets.linked})`, eq(evidenceRecords.recordType, "signature_strokes")),
+  )!;
+  const categoryVisible = or(
+    and(inArray(evidenceRecords.id, sets.renders), legal),
+    and(notInArray(evidenceRecords.id, sets.renders), inArray(evidenceRecords.id, sets.receipts), legal),
+    and(notInArray(evidenceRecords.id, sets.renders), notInArray(evidenceRecords.id, sets.receipts),
+      inArray(evidenceRecords.id, sets.signedDocs), inArray(evidenceRecords.id, signedVisible)),
+    and(notInArray(evidenceRecords.id, sets.renders), notInArray(evidenceRecords.id, sets.receipts),
+      notInArray(evidenceRecords.id, sets.signedDocs), typeHeld),
+  )!;
+  const ownerVisible = reach.held.has("evidence.read_own")
+    ? or(
+        eq(evidenceRecords.capturedBy, reach.userId),
+        reach.operatorId != null
+          ? sql`EXISTS (SELECT 1 FROM ${evidenceRelationships} WHERE ${evidenceRelationships.evidenceRecordId} = ${evidenceRecords.id} AND ${evidenceRelationships.entityType} = 'operator' AND ${evidenceRelationships.entityId} = ${reach.operatorId})`
+          : FALSE,
+      )!
+    : FALSE;
+  return and(sql`NOT (${excluded})`, or(categoryVisible, ownerVisible))!;
+}
+
+/** `%`, `_` and the escape character are literal in a search term. `!`, not `\`: no SQL-mode dependence. */
+const likeTerm = (t: string) => `%${t.toLowerCase().replace(/[!%_]/g, c => `!${c}`)}%`;
+
+/**
+ * The File Manager's filters, in SQL. Each is the projection's rule or a
+ * superset of it (search and signing types, which the projection re-checks
+ * exactly), never a subset — so nothing that matches is missed by the query.
+ */
+export function fileFilterWhere(db: Db, f: FileQueryFilters): SQL {
+  const sets = signingSets(db);
+  const parts: SQL[] = [];
+  const notLinked = sql`NOT (${sets.linked})`;
+
+  // Folder: type folders file by effective type, and every signing type is filed under "other".
+  switch (f.folder) {
+    case "all": break;
+    case "needs_filing":
+      parts.push(and(isNull(evidenceRecords.jobId),
+        sql`NOT EXISTS (SELECT 1 FROM ${evidenceRelationships} WHERE ${evidenceRelationships.evidenceRecordId} = ${evidenceRecords.id} AND ${evidenceRelationships.entityType} <> 'operator')`)!);
+      break;
+    case "needs_review": parts.push(eq(evidenceRecords.status, "needs_review")); break;
+    case "drafts": parts.push(eq(evidenceRecords.sealState, "draft")); break;
+    case "legal_hold":
+      parts.push(or(eq(evidenceRecords.legalHold, true), inArray(evidenceRecords.id,
+        db.select({ id: legalHoldRecords.evidenceRecordId }).from(legalHoldRecords)
+          .innerJoin(legalHolds, eq(legalHolds.id, legalHoldRecords.legalHoldId)).where(eq(legalHolds.status, "active"))))!);
+      break;
+    case "other":
+      parts.push(or(sets.linked, notInArray(evidenceRecords.recordType, [...ALL_FOLDERED_TYPES]))!);
+      break;
+    default: {
+      const types = TYPE_FOLDER_TYPES[f.folder] ?? [];
+      parts.push(types.length ? and(notLinked, inArray(evidenceRecords.recordType, [...types]))! : FALSE);
+    }
+  }
+
+  // Effective type: a signing type is matched by its linkage (or by the column when unlinked); any other
+  // type only on an unlinked row, because a linked row's effective type is its signing role.
+  if (f.recordType) {
+    const byLinkage: Record<string, ReturnType<typeof signingSets>[keyof ReturnType<typeof signingSets>]> = {
+      signature_strokes: sets.strokes, signature_render: sets.renders, attest_receipt: sets.receipts, signed_artifact: sets.signedDocs,
+    };
+    const set = byLinkage[f.recordType];
+    parts.push(set
+      ? or(inArray(evidenceRecords.id, set as never), and(notLinked, eq(evidenceRecords.recordType, f.recordType)))!
+      : and(notLinked, eq(evidenceRecords.recordType, f.recordType))!);
+  }
+
+  // Lifecycle: only the seal state is a column; the rest is decided by the projection.
+  if (f.lifecycle === "draft") parts.push(eq(evidenceRecords.sealState, "draft"));
+  else if (f.lifecycle) parts.push(ne(evidenceRecords.sealState, "draft"));
+
+  // Search: every term must match one of the fields the projection searches. Signing rows pass the query
+  // on any term, because their searchable type is the signing role rather than the column.
+  for (const term of f.terms) {
+    const like = likeTerm(term);
+    parts.push(or(
+      sql`LOWER(${evidenceRecords.title}) LIKE ${like} ESCAPE '!'`,
+      sql`LOWER(COALESCE(${evidenceRecords.trackingNumber}, '')) LIKE ${like} ESCAPE '!'`,
+      sql`LOWER(REPLACE(${evidenceRecords.recordType}, '_', ' ')) LIKE ${like} ESCAPE '!'`,
+      sql`LOWER(${evidenceRecords.category}) LIKE ${like} ESCAPE '!'`,
+      sql`LOWER(COALESCE(${evidenceRecords.notes}, '')) LIKE ${like} ESCAPE '!'`,
+      sql`EXISTS (SELECT 1 FROM ${evidenceRelationships} WHERE ${evidenceRelationships.evidenceRecordId} = ${evidenceRecords.id} AND LOWER(CONCAT(COALESCE(${evidenceRelationships.entityRef}, ''), ' ', COALESCE(${evidenceRelationships.entityId}, ''))) LIKE ${like} ESCAPE '!')`,
+      sets.linked,
+    )!);
+  }
+  return parts.length ? and(...parts)! : TRUE;
+}
+
+/** Strictly after a cursor position in createdAt DESC, id DESC. */
+function afterPosition(pos: { createdAt: Date; id: number }): SQL {
+  return or(
+    lt(evidenceRecords.createdAt, pos.createdAt),
+    and(eq(evidenceRecords.createdAt, pos.createdAt), lt(evidenceRecords.id, pos.id)),
+  )!;
+}
+
+/**
+ * One batch of the File Manager's sequence: the caller's organization, what
+ * they may see and what they filtered for, in createdAt DESC, id DESC, strictly
+ * after `after`. Everything that decides access is in the WHERE clause.
+ */
+export async function scanFileCandidates(args: {
+  scope: TenantScope;
+  reach: FileReach;
+  filters: FileQueryFilters;
+  after: { createdAt: Date; id: number } | null;
+  limit: number;
+}): Promise<FileCandidate[]> {
   const db = await getDb();
   if (!db) return [];
   const rows = await db
     .select()
     .from(evidenceRecords)
-    .where(fileScopeWhere(db, scope))
-    .orderBy(desc(evidenceRecords.capturedAt))
-    .limit(limit);
+    .where(and(
+      fileScopeWhere(db, args.scope),
+      fileVisibilityWhere(db, args.reach),
+      fileFilterWhere(db, args.filters),
+      ...(args.after ? [afterPosition(args.after)] : []),
+    ))
+    .orderBy(desc(evidenceRecords.createdAt), desc(evidenceRecords.id))
+    .limit(args.limit);
+  return enrichFileCandidates(db, rows);
+}
+
+/**
+ * Folder counts over everything the caller may see — the same scope and
+ * visibility as the pages, so a count never includes a row the caller cannot
+ * open. One aggregate query.
+ */
+export async function countFileFolders(scope: TenantScope, reach: FileReach): Promise<Record<FolderKey, number>> {
+  const db = await getDb();
+  const keys: FolderKey[] = ["all", "field_tickets", "loads_disposal", "photos", "safety", "maintenance", "billing", "personnel", "other", "needs_filing", "needs_review", "drafts", "legal_hold"];
+  const out = Object.fromEntries(keys.map(k => [k, 0])) as Record<FolderKey, number>;
+  if (!db) return out;
+  const selection = Object.fromEntries(keys.map(k => [k,
+    k === "all" ? sql<number>`COUNT(*)` : sql<number>`SUM(CASE WHEN ${fileFilterWhere(db, { folder: k, terms: [], recordType: null, lifecycle: null })} THEN 1 ELSE 0 END)`,
+  ])) as Record<FolderKey, SQL<number>>;
+  const row = (await db.select(selection).from(evidenceRecords).where(and(fileScopeWhere(db, scope), fileVisibilityWhere(db, reach))))[0];
+  for (const k of keys) out[k] = Number(row?.[k] ?? 0);
+  return out;
+}
+
+async function enrichFileCandidates(db: Db, rows: (typeof evidenceRecords.$inferSelect)[]): Promise<FileCandidate[]> {
   if (rows.length === 0) return [];
   const ids = rows.map(r => r.id);
 
@@ -969,6 +1192,7 @@ export async function listFileCandidates(scope: TenantScope, limit: number): Pro
       mimeType: r.mimeType ?? null,
       hasContent: Boolean(r.storageKey),
       capturedAt: r.capturedAt,
+      createdAt: r.createdAt,
       capturedBy: r.capturedBy ?? null,
       status: r.status,
       sealState: r.sealState,

@@ -362,3 +362,160 @@ d("records.files — signing material is read by the rules of what it is", () =>
     await expect(callerFor(hr).records.files.get({ evidenceId: signedCredential })).resolves.toMatchObject({ recordType: "signed_artifact", readCategory: "evidence.read_personnel" });
   }, 120_000);
 });
+
+d("records.files.list — cursor pages", () => {
+  type Page = Awaited<ReturnType<ReturnType<typeof callerFor>["records"]["files"]["list"]>>;
+  const at = (s: number) => new Date(Date.UTC(2031, 0, 1, 0, 0, s));   // receipt times in a window nothing else uses
+  async function row(o: { jobId: number; title: string; recordType?: string; createdAt: Date; capturedBy?: number | null; sealState?: string }) {
+    const [e] = await pool.execute<mysql.ResultSetHeader>(
+      "INSERT INTO evidenceRecords (jobId, title, category, capturedAt, capturedBy, status, recordType, sealState, createdAt) VALUES (?,?, 'fixture', NOW(), ?, 'needs_review', ?, ?, ?)",
+      [o.jobId, o.title, o.capturedBy ?? null, o.recordType ?? "load_ticket", o.sealState ?? "draft", o.createdAt]);
+    return e.insertId;
+  }
+  async function traverse(user: number, input: Record<string, unknown>, limit: number) {
+    const pages: Page[] = [];
+    let cursor: string | null = null;
+    do {
+      const p: Page = await callerFor(user).records.files.list({ ...input, limit, cursor } as never);
+      pages.push(p);
+      cursor = p.nextCursor;
+    } while (cursor && pages.length < 200);
+    return { pages, ids: pages.flatMap(p => p.records.map(r => r.id)), titles: pages.flatMap(p => p.records.map(r => r.title)) };
+  }
+
+  it("walks every visible record once, in createdAt DESC, id DESC, across ties, filters and organizations", async () => {
+    const A = await org(), B = await org();
+    const jobA = await job(A), jobB = await job(B);
+    const tag = rnd();
+    const dispatcher = await member(A, ["dispatcher"]), office = await member(A, ["office"]), legal = await member(A, ["legal"]);
+    const signer = await member(A, ["driver"]), officeB = await member(B, ["office"]);
+
+    // Seven distinct seconds, then four rows sharing one second — the id alone must order those.
+    const tickets: { id: number; t: number }[] = [];
+    for (let s = 10; s < 17; s++) tickets.push({ id: await row({ jobId: jobA, title: `t${s} ${tag}`, createdAt: at(s) }), t: s });
+    for (let k = 0; k < 4; k++) tickets.push({ id: await row({ jobId: jobA, title: `tie${k} ${tag}`, createdAt: at(5) }), t: 5 });
+    const receipts = [await row({ jobId: jobA, title: `bill1 ${tag}`, recordType: "bill_receipt", createdAt: at(20) }), await row({ jobId: jobA, title: `bill2 ${tag}`, recordType: "bill_receipt", createdAt: at(3) })];
+    const cred = await row({ jobId: jobA, title: `cred ${tag}`, recordType: "credential", createdAt: at(18) });
+    const strokes = await row({ jobId: jobA, title: `strokes ${tag}`, recordType: "other", createdAt: at(19), capturedBy: signer });
+    await pool.execute("INSERT INTO attestMarks (markRef, sessionId, fieldId, markKind, inputKind, strokeEvidenceRecordId, payloadHash, completedAt) VALUES (?, 1, 1, 'signature', 'drawn', ?, ?, NOW())", [`MARK-${rnd()}`, strokes, "f".repeat(64)]);
+    const theirs = await row({ jobId: jobB, title: `theirs ${tag}`, createdAt: at(15) });
+
+    const ordered = (xs: { id: number; t: number }[]) => [...xs].sort((a, b) => b.t - a.t || b.id - a.id).map(x => x.id);
+
+    // 1, 2. Pages are distinct, in order, and cover every visible record once — ties split across pages by id.
+    const disp = await traverse(dispatcher, { query: tag }, 3);
+    expect(disp.ids).toEqual(ordered(tickets));
+    expect(new Set(disp.ids).size).toBe(disp.ids.length);
+    expect(disp.pages.length).toBe(Math.ceil(tickets.length / 3));
+    expect(disp.pages.at(-1)!.hasMore).toBe(false);
+    expect(disp.pages.at(-1)!.nextCursor).toBeNull();
+    expect(disp.pages.slice(0, -1).every(p => p.hasMore && p.nextCursor && p.records.length === 3)).toBe(true);
+
+    // 3, 4, 5. Another company's record, an unheld category and stroke data never appear — for anyone.
+    expect(disp.ids).not.toContain(theirs);
+    for (const id of [...receipts, cred, strokes]) expect(disp.ids).not.toContain(id);
+    const off = await traverse(office, { query: tag }, 4);
+    expect(off.ids).toEqual(ordered([...tickets, { id: receipts[0]!, t: 20 }, { id: receipts[1]!, t: 3 }]));
+    for (const id of [cred, strokes, theirs]) expect(off.ids).not.toContain(id);
+    for (const user of [legal, signer]) expect((await traverse(user, { query: tag }, 2)).ids).not.toContain(strokes);
+    expect((await traverse(officeB, { query: tag }, 2)).ids).toEqual([theirs]);
+
+    // Counts describe what the caller may see — no hidden row contributes to them.
+    const first = await callerFor(dispatcher).records.files.list({ query: tag, limit: 3 } as never);
+    const all = (await callerFor(dispatcher).records.files.list({ limit: 1 } as never)).counts!;
+    expect(first.counts).not.toBeNull();
+    expect(all.loads_disposal).toBeGreaterThanOrEqual(tickets.length);
+    const [orgRows] = await pool.query<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM evidenceRecords WHERE jobId = ? AND recordType IN ('load_ticket','other')", [jobA]);
+    expect(all.all).toBe(Number(orgRows[0]!.n) - 1);   // every job-operational row in A except the stroke data
+    expect((await callerFor(office).records.files.list({ limit: 1 } as never)).counts!.billing).toBe(2);
+    expect((await callerFor(dispatcher).records.files.list({ limit: 1 } as never)).counts!.billing).toBe(0);
+
+    // 6. Direct reads are unchanged by paging.
+    await expect(callerFor(legal).records.files.get({ evidenceId: strokes })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(callerFor(dispatcher).records.files.get({ evidenceId: receipts[0]! })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(callerFor(dispatcher).records.files.get({ evidenceId: tickets[0]!.id })).resolves.toMatchObject({ id: tickets[0]!.id });
+
+    // 7. Search across page boundaries: only the matching rows, all of them, in order.
+    const tieSearch = await traverse(dispatcher, { query: `tie ${tag}` }, 1);
+    expect(tieSearch.ids).toEqual(ordered(tickets.filter(t => t.t === 5)));
+    // 8. Folder across pages.
+    expect((await traverse(office, { query: tag, folder: "billing" }, 1)).ids).toEqual([receipts[0], receipts[1]]);
+    expect((await traverse(office, { query: tag, folder: "loads_disposal" }, 5)).ids).toEqual(ordered(tickets));
+    // 9. Type across pages.
+    expect((await traverse(office, { query: tag, recordType: "bill_receipt" }, 1)).ids).toEqual([receipts[0], receipts[1]]);
+    expect((await traverse(dispatcher, { query: tag, recordType: "bill_receipt" }, 1)).ids).toEqual([]);
+  }, 180_000);
+
+  it("filters by lifecycle across pages, scanning past rows the caller may see but did not ask for", async () => {
+    const A = await org(); const jobA = await job(A); const tag = rnd();
+    const office = await member(A, ["office"]);
+    const ids: number[] = [];
+    for (let s = 0; s < 9; s++) ids.push(await row({ jobId: jobA, title: `life${s} ${tag}`, createdAt: at(30 + s), sealState: "sealed" }));
+    const failed = [ids[1]!, ids[4]!, ids[7]!];
+    const [pkg] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO syncPackages (packageRef, deviceId, state, itemCount, queuedAt) VALUES (?, 'dev', 'failed', 3, NOW())", [`PKG-${rnd()}`]);
+    for (const id of failed) await pool.execute("INSERT INTO syncPackageItems (syncPackageId, evidenceRecordId, declaredContentHash, declaredManifestHash, state) VALUES (?,?,?,?,'mismatch')", [pkg.insertId, id, "a".repeat(64), "b".repeat(64)]);
+    // 10.
+    const t = await traverse(office, { query: tag, lifecycle: "integrity_failed" }, 1);
+    expect(t.ids).toEqual([...failed].reverse());
+    expect((await traverse(office, { query: tag, lifecycle: "sealed" }, 2)).ids).toEqual(ids.filter(i => !failed.includes(i)).reverse());
+    expect((await traverse(office, { query: tag, lifecycle: "draft" }, 2)).ids).toEqual([]);
+  }, 120_000);
+
+  it("refuses a malformed cursor, a cursor from other filters, and a page size past the maximum — and another company's cursor reaches nothing of theirs", async () => {
+    const A = await org(), B = await org();
+    const jobA = await job(A), jobB = await job(B); const tag = rnd();
+    const officeA = await member(A, ["office"]), officeB = await member(B, ["office"]);
+    for (let s = 0; s < 4; s++) { await row({ jobId: jobA, title: `a${s} ${tag}`, createdAt: at(40 + s) }); await row({ jobId: jobB, title: `b${s} ${tag}`, createdAt: at(40 + s) }); }
+    const list = (user: number, input: Record<string, unknown>) => callerFor(user).records.files.list({ query: tag, ...input } as never);
+    const issued = (await list(officeA, { limit: 1 })).nextCursor!;
+    expect(issued).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(Buffer.from(issued, "base64url").toString()).not.toMatch(/storage|key|org|title/i);
+
+    // 11.
+    const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+    const decoded = JSON.parse(Buffer.from(issued, "base64url").toString());
+    for (const bad of ["garbage!!", "", "e30", b64([1, 2]), b64({ ...decoded, i: -1 }), b64({ ...decoded, i: 1.5 }), b64({ ...decoded, t: "x" }), b64({ ...decoded, extra: 1 }), b64({ ...decoded, v: 2 }), "a".repeat(600)]) {
+      await expect(list(officeA, { limit: 1, cursor: bad }), bad.slice(0, 20)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    // 12. A cursor issued under one filter set does not resume another.
+    await expect(list(officeA, { limit: 1, cursor: issued, folder: "billing" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(list(officeA, { limit: 1, cursor: issued, query: `${tag} x` })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    // 13. B's cursor, under the same filters, only moves A through A's own records.
+    const theirCursor = (await list(officeB, { limit: 1 })).nextCursor!;
+    const viaTheirs = await list(officeA, { limit: 10, cursor: theirCursor });
+    expect(viaTheirs.records.every(r => r.title.startsWith("a"))).toBe(true);
+    // A hand-built cursor at the very top of the order changes nothing either.
+    const forged = b64({ ...decoded, t: 8_000_000_000_000, i: 2_147_483_647 });
+    expect((await list(officeA, { limit: 10, cursor: forged })).records.map(r => r.title).every(t => t.startsWith("a"))).toBe(true);
+    // 14.
+    for (const limit of [101, 1_000_000, 0, -1, 1.5, Number.MAX_SAFE_INTEGER]) {
+      await expect(list(officeA, { limit }), String(limit)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    expect((await list(officeA, {})).records.length).toBe(4);   // the default page holds them all
+  }, 120_000);
+
+  it("keeps a traversal whole while new records arrive: no duplicate, no skipped older row, new rows ahead", async () => {
+    const A = await org(); const jobA = await job(A); const tag = rnd();
+    const office = await member(A, ["office"]);
+    const old: number[] = [];
+    for (let s = 0; s < 6; s++) old.push(await row({ jobId: jobA, title: `old${s} ${tag}`, createdAt: at(50 + s) }));
+    const page1 = await callerFor(office).records.files.list({ query: tag, limit: 2 } as never);
+    // 15. Newer records arrive mid-traversal, one of them in the same second as the cursor row.
+    const newer = [await row({ jobId: jobA, title: `new0 ${tag}`, createdAt: at(60) }), await row({ jobId: jobA, title: `new1 ${tag}`, createdAt: at(54) })];
+    const ids = page1.records.map(r => r.id);
+    let cursor = page1.nextCursor;
+    while (cursor) {
+      const p = await callerFor(office).records.files.list({ query: tag, limit: 2, cursor } as never);
+      ids.push(...p.records.map(r => r.id));
+      cursor = p.nextCursor;
+    }
+    expect(new Set(ids).size).toBe(ids.length);                         // no duplicate
+    expect(ids.filter(i => old.includes(i))).toEqual([...old].reverse()); // every older row, in order
+    expect(ids).not.toContain(newer[0]);                                 // ahead of the cursor: not in this traversal
+    expect(ids).not.toContain(newer[1]);                                 // same second, higher id: also ahead
+    // A fresh traversal sees them, each in its place: new0 (second 60) first; new1 shares second 54 with
+    // old4 and, received later, sorts ahead of it by id.
+    const fresh = await traverse(office, { query: tag }, 3);
+    expect(fresh.ids).toEqual([newer[0], old[5], newer[1], old[4], old[3], old[2], old[1], old[0]]);
+  }, 120_000);
+});

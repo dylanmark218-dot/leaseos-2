@@ -33,11 +33,12 @@ import {
   type Permission,
   type RoleGrant,
 } from "./_core/recordsAuthorization";
+import { decodeFileCursor, encodeFileCursor } from "./recordFileCursor";
 import {
+  type LifecycleStage,
   classifyRecord,
   fileVisibility,
   normalizeSealRecordType,
-  folderCounts,
   inFolder,
   lifecycleStage,
   matchRecord,
@@ -143,6 +144,17 @@ function heldFilePermissions(userId: number, grants: readonly RoleGrant[], organ
   // and a grant in another company answers nothing here.
   return new Set(FILE_PERMISSIONS.filter(p => authorize({ userId, grants, permission: p, organization }).allowed));
 }
+
+/** Page sizes for records.files.list: a screenful by default, and a hard ceiling the input refuses past. */
+const FILE_PAGE_DEFAULT = 50;
+const FILE_PAGE_MAX = 100;
+/** Rows read per database round trip, and per request at most, while filling one page. */
+const FILE_SCAN_BATCH_MAX = 404;
+const FILE_SCAN_BUDGET = 2_000;
+
+const LIFECYCLE_STAGES = [
+  "draft", "sealed", "queued", "server_received", "hash_verified", "office_accepted", "device_released", "integrity_failed",
+] as const satisfies readonly LifecycleStage[];
 
 const FOLDER_KEYS = [
   "all", "field_tickets", "loads_disposal", "photos", "safety", "maintenance", "billing",
@@ -554,48 +566,92 @@ export const recordsRouter = router({
    * and "not found" by id, never "forbidden", so its existence does not leak.
    */
   files: router({
+    /**
+     * One page of the caller's records, newest received first (createdAt DESC, id DESC).
+     *
+     * The page is cut in the database from rows the caller may see: organization scope, category
+     * reads, ownership and signing visibility are all in the WHERE clause, with the filters, and the
+     * cursor is only a position after which to continue. Every returned row is then re-checked by the
+     * projection. A cursor is only ever built from a row the caller is allowed to see, so a hidden row
+     * never becomes a resume point; folder counts use the same visibility. The cursor is bound to the
+     * filter set it was issued under — change a filter and the traversal starts again.
+     */
     list: roleProcedure("records.files.list")
       .input(
         z.object({
           folder: z.enum(FOLDER_KEYS).default("all"),
           query: z.string().max(200).default(""),
-          limit: z.number().int().min(1).max(500).default(200),
-        }).default({ folder: "all", query: "", limit: 200 })
+          /** An effective record type: a sealed type, or a signing role's type. */
+          recordType: z.string().min(1).max(60).regex(/^[a-z_]+$/).optional(),
+          lifecycle: z.enum(LIFECYCLE_STAGES).optional(),
+          limit: z.number().int().min(1).max(FILE_PAGE_MAX).default(FILE_PAGE_DEFAULT),
+          /** Opaque. Issued by this procedure as `nextCursor`; nothing else is accepted. */
+          cursor: z.string().min(1).max(512).nullish(),
+        }).default({ folder: "all", query: "", limit: FILE_PAGE_DEFAULT })
       )
       .query(async ({ ctx, input }) => {
+        const filterSet = { folder: input.folder, query: input.query, recordType: input.recordType ?? null, lifecycle: input.lifecycle ?? null };
+        let after: { createdAt: Date; id: number } | null = null;
+        if (input.cursor) {
+          const decoded = decodeFileCursor(input.cursor, filterSet);
+          if (!decoded.ok) throw new TRPCError({ code: "BAD_REQUEST", message: `Invalid cursor: ${decoded.reason}` });
+          after = decoded.position;
+        }
+
         const scope = await actingScopeFor(ctx.user.id);
         const me = await svc.resolveOperatorForUser(ctx.user.id);
         const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id), ctx.organization);
-        // Read one past the window so "there is more" is a fact, not a guess.
-        const candidates = await svc.listFileCandidates(scope, 501);
-        // Sign & Attest's own linkage, not the type column, says what signing material is.
-        const signing = await svc.signingLinksFor(candidates.map(c => c.id));
-        const truncated = candidates.length > 500;
+        const reach = { userId: ctx.user.id, operatorId: me.operatorId, held };
+        const terms = input.query.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 12);
+        const filters = { folder: input.folder, terms, recordType: input.recordType ?? null, lifecycle: input.lifecycle ?? null };
 
-        const visible = candidates.slice(0, 500).flatMap(c => {
-          const ownerOperatorId = ownerOperatorOf(c.relationships);
-          const isOwner =
-            (ownerOperatorId != null && ownerOperatorId === me.operatorId) || c.capturedBy === ctx.user.id;
-          const link = signing.get(c.id) ?? null;
-          const v = fileVisibility({ held, recordType: c.recordType, isOwner, signing: link });
-          if (!v.visible) return [];
-          const entityRelationshipCount = c.relationships.filter(r => r.entityType !== "operator").length;
-          // From here on the record is what its linkage says it is: a rendered mark stored as `other`
-          // is filed, searched and labelled as a rendered mark.
-          const effective = classifyRecord({ recordType: c.recordType, signing: link });
-          const recordType = effective.excluded ? c.recordType : effective.effectiveType;
-          return [{ c: { ...c, recordType }, basis: v.basis, isOwner, entityRelationshipCount }];
-        });
+        // Scan forward in batches until the page (plus one, to know there is more) is full or the
+        // sequence ends. Lifecycle is the one filter the query can only narrow, so a bounded number of
+        // rows the caller may see — but did not ask for — can be passed over; never a hidden one.
+        const batchSize = Math.min(FILE_SCAN_BATCH_MAX, (input.limit + 1) * 4);
+        type Row = { c: Awaited<ReturnType<typeof svc.scanFileCandidates>>[number]; basis: "category" | "own"; isOwner: boolean; match: string[] };
+        const matches: Row[] = [];
+        let position = after;
+        let scanned = 0;
+        let exhausted = false;
+        while (matches.length <= input.limit && scanned < FILE_SCAN_BUDGET) {
+          const batch = await svc.scanFileCandidates({ scope, reach, filters, after: position, limit: batchSize });
+          const signing = await svc.signingLinksFor(batch.map(c => c.id));
+          for (const c of batch) {
+            scanned++;
+            const ownerOperatorId = ownerOperatorOf(c.relationships);
+            const isOwner = (ownerOperatorId != null && ownerOperatorId === me.operatorId) || c.capturedBy === ctx.user.id;
+            const link = signing.get(c.id) ?? null;
+            const v = fileVisibility({ held, recordType: c.recordType, isOwner, signing: link });
+            // The query already decided visibility; this is the projection agreeing. A row it refuses is
+            // skipped and never becomes a position.
+            if (!v.visible) continue;
+            position = { createdAt: c.createdAt, id: c.id };
+            // From here on the record is what its linkage says it is: a rendered mark stored as `other`
+            // is filed, searched and labelled as a rendered mark.
+            const effective = classifyRecord({ recordType: c.recordType, signing: link });
+            const row = { ...c, recordType: effective.excluded ? c.recordType : effective.effectiveType };
+            const entityRelationshipCount = row.relationships.filter(r => r.entityType !== "operator").length;
+            if (!inFolder(input.folder, { ...row, entityRelationshipCount })) continue;
+            if (input.recordType && row.recordType !== input.recordType) continue;
+            if (input.lifecycle && lifecycleStage(row) !== input.lifecycle) continue;
+            const match = matchRecord(input.query, row);
+            if (!match.matched) continue;
+            matches.push({ c: row, basis: v.basis, isOwner, match: match.reasons });
+            if (matches.length > input.limit) break;
+          }
+          if (batch.length < batchSize) { exhausted = true; break; }
+        }
 
-        const facts = visible.map(({ c, entityRelationshipCount }) => ({ ...c, entityRelationshipCount }));
-        const counts = folderCounts(facts);
+        const page = matches.slice(0, input.limit);
+        const full = matches.length > input.limit;
+        // More remains when the page overflowed, or when the scan budget ran out before the sequence did.
+        const hasMore = full || (!exhausted && position != null);
+        const resumeAt = full ? { createdAt: page[page.length - 1]!.c.createdAt, id: page[page.length - 1]!.c.id } : position;
+        const nextCursor = hasMore && resumeAt ? encodeFileCursor(resumeAt, filterSet) : null;
 
-        const records = visible
-          .filter(({ c, entityRelationshipCount }) => inFolder(input.folder, { ...c, entityRelationshipCount }))
-          .map(v => ({ ...v, match: matchRecord(input.query, v.c) }))
-          .filter(v => v.match.matched)
-          .slice(0, input.limit)
-          .map(({ c, basis, isOwner, match }) => ({
+        return {
+          records: page.map(({ c, basis, isOwner, match }) => ({
             id: c.id,
             trackingNumber: c.trackingNumber,
             title: c.title,
@@ -605,6 +661,7 @@ export const recordsRouter = router({
             mimeType: c.mimeType,
             hasContent: c.hasContent,
             capturedAt: c.capturedAt,
+            receivedAt: c.createdAt,
             status: c.status,
             sealState: c.sealState,
             version: c.currentVersion,
@@ -615,13 +672,12 @@ export const recordsRouter = router({
             officeRetainUntil: c.officeRetainUntil,
             visibleBecause: basis,
             mine: isOwner,
-            matchReasons: match.reasons,
-          }));
-
-        return {
-          records,
-          counts,
-          truncated,
+            matchReasons: match,
+          })),
+          nextCursor,
+          hasMore,
+          // Counts describe the whole visible collection, not the page; computed once, on the first page.
+          counts: input.cursor ? null : await svc.countFileFolders(scope, reach),
           reach: {
             categories: FILE_PERMISSIONS.filter(p => p.startsWith("evidence.read_") && p !== "evidence.read_own" && held.has(p)),
             own: held.has("evidence.read_own"),

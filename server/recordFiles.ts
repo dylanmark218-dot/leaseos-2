@@ -420,6 +420,11 @@ export const FOLDER_LABELS: Readonly<Record<FolderKey, string>> = {
 } as Record<FolderKey, string>;
 
 export const TYPE_FOLDER_KEYS: readonly FolderKey[] = [...TYPE_FOLDERS.map(f => f.key), "other"];
+
+/** The record types each type folder holds — the same table the projection files by, for the server query. */
+export const TYPE_FOLDER_TYPES: Readonly<Partial<Record<FolderKey, readonly string[]>>> = Object.fromEntries(TYPE_FOLDERS.map(f => [f.key, f.types]));
+/** Every type some type folder holds; a type in none of them is filed under "other". */
+export const ALL_FOLDERED_TYPES: readonly string[] = TYPE_FOLDERS.flatMap(f => f.types);
 export const QUEUE_FOLDER_KEYS: readonly FolderKey[] = QUEUE_FOLDERS.map(f => f.key);
 
 export function typeFolderFor(recordType: string): FolderKey {

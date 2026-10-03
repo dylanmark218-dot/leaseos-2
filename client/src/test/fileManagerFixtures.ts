@@ -36,8 +36,8 @@ export const detail = (over: Partial<FileDetail> = {}): FileDetail => ({
 });
 
 export const fileManagerProps = (over: Partial<FileManagerViewProps> = {}): FileManagerViewProps => ({
-  folder: "all", onFolder: () => {}, query: "", onQuery: () => {},
-  list: { kind: "loaded", rows: [row(), row({ id: 2, trackingNumber: null, title: "Site photo", recordType: "photo", status: "needs_review", lifecycle: "queued", legalHold: true, mine: true })], counts, truncated: false, reach: { categories: ["evidence.read_job_operational"], own: false, canVerify: false } },
+  folder: "all", onFolder: () => {}, query: "", onQuery: () => {}, onLoadMore: () => {},
+  list: { kind: "loaded", rows: [row(), row({ id: 2, trackingNumber: null, title: "Site photo", recordType: "photo", status: "needs_review", lifecycle: "queued", legalHold: true, mine: true })], counts, hasMore: false, loadingMore: false, loadMoreError: null, reach: { categories: ["evidence.read_job_operational"], own: false, canVerify: false } },
   selectedId: 1, onSelect: () => {},
   detail: { kind: "loaded", detail: detail() },
   onDownload: () => {}, onVerify: () => {}, busy: null, notice: null,

@@ -3,7 +3,8 @@
  *
  * The only file in the file manager that talks to the server:
  *
- *   `records.files.list`      the folders, counts and rows this caller may see
+ *   `records.files.list`      the folders, counts and rows this caller may see,
+ *                             a page at a time behind the server's cursor
  *   `records.files.get`       one record's inspector — logged as a view
  *   `records.files.download`  a short-lived signed URL — logged as a download
  *   `fieldRoute.evidence.verify`  the existing verification act, offered only
@@ -17,7 +18,10 @@
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { FileManagerView, type DetailState, type FileDetail, type FileRow, type ListState } from "./FileManagerView";
-import type { FolderKey } from "./fileViewModels";
+import { mergePages, type FolderKey } from "./fileViewModels";
+
+/** One page. The server caps it at 100; 50 keeps the first paint quick. */
+const PAGE_SIZE = 50;
 
 export default function FileManager() {
   const utils = trpc.useUtils();
@@ -33,7 +37,12 @@ export default function FileManager() {
     return () => clearTimeout(t);
   }, [query]);
 
-  const listQuery = trpc.records.files.list.useQuery({ folder, query: debounced, limit: 200 });
+  // The folder and search are the query key: changing either starts a new
+  // traversal from the first page, and the old cursor is never sent with it.
+  const listQuery = trpc.records.files.list.useInfiniteQuery(
+    { folder, query: debounced, limit: PAGE_SIZE },
+    { getNextPageParam: last => (last.hasMore ? last.nextCursor ?? undefined : undefined) }
+  );
   const detailQuery = trpc.records.files.get.useQuery(
     { evidenceId: selectedId ?? 0 },
     { enabled: selectedId != null, retry: false }
@@ -41,17 +50,21 @@ export default function FileManager() {
   const download = trpc.records.files.download.useMutation();
   const verify = trpc.fieldRoute.evidence.verify.useMutation();
 
-  const list: ListState = listQuery.isError
-    ? { kind: "failed", message: listQuery.error.message }
-    : listQuery.isPending
-      ? { kind: "loading" }
-      : {
-          kind: "loaded",
-          rows: listQuery.data.records as FileRow[],
-          counts: listQuery.data.counts,
-          truncated: listQuery.data.truncated,
-          reach: listQuery.data.reach,
-        };
+  const pages = listQuery.data?.pages;
+  const list: ListState = !pages
+    ? listQuery.isError
+      ? { kind: "failed", message: listQuery.error.message }
+      : { kind: "loading" }
+    : {
+        kind: "loaded",
+        rows: mergePages(pages) as FileRow[],
+        // Counts come with the first page only; later pages carry null.
+        counts: pages[0]?.counts ?? null,
+        reach: pages[0]?.reach ?? { categories: [], own: false, canVerify: false },
+        hasMore: listQuery.hasNextPage,
+        loadingMore: listQuery.isFetchingNextPage,
+        loadMoreError: listQuery.isFetchNextPageError ? listQuery.error?.message ?? "Unknown error" : null,
+      };
 
   const detail: DetailState =
     selectedId == null ? { kind: "none" }
@@ -96,6 +109,7 @@ export default function FileManager() {
       query={query}
       onQuery={setQuery}
       list={list}
+      onLoadMore={() => { if (listQuery.hasNextPage && !listQuery.isFetchingNextPage) void listQuery.fetchNextPage(); }}
       selectedId={selectedId}
       onSelect={id => { setSelectedId(id); setNotice(null); }}
       detail={detail}

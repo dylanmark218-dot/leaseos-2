@@ -140,3 +140,23 @@ export const ACCESS_LABELS: Record<string, string> = {
   printed: "Printed",
   seal_verified: "Seal verified",
 };
+
+/**
+ * The pages a Load-more list has fetched, as one list in server order. A row
+ * that arrives twice — a retried page, a page refetched after the previous one
+ * was already appended — is shown once, where it first appeared. The server's
+ * cursor already prevents duplicates; this keeps the screen honest if a
+ * request is replayed.
+ */
+export function mergePages<T extends { id: number }>(pages: ReadonlyArray<{ records: readonly T[] }>): T[] {
+  const seen = new Set<number>();
+  const out: T[] = [];
+  for (const page of pages) {
+    for (const r of page.records) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      out.push(r);
+    }
+  }
+  return out;
+}

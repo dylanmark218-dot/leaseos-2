@@ -97,7 +97,17 @@ export type Reach = { categories: string[]; own: boolean; canVerify: boolean };
 export type ListState =
   | { kind: "loading" }
   | { kind: "failed"; message: string }
-  | { kind: "loaded"; rows: FileRow[]; counts: Record<FolderKey, number>; truncated: boolean; reach: Reach };
+  | {
+      kind: "loaded";
+      rows: FileRow[];
+      /** Folder counts over everything the caller may see; null until the first page has answered. */
+      counts: Record<FolderKey, number> | null;
+      reach: Reach;
+      /** The server has more records after these, in the same order and filters. */
+      hasMore: boolean;
+      loadingMore: boolean;
+      loadMoreError: string | null;
+    };
 
 export type DetailState =
   | { kind: "none" }
@@ -111,6 +121,8 @@ export type FileManagerViewProps = {
   query: string;
   onQuery: (q: string) => void;
   list: ListState;
+  /** Fetch the next page with the server's cursor; appended, never re-ordered. */
+  onLoadMore: () => void;
   selectedId: number | null;
   onSelect: (id: number) => void;
   detail: DetailState;
@@ -162,15 +174,12 @@ function FolderNav({ folder, onFolder, counts }: { folder: FolderKey; onFolder: 
   );
 }
 
-function RecordList({ list, selectedId, onSelect, folder }: { list: ListState; selectedId: number | null; onSelect: (id: number) => void; folder: FolderKey }) {
+function RecordList({ list, selectedId, onSelect, folder, onLoadMore }: { list: ListState; selectedId: number | null; onSelect: (id: number) => void; folder: FolderKey; onLoadMore: () => void }) {
   if (list.kind === "loading") return <p className={`${card} p-5 text-sm ${muted}`}>Loading records…</p>;
   if (list.kind === "failed") return <p role="alert" className={`${card} p-5 text-sm text-[#8f1d14]`}>Records could not be loaded: {list.message}</p>;
   return (
     <section aria-label="Records" className={`${card} p-3`}>
       <p className={`px-2 text-xs ${muted}`}>{reachSummary(list.reach)}</p>
-      {list.truncated && (
-        <p className="mt-1 px-2 text-xs text-[#7a3d00]">Only the 500 most recent records in your organization were read. Search narrows within them.</p>
-      )}
       {list.rows.length === 0 ? (
         <p className={`mt-3 px-2 pb-2 text-sm ${muted}`}>No records in {FOLDER_LABELS[folder].toLowerCase()} that you can see.</p>
       ) : (
@@ -202,6 +211,21 @@ function RecordList({ list, selectedId, onSelect, folder }: { list: ListState; s
             </li>
           ))}
         </ul>
+      )}
+      {/* How many are shown, said once each time it changes — so "Load more" is heard to have worked. */}
+      <p role="status" aria-live="polite" className={`mt-2 px-2 text-xs ${muted}`}>
+        {list.rows.length === 0 ? "" : `Showing ${list.rows.length} record${list.rows.length === 1 ? "" : "s"}${list.hasMore ? "; more are available" : ""}.`}
+      </p>
+      {list.loadMoreError && (
+        <p role="alert" className="mt-1 px-2 text-sm text-[#8f1d14]">More records could not be loaded: {list.loadMoreError}</p>
+      )}
+      {list.hasMore && (
+        <div className="mt-2 px-2 pb-1">
+          <button type="button" onClick={onLoadMore} disabled={list.loadingMore} aria-busy={list.loadingMore}
+            className="rounded-lg border border-[#132a4a] px-3 py-1.5 text-sm text-[#132a4a] disabled:opacity-50">
+            {list.loadingMore ? "Loading more…" : list.loadMoreError ? "Try again" : "Load more"}
+          </button>
+        </div>
       )}
     </section>
   );
@@ -414,7 +438,7 @@ export function FileManagerView(p: FileManagerViewProps) {
 
         <div className="mt-4 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)_380px]">
           <FolderNav folder={p.folder} onFolder={p.onFolder} counts={p.list.kind === "loaded" ? p.list.counts : null} />
-          <RecordList list={p.list} selectedId={p.selectedId} onSelect={p.onSelect} folder={p.folder} />
+          <RecordList list={p.list} selectedId={p.selectedId} onSelect={p.onSelect} folder={p.folder} onLoadMore={p.onLoadMore} />
           <Inspector detail={p.detail} onDownload={p.onDownload} onVerify={p.onVerify} busy={p.busy} />
         </div>
       </main>

@@ -9,6 +9,8 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FileManagerView } from "./FileManagerView";
 import { counts, detail, fileManagerProps, row } from "../test/fileManagerFixtures";
+import { mergePages } from "./fileViewModels";
+import type { ListState } from "./FileManagerView";
 
 afterEach(cleanup);
 
@@ -38,19 +40,69 @@ describe("folders and selection", () => {
   });
 
   it("explains an empty folder by the caller's reach", () => {
-    render(<FileManagerView {...fileManagerProps({ folder: "billing", list: { kind: "loaded", rows: [], counts, truncated: false, reach: { categories: [], own: true, canVerify: false } } })} />);
+    render(<FileManagerView {...fileManagerProps({ folder: "billing", list: { kind: "loaded", rows: [], counts, hasMore: false, loadingMore: false, loadMoreError: null, reach: { categories: [], own: true, canVerify: false } } })} />);
     expect(screen.getByText("No records in billing that you can see.")).toBeInTheDocument();
     expect(screen.getByText("Showing your own records.")).toBeInTheDocument();
   });
 
-  it("says when the window was cut", () => {
-    render(<FileManagerView {...fileManagerProps({ list: { kind: "loaded", rows: [row()], counts, truncated: true, reach: { categories: [], own: true, canVerify: false } } })} />);
-    expect(screen.getByText(/Only the 500 most recent/)).toBeInTheDocument();
+  it("shows why a search matched", () => {
+    render(<FileManagerView {...fileManagerProps({ list: { kind: "loaded", rows: [row({ matchReasons: ['related unit matches "trk-27"'] })], counts, hasMore: false, loadingMore: false, loadMoreError: null, reach: { categories: [], own: true, canVerify: false } } })} />);
+    expect(screen.getByText(/Matched: related unit matches "trk-27"/)).toBeInTheDocument();
+  });
+});
+
+describe("load more", () => {
+  const page = (o: Partial<Extract<ListState, { kind: "loaded" }>> = {}): ListState => ({
+    kind: "loaded", rows: [row(), row({ id: 2, title: "Site photo" })], counts, reach: { categories: [], own: true, canVerify: false },
+    hasMore: true, loadingMore: false, loadMoreError: null, ...o,
   });
 
-  it("shows why a search matched", () => {
-    render(<FileManagerView {...fileManagerProps({ list: { kind: "loaded", rows: [row({ matchReasons: ['related unit matches "trk-27"'] })], counts, truncated: false, reach: { categories: [], own: true, canVerify: false } } })} />);
-    expect(screen.getByText(/Matched: related unit matches "trk-27"/)).toBeInTheDocument();
+  it("offers no control when the server has nothing more", () => {
+    render(<FileManagerView {...fileManagerProps({ list: page({ hasMore: false }) })} />);
+    expect(screen.queryByRole("button", { name: /load more|try again/i })).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 2 records.");
+  });
+
+  it("asks for the next page, and says more are available", () => {
+    const onLoadMore = vi.fn();
+    render(<FileManagerView {...fileManagerProps({ onLoadMore, list: page() })} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 2 records; more are available.");
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it("cannot be pressed twice while a page is loading", () => {
+    const onLoadMore = vi.fn();
+    render(<FileManagerView {...fileManagerProps({ onLoadMore, list: page({ loadingMore: true }) })} />);
+    const b = screen.getByRole("button", { name: "Loading more…" });
+    expect(b).toBeDisabled();
+    expect(b).toHaveAttribute("aria-busy", "true");
+    fireEvent.click(b);
+    expect(onLoadMore).not.toHaveBeenCalled();
+  });
+
+  it("keeps the rows it has when the next page fails, and offers a retry", () => {
+    const onLoadMore = vi.fn();
+    render(<FileManagerView {...fileManagerProps({ onLoadMore, list: page({ loadMoreError: "Network unreachable" }) })} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("More records could not be loaded: Network unreachable");
+    expect(screen.getByRole("button", { name: /Site photo/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders a row that arrived twice only once, where it first appeared", () => {
+    const merged = mergePages([
+      { records: [row({ id: 3, title: "Third" }), row({ id: 2, title: "Second" })] },
+      { records: [row({ id: 2, title: "Second again" }), row({ id: 1, title: "First" })] },
+    ]);
+    expect(merged.map(r => [r.id, r.title])).toEqual([[3, "Third"], [2, "Second"], [1, "First"]]);
+    render(<FileManagerView {...fileManagerProps({ selectedId: null, detail: { kind: "none" }, list: page({ rows: merged, hasMore: false }) })} />);
+    expect(screen.getAllByRole("button", { name: /Second/ })).toHaveLength(1);
+  });
+
+  it("keeps the folder list usable before counts arrive", () => {
+    render(<FileManagerView {...fileManagerProps({ list: page({ counts: null }) })} />);
+    expect(within(screen.getByRole("navigation", { name: "Folders" })).getByRole("button", { name: "All records" })).toBeInTheDocument();
   });
 });
 
