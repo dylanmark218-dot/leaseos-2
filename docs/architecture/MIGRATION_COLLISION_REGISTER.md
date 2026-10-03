@@ -391,3 +391,16 @@ every slot in use, so it moved to `0228`. The migration creates only new tables 
 ## Change log (continued)
 
 * **2026-10-01 (SA1 merge)**: Sign & Attest `0214`–`0216` recorded against `main` `ce27fec`; next free `0220`.
+
+## State at the Driver Portfolio security hardening (2026-10-03, `main` = `60de8c2`)
+
+`main` migration head: **`0228_safety_program_builder.sql`**. The security-hardening branch
+(`security/driver-portfolio-hardening`, PR #135) takes **`0236_compliance_document_recorder.sql`** — one
+nullable column, `complianceDocuments.recordedByUserId`, no back-fill (NULL = recorder unknown). Drafted as
+`0229`; the scan across all 144 remote branches found `0229` claimed by
+`claude/integration-hub-subsystem-6nzrkw` and `0230`–`0235` by other open branches, so it moved to `0236`
+before it was ever applied on main. The ledger runner applies it by name.
+
+**Next free number after this: `0237`** (re-check with the scan before committing).
+
+* **2026-10-03 (Driver Portfolio hardening)**: drafted `0229`, renumbered to `0236` on merging `main` `60de8c2` (0229–0235 claimed by open branches); next free `0237`.
