@@ -15,6 +15,7 @@ import { fleetPortfolioEvents, unitHolds, unitMeterReadings } from "../drizzle/s
 import { HOLD_TYPES, actingRoleFor, driverNotice, holdEffectFor, mayPlaceHold, mayReleaseHold, type HoldType } from "./_core/fleetPortfolio";
 import { METER_TYPES, meterProgress, meterSequence, type MeterType } from "./_core/fleetMeters";
 import { activeHolds, appendEvent, fleetRef, meterObservations, operationalStateFor, orgRefOf, placeHold, releaseHold } from "./fleetPortfolioService";
+import { fleetAssetProcedures } from "./fleetAssetRouter";
 
 async function dbOrThrow() {
   const db = await getDb();
@@ -40,6 +41,8 @@ const LEDGER_SOURCE_BY_ROLE: Record<string, readonly ("mechanic" | "inspection" 
 };
 
 export const fleetPortfolioRouter = router({
+  /* 0242 — identity, lifecycle, components, the list, the detail, unit-side readiness, the driver's own units (server/fleetAssetRouter.ts). */
+  ...fleetAssetProcedures,
   /** May this unit operate? One status, every reason with its source and the act that lifts it, and what was not evaluated. */
   unitState: roleProcedure("fleet.unitState")
     .input(z.object({ unitId: z.number().int().positive() }))

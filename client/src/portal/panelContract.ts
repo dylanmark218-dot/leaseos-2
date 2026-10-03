@@ -66,6 +66,12 @@ export const PANEL_CONTRACTS: readonly PanelContract[] = [
       "B23.2 — who belongs to this organization and what they may do here. `roles.grant` is held by `management` alone and every procedure re-derives it, so this restriction is about not showing a screen that would refuse; it is not the boundary.",
   },
   {
+    file: "panels/FleetPanel.tsx",
+    procedures: ["fleet.list"],
+    portals: ["fleet_maintenance", "dispatch_operations", "safety_compliance", "office_administration", "management"],
+    reason: "0242 — the fleet list is read by the portals that work units; a field portal reads its own assigned units through fleet.myAssignedUnits instead, and the server refuses fleet.read to a driver regardless.",
+  },
+  {
     file: "panels/SetupPanel.tsx",
     procedures: [
       "commercialSetup.profileGet", "commercialSetup.profileSet", "commercialSetup.definitionList",

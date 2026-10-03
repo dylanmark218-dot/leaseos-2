@@ -392,6 +392,11 @@ export type Permission =
   // unit may move, and verifying a meter reading makes it count; all three are sensitive. Which hold
   // TYPES a role may place or release is decided in `_core/fleetPortfolio.ts`, below the permission.
   | "fleet.hold.place" | "fleet.hold.release" | "fleet.meter.record" | "fleet.meter.verify"
+  // 0242 — asset core. Identity, lifecycle and components are three recorded acts, each sensitive; a
+  // lifecycle change returns a unit to service or takes it out, so an agent never performs it.
+  // `fleet.read_own` is universal and self-scoped in the router: the driver's own assigned units, from
+  // the slot model, with no unit id taken from the driver.
+  | "fleet.asset.manage" | "fleet.lifecycle.set" | "fleet.component.manage" | "fleet.read_own"
   // 0221 — fleet maintenance, checkpoint 2. Triage decides a defect's severity (lowering a critical frees
   // a safety hold); return to service is the second person's verification that lifts a defect's hold.
   | "maintenance.defect.triage" | "maintenance.defect.send_to_shop" | "maintenance.task.write"
@@ -728,6 +733,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "maintenance.task.write",
     "maintenance.return_to_service.record",
     "fleet.meter.verify",
+    "fleet.component.manage",
   ],
   shop_lead: [
     "live_assist.use",
@@ -833,6 +839,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "maintenance.task.write",
     "maintenance.return_to_service.record",
     "fleet.meter.verify",
+    "fleet.asset.manage",
+    "fleet.lifecycle.set",
+    "fleet.component.manage",
   ],
   safety: [
     "portfolio.read",
@@ -1180,6 +1189,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
     // 0200 — Fleet & Equipment Portfolio foundation.
     "fleet.meter.record",
+    "fleet.asset.manage",
     // 0221 — opening a work order from a defect.
     "maintenance.defect.send_to_shop",
   ],
@@ -1500,6 +1510,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // 0221 — return to service (a safety hold is management's or safety's to lift).
     "maintenance.return_to_service.record",
     "fleet.meter.verify",
+    "fleet.asset.manage",
+    "fleet.lifecycle.set",
+    "fleet.component.manage",
   ],
   hr: [
     "portfolio.read",
@@ -2060,6 +2073,8 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   // 0228 — your own policies to acknowledge, your own signature. The router resolves the person from ctx.user.id.
   "safety_program.read_own",
   "safety_program.acknowledge_own",
+  // 0242 — the driver's own assigned units, resolved from the slot model; the request names no unit.
+  "fleet.read_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -2363,6 +2378,9 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "fleet.hold.place",
   "fleet.hold.release",
   "fleet.meter.verify",
+  "fleet.asset.manage",
+  "fleet.lifecycle.set",
+  "fleet.component.manage",
   // 0221 — triage can lower a critical defect, which frees a safety hold; return to service puts a unit back on the road.
   "maintenance.defect.triage",
   "maintenance.return_to_service.record",
@@ -3835,6 +3853,17 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "fleet.meterRecord": "fleet.meter.record",
   "fleet.meterDecide": "fleet.meter.verify",
   "fleet.history": "fleet.read",
+  /* ---- 0242: Fleet & Equipment Portfolio asset core ---- */
+  "fleet.list": "fleet.read",
+  "fleet.get": "fleet.read",
+  "fleet.unitReadiness": "fleet.read",
+  "fleet.components": "fleet.read",
+  "fleet.assetCreate": "fleet.asset.manage",
+  "fleet.assetUpdate": "fleet.asset.manage",
+  "fleet.lifecycleSet": "fleet.lifecycle.set",
+  "fleet.componentAttach": "fleet.component.manage",
+  "fleet.componentDetach": "fleet.component.manage",
+  "fleet.myAssignedUnits": "fleet.read_own",
 
   /* ---- 0221: fleet maintenance, checkpoint 2 — defect to return to service ---- */
   "maintenance.defectReport": "maintenance.write_defect",

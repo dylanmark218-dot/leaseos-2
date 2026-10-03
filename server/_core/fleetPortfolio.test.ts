@@ -40,7 +40,8 @@ describe("the unit's operational state, derived", () => {
     const s = operationalState(empty);
     expect(s.status).toBe("available");
     // CP1.5: incident holds are evaluated now — an incident that holds its unit places a unitHolds row.
-    expect(s.notEvaluated.map(n => n.domain)).toEqual(["documents_and_insurance", "lifecycle", "dispatched"]);
+    // 0242: lifecycle is recorded and evaluated now (retired, sold, storage are reasons), so it left this list.
+    expect(s.notEvaluated.map(n => n.domain)).toEqual(["documents_and_insurance", "dispatched"]);
     expect(driverNotice(s)).toBe("Operational");
   });
 

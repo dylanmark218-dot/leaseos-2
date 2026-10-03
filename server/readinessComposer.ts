@@ -55,6 +55,8 @@ import { equipmentAuthorizationsInOrg } from "./driverPortfolioService";
 import { listRoleNamesAnyScope } from "./db";
 import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
 import { enforcementReadiness, type OosOrder, type OosScope } from "./_core/enforcement";
+import { classMismatchBlocker, componentBlockers, lifecycleBlocker } from "./_core/fleetAssets";
+import { componentStatesFor, componentVersionOf } from "./fleetComponents";
 import { currentReleaseEvidenceFor, type StoredRelease } from "./_core/mechanicRelease";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { commercialReadinessForJob } from "./customerCommercialService";
@@ -123,7 +125,7 @@ export async function currentCommunicationPolicy(db: NonNullable<Awaited<ReturnT
  *   warn — review, a manager may acknowledge it.
  * The way to move a held unit is to release the hold, which a second person does.
  */
-function holdBlocker(subject: "unit" | "trailer", unitNumber: string, h: { holdRef: string; holdType: string; dispatchEffect: "warn" | "block" | "out_of_service"; reason: string }): DispatchBlocker {
+export function holdBlocker(subject: "unit" | "trailer", unitNumber: string, h: { holdRef: string; holdType: string; dispatchEffect: "warn" | "block" | "out_of_service"; reason: string }): DispatchBlocker {
   const who = subject === "unit" ? "truck" : "trailer";
   const label = `${subject === "unit" ? "Unit" : "Trailer"} ${unitNumber} — ${h.holdType} hold ${h.holdRef}: ${h.reason}`;
   if (h.dispatchEffect === "out_of_service") return { code: `${subject}_hold_${h.holdType}`, label, severity: "blocking", subject: who, overridable: false };
@@ -288,7 +290,7 @@ const proofVersion = (d: ProofOfCoverage | null) =>
     : versionOf([d.verdict.state, d.verdict.documentId, d.verdict.expiresAt?.toISOString(), d.verdict.claimedExpiresAt?.toISOString()]);
 const proofExpiry = (d: ProofOfCoverage | null) => (d?.source === "compliance_document" ? d.verdict.claimedExpiresAt : null);
 
-async function credentialsFor(ownerType: "operator" | "unit" | "trailer", ownerId: number) {
+export async function credentialsFor(ownerType: "operator" | "unit" | "trailer", ownerId: number) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, ownerType), eq(complianceDocuments.ownerId, ownerId)));
@@ -412,7 +414,7 @@ function bindingHasUnevaluatedConditions(conditionsJson: string | null): boolean
  * each is judged on its own rows and the most favourable verdict stands, because any one of them
  * satisfies the requirement.
  */
-function credentialState(rows: readonly CredRow[], docTypes: readonly string[], label: string, at: Date): CredentialState {
+export function credentialState(rows: readonly CredRow[], docTypes: readonly string[], label: string, at: Date): CredentialState {
   const v = complianceRequirementValidity(rows, docTypes, at);
   // An unverified verdict carries the date its newest row claims — evidence the gate may use to
   // block on, never to clear on. The canonical verdict names it; nothing here re-derives it.
@@ -422,7 +424,7 @@ function credentialState(rows: readonly CredRow[], docTypes: readonly string[], 
   };
 }
 
-async function policiesCovering(entityType: "unit" | "trailer", entityId: number, now: Date): Promise<PolicyRecord[]> {
+export async function policiesCovering(entityType: "unit" | "trailer", entityId: number, now: Date): Promise<PolicyRecord[]> {
   const db = await getDb();
   if (!db) return [];
   const covered = await db.select({ policyId: insuranceCoveredEntities.insurancePolicyId, until: insuranceCoveredEntities.coveredUntil })
@@ -743,8 +745,22 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       mechanicReleaseRequired: owingEvidence.length > 0,
       mechanicReleaseGiven: owingEvidence.length > 0 && withoutEvidence.length === 0,
     };
-    unitVersion = versionOf([unit.maintenanceStatus, defects.length, ...defects.map(d => `${d.id}:${d.status}:${d.resolvedByReleaseId ?? "∅"}`), ...holds.map(h => `hold:${h.holdRef}:${h.dispatchEffect}`).sort()]);
+    /*
+     * 0242 — the asset core: lifecycle, class and components. A unit out of the fleet or in storage is
+     * a finding; a trailer bound where a power unit belongs is a mismatch when its class is known; a
+     * mounted component's critical defect or safety hold is the truck's (O-9). All three join the
+     * unit's version so a change to any of them stales a check.
+     */
+    const components = await componentStatesFor(db, unit.id);
+    unitVersion = versionOf([unit.maintenanceStatus, defects.length, ...defects.map(d => `${d.id}:${d.status}:${d.resolvedByReleaseId ?? "∅"}`), ...holds.map(h => `hold:${h.holdRef}:${h.dispatchEffect}`).sort(),
+      `lifecycle:${unit.lifecycleStatus}`, `class:${unit.assetClass ?? "∅"}`, `components:${componentVersionOf(components)}`]);
     for (const h of holds) extra.push(holdBlocker("unit", unit.unitNumber, h));
+    const lifecycle = lifecycleBlocker("unit", unit.unitNumber, unit.lifecycleStatus);
+    if (lifecycle) extra.push(lifecycle);
+    const classMismatch = classMismatchBlocker("unit", unit.unitNumber, unit.assetClass);
+    if (classMismatch) extra.push(classMismatch);
+    for (const b of componentBlockers(unit.unitNumber, components)) extra.push(b);
+    if (lifecycle || classMismatch || components.length) contributions.push({ engine: "fleet", finding: `lifecycle ${unit.lifecycleStatus}; class ${unit.assetClass ?? "unclassified"}; ${components.length} component(s)` });
     releaseVersion = versionOf(releases.map(r => `${r.id}:${r.releaseType}:${r.testResult ?? "∅"}:${r.resolvedDefectIds ?? "∅"}`));
     unitCredentialVersion = credentialVersionOf(uCreds);
     for (const c of uCreds) governingExpiries.push({ what: `unitDoc:${c.id}`, at: c.expiresAt });
@@ -810,6 +826,13 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       db.select().from(unitHolds).where(and(eq(unitHolds.unitId, tr.id), eq(unitHolds.status, "active"))),
     ]);
     for (const h of tHolds) extra.push(holdBlocker("trailer", tr.unitNumber, h));
+    // 0242 — the trailer's lifecycle, class and components, as the unit's.
+    const tComponents = await componentStatesFor(db, tr.id);
+    const tLifecycle = lifecycleBlocker("trailer", tr.unitNumber, tr.lifecycleStatus);
+    if (tLifecycle) extra.push(tLifecycle);
+    const tClass = classMismatchBlocker("trailer", tr.unitNumber, tr.assetClass);
+    if (tClass) extra.push(tClass);
+    for (const b of componentBlockers(tr.unitNumber, tComponents)) extra.push({ ...b, subject: "trailer" });
     trailer = {
       trailerNumber: tr.unitNumber,
       inspection: credentialState(tCreds, ["cvip_certificate", "annual_inspection"], "Trailer inspection", now),
@@ -819,7 +842,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       compatibleWithTruck: null,
     };
     // C1a-6 — was [id, number of documents]: a trailer inspection replaced by an expired one read as unchanged.
-    trailerVersion = versionOf([tr.id, credentialVersionOf(tCreds), ...tHolds.map(h => `hold:${h.holdRef}:${h.dispatchEffect}`).sort()]);
+    trailerVersion = versionOf([tr.id, credentialVersionOf(tCreds), ...tHolds.map(h => `hold:${h.holdRef}:${h.dispatchEffect}`).sort(), `lifecycle:${tr.lifecycleStatus}`, `class:${tr.assetClass ?? "∅"}`, `components:${componentVersionOf(tComponents)}`]);
     insuranceVersion = `${insuranceVersion};trailer=${insuranceVersionOf(pols)}`;
     for (const c of tCreds) governingExpiries.push({ what: `trailerDoc:${c.id}`, at: c.expiresAt });
     for (const p of pols) governingExpiries.push({ what: `trailerPolicy:${p.policyRef}`, at: p.expiresAt }, { what: `trailerPolicyProof:${p.policyRef}`, at: proofExpiry(p.document) });

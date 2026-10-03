@@ -1,6 +1,11 @@
 # Fleet & Equipment Portfolio — repository survey and design
 
-**Status:** survey and design only. No code, no migration, no seed. Written against
+**Status:** the survey and design, as written on 2026-09-23 against `main` `6f52b57`. Since then: the
+foundation slice (holds, meters, events; `0200`/`0201`) was built from it on the mechanic-portal branch
+and reconciled in `docs/fleet/FLEET_PORTFOLIO_FOUNDATION_RECONCILIATION.md`; the asset core (identity,
+lifecycle, components, list and detail, unit-side readiness; `0242`/`0243`) is recorded in
+`docs/fleet/FLEET_ASSET_CORE_CHECKPOINT.md`. Where those records and this document differ, the records
+say what was built and why. The survey below is left as written: survey and design only. Written against
 `main` = `6f52b57` (release `v23.25`) on branch `claude/fleet-equipment-portfolio-design-3d13d5`,
 2026-09-23. Every table, column, procedure and file named here was read from the tree, not
 recalled; line references are to `drizzle/schema.ts` unless another file is named.

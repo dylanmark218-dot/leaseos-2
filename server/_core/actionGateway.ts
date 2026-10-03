@@ -87,6 +87,7 @@ export const NEVER_AUTONOMOUS: readonly string[] = [
  */
 export const HUMAN_AUTHORIZATION_PERMISSIONS: readonly string[] = [
   "fleet.hold.release",           // fleet.holdRelease; and an incident's hold, through its safety review
+  "fleet.lifecycle.set",          // fleet.lifecycleSet: returning a retired or stored unit to the fleet, or taking one out
   "maintenance.record_release",   // mechanic release (return to service) and resolving the defects it names
   "maintenance.revoke_release",   // withdrawing a return to service
   "enforcement.release",          // clearing an out-of-service order

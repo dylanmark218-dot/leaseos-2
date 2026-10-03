@@ -541,6 +541,8 @@ describe("payroll and tax authorization boundaries", () => {
       "shifts.availability_own",
       // 0228 — the policies a person must acknowledge, and their own signature on one.
       "safety_program.read_own", "safety_program.acknowledge_own",
+      // 0220 — the driver's own assigned units.
+      "fleet.read_own",
     ]);
   });
 
