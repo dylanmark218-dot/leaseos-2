@@ -1,6 +1,6 @@
-# Fleet & Equipment Portfolio — asset core checkpoint (2026-10-01)
+# Fleet & Equipment Portfolio — asset core checkpoint (2026-10-01, merged onto main 2026-10-03)
 
-Branch `claude/fleet-equipment-portfolio-design-3d13d5`. Three commits:
+Branch `claude/fleet-equipment-portfolio-design-3d13d5`. Four steps:
 
 1. **`82df3d6` — the foundation, carried onto today's main.** The foundation slice built on this
    design by the mechanic-portal branch (`unitHolds`, the meter ledger and its read-in-place union,
@@ -22,6 +22,16 @@ Branch `claude/fleet-equipment-portfolio-design-3d13d5`. Three commits:
    caught main's new `shifts.post` and `shifts.award` writing a unit id they never checked; both now
    call `requireUnitInScope`, and `shifts.post` joined the refusal table in
    `server/unitScopeSecurity.db.test.ts`.
+4. **`main` `2864723` merged in (2026-10-03).** Main had since merged the foundation itself (the
+   mechanic-portal branch's `0199`–`0201`, CP1.5), mechanic portal CP2 (`0221`/`0222`, defect to
+   return to service), payroll P1/P2, the Safety & Compliance Program Builder, the driver portfolio
+   and the external source registry. Twenty-one files conflicted. Every foundation file takes
+   main's version: main's own CP1.5 fixes for `shifts.post`/`shifts.award` supersede step 3's, and
+   step 1's edits to the finance, purchasing, payroll and commercial-setup routers are dropped for
+   main's (step 1 had lost main's unit check on `roadside.open`; main's version restores it).
+   `drizzle/schema.ts` is main's plus the asset core's columns and `unitComponents`. The asset
+   core's migrations move to `0237`/`0238` (below). The classification version is `c1a.5` on
+   main's `c1a.4`. Pins, grants, the procedure map and the human-authorization list take both sides.
 
 Design: `docs/fleet/FLEET_EQUIPMENT_PORTFOLIO_SURVEY_AND_DESIGN.md` (§A.14, §B.2–B.5, §B.13).
 Foundation: `docs/fleet/FLEET_PORTFOLIO_FOUNDATION_CHECKPOINT.md`,
@@ -29,33 +39,31 @@ Foundation: `docs/fleet/FLEET_PORTFOLIO_FOUNDATION_CHECKPOINT.md`,
 
 ## Counts
 
-| | `main` `b35bac4` | + foundation (`82df3d6`) | + this checkpoint | `main` `240b2dd` | merged |
-|---|---|---|---|---|---|
-| Tables | 440 | 443 | **444** (`unitComponents`) | 451 | **456** |
-| Migrations | 190 | 193 | **195** (`0221_fleet_asset_identity.sql`, `0222_fleet_component_guards.sql`) | 194 | **199** |
-| Role-authorized procedures | 743 | 755 | **765** (+10, `server/fleetAssetRouter.ts`, spread into `fleet`) | 778 | **800** |
-| Operational procedure map | 723 | 735 | **745** | 758 | **780** |
-| Mounted server paths | 793 | 805 | **815** | 832 | **854** |
-| Permissions | 384 | 388 | **392** | 396 | **406** |
-| Sensitive (fail-closed) | 143 | 146 | **149** | 153 | **160** |
-| Universal (self-scoped) | 13 | 13 | **14** (`fleet.read_own`) | 16 | **17** |
-| Classification | `c1a.3` | `c1a.4` | **`c1a.5`** | `c1a.3` | **`c1a.5`** |
-| Unwired `_core` engines | — | unchanged | **unchanged** — `fleetAssets` is reached from its router | — | unchanged |
+| | `main` `2864723` | this branch, merged | delta |
+|---|---|---|---|
+| Tables | 482 | **483** | +1 (`unitComponents`) |
+| Migrations | 207 | **209** | +2 (`0237_fleet_asset_identity.sql`, `0238_fleet_component_guards.sql`) |
+| Role-authorized procedures | 897 | **907** | +10 (`server/fleetAssetRouter.ts`, spread into `fleet`) |
+| Operational procedure map | 874 | **884** | +10 |
+| Mounted server paths | 952 | **962** | +10 |
+| Permissions | 436 | **440** | +4 |
+| Sensitive (fail-closed) | 178 | **181** | +3 |
+| Universal (self-scoped) | 21 | **22** | +1 (`fleet.read_own`) |
+| Classification | `c1a.4` | **`c1a.5`** | four fleet rules |
+| Unwired `_core` engines | — | unchanged | `fleetAssets` is reached from its router |
 
-The two right-hand columns are the second merge: every `merged` count is main's plus exactly this
-branch's delta over `b35bac4` (+5 tables, +5 migrations, +22 procedures and paths, +10 permissions,
-+7 sensitive, +1 universal).
+Every count is read from the source by `scripts/current-state.sh`. The delta is exactly the asset
+core: the foundation is main's now.
 
-Every count is read from the source by `scripts/current-state.sh`.
+## Migrations — 0237 and 0238
 
-## Migrations — 0221 and 0222
+Drafted as `0220`; moved to `0221`/`0222` when `claude/eld-compliance-intelligence-ramlrd` took
+`0220`; moved again on merging `main` `2864723`, which had taken `0221`/`0222` for mechanic portal
+CP2 while `0224`–`0236` were held on main or open branches. `0237` and `0238` were the first two
+numbers free on main and on every remote branch at the scan. No environment applied them under an
+earlier number. Recorded in `docs/architecture/MIGRATION_COLLISION_REGISTER.md`.
 
-Scanned at commit time across `origin/main` and every remote branch: `main` ends at `0219`
-(customer, contract and rate management, #98); the highest claim on any branch is `0220`
-(`claude/eld-compliance-intelligence-ramlrd`, taken while this checkpoint was being gated — the first
-scan had found `0220` free). `0221` and `0222` are the first two numbers free everywhere. Recorded in `docs/architecture/MIGRATION_COLLISION_REGISTER.md`.
-
-- **`0221`** — additive columns on `units`: `assetClass` (enum, NULL = not classified), `assetType`,
+- **`0237`** — additive columns on `units`: `assetClass` (enum, NULL = not classified), `assetType`,
   `assetSubtype`, `companyAssetNumber`, `serialNumber`, `plateJurisdiction`, `make`, `model`,
   `modelYear`, `manufacturer`, `ownershipType`, `acquiredAt`, `homeTerminal`, `assignedBranchRef`,
   `assignedDivision`, `defaultOperatorId`, `regulatoryClass`, `lifecycleStatus` (default `active`),
@@ -63,7 +71,7 @@ scan had found `0220` free). `0221` and `0222` are the first two numbers free ev
   `(lifecycleStatus, assetClass)`. New table `unitComponents` (parent, child, relationship,
   removable, installed/removed with actors and work orders). No existing value changes meaning:
   `vehicleType` stays, and every existing unit reads `lifecycleStatus = active`, unclassified.
-- **`0222`** — triggers: a component installation is never edited and never deleted, and a detached
+- **`0238`** — triggers: a component installation is never edited and never deleted, and a detached
   relation is never changed again; a lifecycle change must carry its own actor, time and reason
   (a raw `UPDATE units SET lifecycleStatus` is refused).
 
@@ -117,7 +125,6 @@ axe rules in the accessibility suite in seven states. The former demonstration s
 | `client/src/fleet/*.dom.test.tsx` | 11 | the presentation contract; the list's ordering, words and empty answer; the detail's reasons, refused controls, lifecycle form and unrecognised state |
 | `client/src/a11y/a11y.dom.test.tsx` | +21 | seven Fleet states at three viewports |
 | existing pins | — | `fleetPortfolio.test.ts` updated (lifecycle is evaluated now); census, path and inventory pins moved by exactly this checkpoint's deltas |
-| `server/unitScopeSecurity.db.test.ts` | +1 case | `shifts.post` (main, `0206`) refuses another organization's unit as not found and writes nothing — found by the structural guard at the second merge |
 
 ## Known gaps, named
 
@@ -135,21 +142,7 @@ axe rules in the accessibility suite in seven states. The former demonstration s
 ## Gate
 
 `DATABASE_URL=… bash scripts/ci-gate.sh` from a dropped and recreated MariaDB 10.11 on Node 22.23.3
-(`.nvmrc`), recorded in the commit that carries this document.
-
-After the second merge the gate ran to the end: migrations, parity, both typechecks at zero, no bare
-`protectedProcedure`, the build, and the suite — every suite green except one, and that one is red
-on `main` `240b2dd` untouched, reproduced on a clean checkout of `main` alone:
-
-- `server/documentValidityCanonical.test.ts` › "open work consumes the adapter's verdict and decides
-  no qualification itself" — `server/_core/openShifts.ts` (#59) imports `readExpiry` from
-  `./documentValidity`, which the census it ships with forbids. Nothing in this branch touches either
-  file. The licence it classifies is `operators.licenseExpiresAt`, a column, not a compliance
-  document; the smallest fix on `main` is to list `_core/openShifts.ts`'s `readExpiry` as a
-  permitted date classifier in that census (with the reason) rather than to copy the expiry rule
-  into open work, which is what the census exists to prevent. Not fixed here: it is `main`'s, and
-  the fix is a ruling on `main`'s own test.
-- `server/calendarFixtures.test.ts` went red on the re-run a day later: `server/cash.test.ts` (`main`,
-  untouched here) carries fixture dates from `2026-10-10` that the real clock now reaches within its
-  three-week window. It is a clock guard on `main`'s own fixtures and fails on `main` from the same
-  date; the fix is `main`'s (make the fixtures clock-relative or record them as reviewed).
+(`.nvmrc`), on the tree merged with `main` `2864723`; the result is recorded in the commit that
+carries this document. The two suites that were red on `main` `240b2dd` itself
+(`server/documentValidityCanonical.test.ts` and `server/calendarFixtures.test.ts`) are fixed on
+`main` and pass here.

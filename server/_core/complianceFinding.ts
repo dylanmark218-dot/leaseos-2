@@ -45,7 +45,7 @@ export type FindingDomain =
   | "permit" | "destination" | "route" | "communications" | "capability" | "commercial" | "unclassified";
 
 /** Bumped whenever CLASSIFICATION changes meaning. Part of the rule-set hash, so a change stales every check. */
-export const CLASSIFICATION_VERSION = "c1a.5";   // main's c1a.3 + 0200 fleet portfolio hold rules (both landed as "c1a.3" on their own branches; the merge is a third rule set)
+export const CLASSIFICATION_VERSION = "c1a.5";   // 0237 asset core: + fleet.lifecycle.out/storage, fleet.class.mismatch, fleet.component.critical, on main's c1a.4.   // c1a.3 was taken twice — this branch's fleet hold rules (0200) and main's v23.26 commercial rules; the union of both is c1a.4
 
 /**
  * A readiness finding. It IS a `DispatchBlocker` — every existing consumer (the checklist, the
@@ -113,6 +113,11 @@ export const CLASSIFICATION: readonly Rule[] = [
   r("driver.academy.conditions", /^academy_binding_conditions_unknown$/, "driver_qualification", "carrier_safety_policy", ...UNKNOWN_BLOCKS),
   r("driver.academy.review", /^academy_review_/, "driver_qualification", "carrier_safety_policy", ...WARN_ACK),
   r("driver.academy.unsatisfied", /^academy_/, "driver_qualification", "carrier_safety_policy", ...HARD),
+  /* Driver Portfolio requirement bindings (0210): company, client, site, job-type, equipment and job
+   * requirements. Only mandatory bindings produce these codes; informational ones produce none. */
+  r("driver.portfolio.unlinked", /^portfolio_operator_unlinked$/, "driver_qualification", "carrier_safety_policy", ...UNKNOWN_BLOCKS),
+  r("driver.portfolio.unknown", /^driver_(credential|licence_class|equipment)_.+_(unverified|no_expiry_recorded|class_unknown|unknown_requirement)$/, "driver_qualification", "carrier_safety_policy", ...UNKNOWN_BLOCKS),
+  r("driver.portfolio.unsatisfied", /^driver_(credential|licence_class|equipment)_/, "driver_qualification", "carrier_safety_policy", ...HARD),
 
   /* hours of service */
   r("hos.insufficient", /^hos_insufficient$/, "hos", "statute_regulation", ...HARD),

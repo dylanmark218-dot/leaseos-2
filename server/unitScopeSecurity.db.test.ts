@@ -169,9 +169,17 @@ const CASES: Case[] = [
   { name: "(new) integration.loadSenseBindGateway", procedure: "integration.loadSenseBindGateway", role: "management",
     call: (c, u) => c.integration.loadSenseBindGateway({ gatewayDeviceRef: `GW-${rnd()}`, measurementDeviceId: 1, unitId: u, tareKg: 0 }),
     writes: rowsNaming("loadSenseGatewayBindings", "unitId") },
-  { name: "(0206) shifts.post", procedure: "shifts.post", role: "dispatcher",
-    call: (c, u) => c.shifts.post({ title: "Night haul", startsAt: new Date(AT.getTime() + 3_600_000), endsAt: new Date(AT.getTime() + 7_200_000), requiredRole: "driver", unitId: u, publish: false }),
+  // main 240b2dd's open work: a post stored the unit it named unchecked; an award reached the binding's
+  // check only after reading the unit's readiness and writing its refusal.
+  { name: "(main) shifts.post", procedure: "shifts.post", role: "dispatcher",
+    call: (c, u) => c.shifts.post({ title: "Night haul", startsAt: new Date(Date.now() + 86_400_000), endsAt: new Date(Date.now() + 90_000_000), requiredRole: "driver", unitId: u }),
     writes: rowsNaming("shiftPosts", "unitId") },
+  { name: "(main) shifts.award (unit)", procedure: "shifts.award", role: "dispatcher",
+    call: (c, u) => c.shifts.award({ postRef: `OS-${rnd()}`, userId: 1, unitId: u, checkId: 1, expectedLastEventId: null }),
+    writes: () => count("SELECT COUNT(*) AS n FROM shiftPostEvents WHERE eventType = 'award_refused' AND detail LIKE 'NOT_FOUND%'", []) },
+  { name: "(main) shifts.award (trailer)", procedure: "shifts.award", role: "dispatcher", label: "Trailer",
+    call: (c, u) => c.shifts.award({ postRef: `OS-${rnd()}`, userId: 1, unitId: null, trailerId: u, checkId: 1, expectedLastEventId: null }),
+    writes: () => count("SELECT COUNT(*) AS n FROM shiftPostEvents WHERE eventType = 'award_refused' AND detail LIKE 'NOT_FOUND%'", []) },
 ];
 
 d("another organization's unit is indistinguishable from a unit that does not exist, and nothing is written", () => {

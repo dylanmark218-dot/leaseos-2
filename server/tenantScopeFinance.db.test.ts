@@ -470,7 +470,7 @@ d("F1.1 — inventory and other rows with no owner fail closed once organization
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 /** One organization's compliance subjects and the credentials its own people filed against them. */
 async function world12(orgRef: string) {
-  const people = { office: await member(orgRef, ["office"]), hr: await member(orgRef, ["hr"]), dispatcher: await member(orgRef, ["dispatcher"]) };
+  const people = { office: await member(orgRef, ["office"]), office2: await member(orgRef, ["office"]), hr: await member(orgRef, ["hr"]), dispatcher: await member(orgRef, ["dispatcher"]) };
   const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES (?, NOW())", [`Op ${rnd()}`]);
   const operatorId = Number(op.insertId);
   await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'operator', ?, 1)", [orgRef, operatorId]);
@@ -547,7 +547,8 @@ d("F1.2 — Organization B cannot read or file compliance records against Organi
       expect((await callerFor(A.dispatcher).compliance.passport({ subjectType, subjectId, jurisdiction: "CA-AB" })).verdict, subjectType).toBeTruthy();
     expect((await callerFor(A.dispatcher).compliance.jobPassport({ jurisdiction: "CA-AB", carrier: { id: A.entityId }, operator: { id: A.operatorId }, unit: { id: A.unitId }, trailer: { id: A.unitId } })).verdict).toBeTruthy();
     expect((await callerFor(A.dispatcher).compliance.medicalEligibility({ operatorId: A.operatorId })).eligible).toBe("unknown");
-    expect((await callerFor(A.office).compliance.credentialVerify({ credentialId: A.credentialId, outcome: "verified" })).verificationStatus).toBe("verified");
+    // A.office recorded it, so a second office user in A verifies it (separation of duties).
+    expect((await callerFor(A.office2).compliance.credentialVerify({ credentialId: A.credentialId, outcome: "verified" })).verificationStatus).toBe("verified");
     expect((await callerFor(A.office).compliance.consentRecord({ subjectUserId: A.hr, consentType: "driver_abstract", purpose: "annual abstract", signedAt: days(-1), signatureEvidenceRecordId: A.evidenceId })).consentRef).toBeTruthy();
   });
 });

@@ -54,15 +54,40 @@ describe("the real tree", () => {
     expect(files).toContain("0208_organization_invitations.sql");   // renumbered from 0175 on merging main, which took 0175
     // Main has since taken 0209 (0209_operating_zone_scope, P0-A2.1), above this checkpoint's two; the
     // ledger applies by name, so 0207/0208 still run on a database that already has 0209.
+    // The driver portfolio (#16) then took 0210–0212, yielding 0202–0204 to Live Assist, which merged first.
     // SA1 (Sign & Attest) holds 0214–0216 on this branch, below v23.31's 0217–0219, which were renumbered
     // around them; both lineages apply by name.
     // v23.31 took 0217–0219 (Customer, Contract and Rate Management): 0210–0216 are claimed by open
     // branches, so head+1 would have collided; the register records the scan.
     expect(files).toContain("0219_job_commercial_context.sql");
-    // The Fleet & Equipment Portfolio asset core took 0221–0222: 0220 was claimed by an open branch
-    // (eld-compliance-intelligence) while the checkpoint was being gated; the register records the scan.
-    expect(files).toContain("0221_fleet_asset_identity.sql");
-    expect(headSlot(files)).toBe("0222");
+    // Mechanic Portal CP2 took 0221–0222 (defect lifecycle and its guards): 0220 is claimed by
+    // `claude/eld-compliance-intelligence-ramlrd`, so head+1 would have collided; the register records the scan.
+    expect(files).toContain("0222_defect_lifecycle_guards.sql");
+    // Payroll P1 took 0226 (compensation agreements): 0220–0225 are claimed by open branches (ELD, integration
+    // hub, CI stabilization), so head+1 would have collided twice; drafted as 0224 and moved before it was applied.
+    expect(files).toContain("0226_payroll_compensation_agreements.sql");
+    // Payroll P2 took 0227 (pay schedules): 0223–0225 are still claimed by open branches, below main's 0226.
+    expect(files).toContain("0227_payroll_pay_schedules.sql");
+    // The Safety & Compliance Program Builder took 0228. It was drafted as 0182 when that was free everywhere;
+    // on merging main, document control had claimed 0182 and main's head was 0227, so it moved to 0228,
+    // the first slot free on main and on all 131 remote branches at the scan.
+    expect(files).toContain("0228_safety_program_builder.sql");
+    expect(files.filter(f => f.startsWith("0182_"))).toEqual([]);
+    // The approved external source registry took 0233. Drafted as 0228 when that was free, it moved before any
+    // environment applied it when the pre-commit scan found 0228 claimed by payroll P3 and 0229–0232 by the
+    // integration hub; main has since taken 0228 itself (the program builder, #99). 0233 was still free on main
+    // and on all 133 remote branches at the rescan before rebasing onto it, and stays below main's 0236,
+    // whose author counted it among the claimed slots; the ledger applies by name.
+    expect(files).toContain("0233_external_source_registry.sql");
+    // Driver Portfolio security hardening took 0236 (compliance document recorder). Drafted as 0229; on
+    // merging main, 0229 was claimed by the integration hub and 0230–0235 by other open branches, so it
+    // moved to 0236, the first slot free on main and on all 144 remote branches at the scan.
+    expect(files).toContain("0236_compliance_document_recorder.sql");
+    // The Fleet & Equipment Portfolio asset core took 0237–0238 (asset identity and its guards). Drafted as
+    // 0220, it moved to 0221 when the ELD branch took 0220, and to 0237 on merging main, which had taken
+    // 0221–0222 (CP2) while 0224–0236 were held on main or open branches. Never applied under 0220/0221.
+    expect(files).toContain("0237_fleet_asset_identity.sql");
+    expect(headSlot(files)).toBe("0238");
   });
 
   it("keeps the reserved slots empty", () => {
@@ -113,8 +138,10 @@ describe("the guard catches what it exists to catch", () => {
   });
 
   it("accepts a correctly allocated next migration", () => {
-    expect(auditMigrationSlots([...files, "0223_the_next_one.sql"])).toEqual([]);
-    expect(headSlot([...files, "0223_the_next_one.sql"])).toBe("0223");
+    // The slot after the real head, whatever it is today — so this case does not need moving each checkpoint.
+    const next = String(Number(headSlot(files)) + 1).padStart(4, "0");
+    expect(auditMigrationSlots([...files, `${next}_the_next_one.sql`])).toEqual([]);
+    expect(headSlot([...files, `${next}_the_next_one.sql`])).toBe(next);
   });
 
   it("gives every tolerated duplicate a reason that says something", () => {

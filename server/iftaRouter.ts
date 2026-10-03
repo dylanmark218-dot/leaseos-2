@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, gte, lt } from "drizzle-orm";
 import { moneyScoped, roleProcedure, router } from "./_core/trpc";
 import { requireOwnedEntity } from "./_core/entityScope";
-import { distanceRecordInScope, fuelTransactionInScope, iftaReturnInScope, requireEvidence, requireTrip, requireUnit } from "./financeScope";
+import { distanceRecordInScope, fuelTransactionInScope, iftaReturnInScope, requireEvidence, requireTrip } from "./financeScope";
 import { getDb } from "./db";
 import { fuelTransactions, iftaReturns, jurisdictionDistanceRecords, operators, trips } from "../drizzle/schema";
 import { buildIftaQuarter, finalizeDecision, quarterBounds, splitTripDistance, type DistanceRecord, type FuelRecord } from "./_core/iftaEngine";
@@ -65,7 +65,6 @@ export const iftaRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       if (input.periodEnd <= input.periodStart) throw new TRPCError({ code: "BAD_REQUEST", message: "periodEnd must be after periodStart" });
       requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
-      await requireUnit(ctx.money, input.unitId);
       await requireTrip(ctx.money, input.tripId);
       await requireEvidence(ctx.money, input.evidenceRecordId);
       await assertPeriodOpen(input.financialEntityId, input.periodStart, "Distance record");

@@ -16,9 +16,11 @@ import { roleProcedure, router } from "./_core/trpc";
 import { actingScopeFor, evidenceInScope, getDb, jobInScope, operatorInScope, unitInScope, userInScope } from "./db";
 import { assertCallerOwnsEntity } from "./_core/entityScope";
 import { requireProvableOwnership } from "./ownershipDomain";
+import { requireSubjectInScope, type ComplianceOwnerType } from "./complianceSubjectScope";
+import { decideComplianceCredential, recordCredentialEntry } from "./credentialVerificationService";
 import { carrierProfileReviews, complianceConsents, complianceDocuments, complianceRequirements, writtenProgramVersions } from "../drizzle/schema";
 import {
-  abstractRequestPermitted, buildPassport, composeJobPassport, MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch, nextRenewalDue,
+  abstractRequestPermitted, buildPassport, composeJobPassport, isMedicalDocType, MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch, nextRenewalDue,
   type Credential, type Passport, type Requirement, type Subject,
 } from "./_core/compliancePassport";
 import { COMPLIANCE_REQUIREMENT_SEEDS } from "./_core/complianceRequirementSeeds";
@@ -77,29 +79,7 @@ async function loadCredentials(ownerType: string, ownerId: number): Promise<Cred
   }));
 }
 
-type OwnerType = "operator" | "unit" | "job" | "trailer" | "carrier" | "user" | "equipment";
-/**
- * F1.2 — the subject of a credential or passport is one the caller's organization may see, through the
- * owner it already has: an operator or unit (trailers are units) through coreRecordOwnership, a job
- * through jobs.orgRef, a person through their membership, a carrier through the company's legal entity
- * (0146 — the id programPublish and profileReviewRecord record carrier compliance against). Anything
- * else answers `what`, the same answer a missing subject gets. Equipment has no owner yet: refused while
- * more than one company exists (UNKNOWN OWNERSHIP != GLOBAL ACCESS).
- */
-async function requireSubjectInScope(userId: number, ownerType: OwnerType, ownerId: number, what: string): Promise<void> {
-  if (ownerType === "equipment") return requireProvableOwnership("Equipment credentials", "equipment records carry an owner");
-  if (ownerType === "carrier") {
-    const db = await getDb();
-    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-    return assertCallerOwnsEntity(db as never, userId, ownerId, what);
-  }
-  const scope = await actingScopeFor(userId);
-  const visible = ownerType === "operator" ? await operatorInScope(ownerId, scope)
-    : ownerType === "unit" || ownerType === "trailer" ? await unitInScope(ownerId, scope)
-    : ownerType === "job" ? await jobInScope(ownerId, scope)
-    : await userInScope(ownerId, scope);
-  if (!visible) throw new TRPCError({ code: "NOT_FOUND", message: what });
-}
+type OwnerType = ComplianceOwnerType;
 
 async function passportFor(tenantId: string, subjectType: Subject["subjectType"], subjectId: number, jurisdiction: string, attributes: Record<string, unknown>): Promise<Passport> {
   const [requirements, credentials] = await Promise.all([loadRequirements(tenantId), loadCredentials(subjectType, subjectId)]);
@@ -170,28 +150,33 @@ export const complianceRouter = router({
       await requireSubjectInScope(ctx.user.id, input.ownerType, input.ownerId, "Credential owner not found");
       if (input.evidenceRecordId != null && !(await evidenceInScope(input.evidenceRecordId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       // Recorded is not verified. Every credential enters as needs_review.
-      const ins = await db.insert(complianceDocuments).values({
+      const now = new Date();
+      const privateDetail = input.privateDetail || isMedicalDocType(input.docType);
+      return db.transaction(async tx => {
+      const ins = await tx.insert(complianceDocuments).values({
         ownerType: input.ownerType, ownerId: input.ownerId, docType: input.docType, requirementKey: input.requirementKey ?? null,
-        title: input.title, identifier: input.identifier ?? null, capturedAt: new Date(), issuedAt: input.issuedAt ?? null,
+        title: input.title, identifier: input.identifier ?? null, capturedAt: now, issuedAt: input.issuedAt ?? null,
         expiresAt: input.expiresAt ?? null, jurisdiction: input.jurisdiction ?? null, verificationStatus: "needs_review",
-        source: input.source ?? null, confidence: "medium", privateDetail: input.privateDetail || input.docType === "medical_fitness",
+        source: input.source ?? null, confidence: "medium", privateDetail,
         evidenceRecordId: input.evidenceRecordId ?? null,
+        // 0236 — who entered it, so the same person cannot then verify it.
+        recordedByUserId: ctx.user.id,
       });
-      return { credentialId: Number(ins[0]?.insertId ?? 0), verificationStatus: "needs_review" as const };
+      const credentialId = Number(ins[0]?.insertId ?? 0);
+      // The same entry row in the portfolio audit as a driver's own submission.
+      await recordCredentialEntry(tx, { credentialId, ownerType: input.ownerType, ownerId: input.ownerId, docType: input.docType, privateDetail, actorUserId: ctx.user.id, path: "compliance.credentialRecord", at: now });
+      return { credentialId, verificationStatus: "needs_review" as const };
+      });
     }),
 
   credentialVerify: roleProcedure("compliance.credentialVerify")
     .input(z.object({ credentialId: z.number().int().positive(), outcome: z.enum(["verified", "rejected"]), note: z.string().max(400).optional() }))
-    .mutation(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const rows = await db.select().from(complianceDocuments).where(eq(complianceDocuments.id, input.credentialId)).limit(1);
-      if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Credential not found" });
-      // F1.2 — another company's credential is not found, not verifiable.
-      await requireSubjectInScope(ctx.user.id, rows[0].ownerType, rows[0].ownerId, "Credential not found");
-      await db.update(complianceDocuments).set({ verificationStatus: input.outcome, verifiedByUserId: ctx.user.id, verifiedAt: new Date() }).where(eq(complianceDocuments.id, input.credentialId));
-      return { credentialId: input.credentialId, verificationStatus: input.outcome };
-    }),
+    // The one verification door: subject scope (requireSubjectInScope), separation of duties, the
+    // needs_review state and the conditional update are all the service's, not this procedure's.
+    .mutation(async ({ ctx, input }) => decideComplianceCredential({
+      credentialId: input.credentialId, outcome: input.outcome, verifierUserId: ctx.user.id,
+      note: input.note ?? null, path: "compliance.credentialVerify",
+    })),
 
   consentRecord: roleProcedure("compliance.consentRecord")
     .input(z.object({

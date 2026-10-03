@@ -12,11 +12,12 @@ import { z } from "zod";
 import { and, desc, eq, gte, isNull, or } from "drizzle-orm";
 import { moneyScoped, roleProcedure, router } from "./_core/trpc";
 import { ownsEntity, requireOwnedEntity } from "./_core/entityScope";
-import { customerAccountInScope, purchaseAuthorizationInScope, requireEvidence, requireJob, requireTrip, requireUnit, roadsideEventInScope, vendorBillInScope, vendorInScope } from "./financeScope";
+import { customerAccountInScope, purchaseAuthorizationInScope, requireEvidence, requireJob, requireTrip, roadsideEventInScope, vendorBillInScope, vendorInScope } from "./financeScope";
 import { assertPeriodOpen } from "./periodCloseService";
 import { fromCents, toCents } from "./_core/money";
 import { normaliseUnit, priceLineAndRecord } from "./_core/linePricing";
 import { getDb, listActiveUserRoleNames } from "./db";
+import { requireCallerUnits } from "./unitScope";
 import {
   maintenanceDefects, purchaseAuthorizations, roadsideServiceEvents, spendingLimits,
   vendorBillLines, vendorBills, vendors, customerRecoveryProposals, customerAccounts } from "../drizzle/schema";
@@ -58,10 +59,12 @@ export const roadsideRouter = router({
       driverStatement: z.string().max(4000).nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      // CP1.5 — the unit must be the caller's organization's. Existence alone let one organization open
+      // a defect and a roadside event on another's truck, and readiness blocks a truck with either.
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       // F1 — a roadside event is the unit's; the unit, and any job or trip it names, must be the caller's.
-      await requireUnit(ctx.money, input.unitId);
       await requireJob(ctx.money, input.jobId);
       await requireTrip(ctx.money, input.tripId);
 
@@ -128,10 +131,9 @@ export const purchasingRouter = router({
       emergency: z.boolean().default(false),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5 — the unit is the caller's organization's, or it is not found
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      // The unit first (CP1.5): a unit the caller may not see is "not found" before anything else is judged.
-      await requireUnit(ctx.money, input.unitId);
       if (!input.vendorId && !input.vendorNameIfNew) throw new TRPCError({ code: "BAD_REQUEST", message: "Name a vendor or a new vendor" });
       requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
       if (input.vendorId) await vendorInScope(db, ctx.money, input.vendorId);
@@ -219,7 +221,7 @@ export const vendorRouter = router({
       evidenceRecordId: z.number().int().positive().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      await requireUnit(ctx.money, input.unitId);   // the unit first (CP1.5): not found before anything else is judged
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
 

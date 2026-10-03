@@ -57,6 +57,9 @@ export type Permission =
   | "evidence.read_commercial"
   | "evidence.read_personnel"
   | "evidence.read_legal"
+  // The file manager's gate. Opening the browser is not reading a record: each
+  // record is still decided on its own category read (or evidence.read_own).
+  | "evidence.browse"
   // Safety
   | "incident.create"
   | "incident.read_summary"
@@ -152,6 +155,19 @@ export type Permission =
   | "payroll.time.submit_own"
   | "payroll.dispute.raise_own"
   | "payroll.profile.write"
+  // Payroll P1 (0226) — compensation agreements and the earning-code catalogue, split by act (D4):
+  // reading compensation, proposing it, approving it, and administering a book's earning codes are
+  // four different authorities. None of them is held by dispatch, a driver, a mechanic or management.
+  | "payroll.compensation.read"
+  | "payroll.compensation.propose"
+  | "payroll.compensation.approve"
+  | "payroll.earning_code.manage"
+  // Payroll P2 (0227) — the payroll calendar and the pay-period machine. Reading the calendar, configuring it,
+  // finalizing a period and voiding one are separate authorities; approving a period reuses `payroll.approve`.
+  | "payroll.schedule.read"
+  | "payroll.schedule.manage"
+  | "payroll.finalize"
+  | "payroll.void"
   // Contractor settlement is its own ledger, never employee payroll.
   | "contractor.read" | "contractor.write" | "contractor.approve"
   | "finance.entity.write"
@@ -295,6 +311,12 @@ export type Permission =
   | "live_assist.use" | "live_assist.administer" | "live_assist.review"
   // v22.20 — clearing a government data source for operational use.
   | "geo.source.review"
+  // 0233 — the approved external source registry (server/_core/sourceRegistry.ts). Reading, proposing,
+  // editing what may be contacted, binding a credential reference, and each decision (reject, approve,
+  // suspend, revoke) are separate, so no permission both proposes a source and authorises it.
+  | "source.directory.read" | "source.registry.submit" | "source.registry.review" | "source.registry.approve"
+  | "source.registry.suspend" | "source.registry.revoke" | "source.endpoint.edit" | "source.credential_ref.edit"
+  | "source.health.review"
   // v22.19 — the package a truck carries when nothing can be fetched.
   | "comms.package.build" | "comms.package.fetch"
   // v22.20 — hours of service as versioned rules. A verified figure is what a
@@ -353,6 +375,12 @@ export type Permission =
   | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
   | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
   | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
+  // 0212 — Driver Portfolio. The `_own` three are universal and self-scoped in the router: they read
+  // the operator linked to ctx.user.id and take no operator id. Reading another driver's portfolio is
+  // safety/HR/management's; managing requirements is safety's and management's. Verification reuses
+  // compliance.credential.verify, and dispatch's view reuses dispatch.read.
+  | "portfolio.read_own" | "portfolio.submit_own" | "portfolio.share_own"
+  | "portfolio.read" | "portfolio.requirement.manage"
   // 0199 — fleet maintenance, checkpoint 1. Assigning a work order names who owns the repair; cancelling
   // one can leave a defect unrepaired, so it is sensitive.
   | "maintenance.workorder.assign" | "maintenance.workorder.cancel"
@@ -365,13 +393,22 @@ export type Permission =
   // `fleet.read_own` is universal and self-scoped in the router: the driver's own assigned units, from
   // the slot model, with no unit id taken from the driver.
   | "fleet.asset.manage" | "fleet.lifecycle.set" | "fleet.component.manage" | "fleet.read_own"
+  // 0221 — fleet maintenance, checkpoint 2. Triage decides a defect's severity (lowering a critical frees
+  // a safety hold); return to service is the second person's verification that lifts a defect's hold.
+  | "maintenance.defect.triage" | "maintenance.defect.send_to_shop" | "maintenance.task.write"
+  | "maintenance.return_to_service.record"
   // SA1 — Sign & Attest (docs/sign-attest/SIGN_ATTEST_DESIGN.md §13). Opening a revision fixes a hash;
   // placing fields and assigning signers shape what is signed; signing is self-scoped; witnessing is
   // the one act that places another person's mark and says so; finalize, void, supersede and export
   // are evidence acts. All but the reads are SENSITIVE.
   | "attest.read" | "attest.document.open" | "attest.field.place" | "attest.signer.assign"
   | "attest.sign_own" | "attest.decline_own" | "attest.witness"
-  | "attest.finalize" | "attest.void" | "attest.supersede" | "attest.export";
+  | "attest.finalize" | "attest.void" | "attest.supersede" | "attest.export"
+  // 0228 — Safety & Compliance Program Builder. read_own / acknowledge_own are universal and self-scoped
+  // in the router (the caller's own policies, the caller's own signature); manage, approve and verify are
+  // the acts that change what the company is taken to require, make a version binding, or close a loop.
+  | "safety_program.read" | "safety_program.write" | "safety_program.manage" | "safety_program.approve" | "safety_program.verify"
+  | "safety_program.read_own" | "safety_program.acknowledge_own";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -423,6 +460,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "evidence.seal",
     "evidence.send",
     "evidence.read_own",
+    "evidence.browse",
     "evidence.delete_device_copy",
     "incident.create",
     "roadside.open",
@@ -482,6 +520,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    // 0221 — opening a work order from a defect.
+    "maintenance.defect.send_to_shop",
     // SA1 — Sign & Attest
     "attest.read",
     "attest.document.open",
@@ -527,6 +567,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.read",
     "comms.plan.compute",
     "evidence.read_job_operational",
+    "evidence.browse",
     "incident.create",
     // Summary only. A dispatcher must know a unit is unavailable; they do not
     // need the operator's injury details to reassign a job.
@@ -631,6 +672,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // job the unit was on. It is not granted commercial or personnel reads at
     // all, so nothing has to be subtracted later.
     "evidence.read_maintenance",
+    "evidence.browse",
     "evidence.read_job_operational",
     "maintenance.read_defect",
     "maintenance.write_defect",
@@ -679,6 +721,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "fleet.hold.place",
     "fleet.hold.release",
     "fleet.meter.record",
+    // 0221 — fleet maintenance, checkpoint 2: triage, send to shop, the repair's tasks, return to service.
+    "maintenance.defect.triage",
+    "maintenance.defect.send_to_shop",
+    "maintenance.task.write",
+    "maintenance.return_to_service.record",
     "fleet.meter.verify",
     "fleet.component.manage",
   ],
@@ -712,6 +759,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.read",
     "comms.unit.capability",
     "evidence.read_maintenance",
+    "evidence.browse",
     "evidence.read_job_operational",
     "maintenance.read_defect",
     "maintenance.write_defect",
@@ -779,12 +827,22 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "fleet.hold.place",
     "fleet.hold.release",
     "fleet.meter.record",
+    // 0221 — fleet maintenance, checkpoint 2.
+    "maintenance.defect.triage",
+    "maintenance.defect.send_to_shop",
+    "maintenance.task.write",
+    "maintenance.return_to_service.record",
     "fleet.meter.verify",
     "fleet.asset.manage",
     "fleet.lifecycle.set",
     "fleet.component.manage",
   ],
   safety: [
+    "portfolio.read",
+    "portfolio.requirement.manage",
+    // 0233 — safety runs the facility directory's regulator imports: it proposes and configures a source,
+    // can stop one at once, and reads health. Approving, rejecting, revoking and binding credentials are not its.
+    "source.directory.read", "source.registry.submit", "source.endpoint.edit", "source.registry.suspend", "source.health.review",
     // SA1 — Sign & Attest
     "attest.read",
     "attest.document.open",
@@ -802,6 +860,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     /* C1b-2b — requirement verification */
     "compliance.requirement.propose",
     "compliance.requirement.verify",
+    "safety_program.read",
+    "safety_program.write",
+    "safety_program.manage",
+    "safety_program.approve",
+    "safety_program.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -851,6 +914,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.observation.decide",
     "comms.plan.compute",
     "evidence.read_safety_summary",
+    "evidence.browse",
     "evidence.read_job_operational",
     "evidence.read_maintenance",
     "evidence.export",
@@ -924,6 +988,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // 0200 — Fleet & Equipment Portfolio foundation.
     "fleet.hold.place",
     "fleet.hold.release",
+    // 0221 — the second person who returns a unit to service; a critical defect's safety hold is theirs to lift.
+    "maintenance.return_to_service.record",
+    // 0221 — and they decide severity: lowering a critical defect frees its safety hold, which safety may release.
+    "maintenance.defect.triage",
   ],
   office: [
     // SA1 — Sign & Attest
@@ -943,6 +1011,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "document.issue",
     "document.void",
     "document.template.manage",
+    "safety_program.read",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -982,6 +1051,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.plan.compute",
     "comms.assignment.record",
     "evidence.read_job_operational",
+    "evidence.browse",
     "evidence.read_commercial",
     "evidence.read_safety_summary",
     "evidence.read_maintenance",
@@ -1114,8 +1184,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // 0200 — Fleet & Equipment Portfolio foundation.
     "fleet.meter.record",
     "fleet.asset.manage",
+    // 0221 — opening a work order from a defect.
+    "maintenance.defect.send_to_shop",
   ],
   management: [
+    "portfolio.read",
+    "portfolio.requirement.manage",
     // SA1 — Sign & Attest
     "attest.read",
     "attest.document.open",
@@ -1144,6 +1218,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "compliance.requirement.second_approve",
     "compliance.requirement.retire",
     "compliance.verification.govern",
+    "safety_program.read",
+    "safety_program.write",
+    "safety_program.manage",
+    "safety_program.approve",
+    "safety_program.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1214,6 +1293,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "oos.policy.manage",
     "oos.policy.approve",
     "geo.source.review",
+    // 0233 — the approved external source registry: the whole lifecycle, as for licence review.
+    "source.directory.read", "source.registry.submit", "source.registry.review", "source.registry.approve",
+    "source.registry.suspend", "source.registry.revoke", "source.endpoint.edit", "source.credential_ref.edit",
+    "source.health.review",
     "hos.read",
     "hos.rule.manage",
     "hos.rule.verify",
@@ -1234,6 +1317,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "comms.observation.decide",
     "comms.plan.compute",
     "evidence.read_job_operational",
+    "evidence.browse",
     "evidence.read_commercial",
     "evidence.read_safety_summary",
     "evidence.read_maintenance",
@@ -1411,24 +1495,33 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // 0200 — Fleet & Equipment Portfolio foundation.
     "fleet.hold.place",
     "fleet.hold.release",
+    // 0221 — return to service (a safety hold is management's or safety's to lift).
+    "maintenance.return_to_service.record",
     "fleet.meter.verify",
     "fleet.asset.manage",
     "fleet.lifecycle.set",
     "fleet.component.manage",
   ],
   hr: [
+    "portfolio.read",
     "document.read",
+    "safety_program.read",
+    "safety_program.write",
     "academy.assign",
     "academy.manage",
     "academy.evaluate",
     "academy.certificate.issue",
     "evidence.read_personnel",
+    "evidence.browse",
     "incident.read_summary",
     "incident.read_investigation",
     "payroll.read",
     "payroll.read_own",
     "payroll.read_employee",
     "payroll.review",
+    "payroll.compensation.read",
+    "payroll.compensation.propose",
+    "payroll.schedule.read",
     "personnel.read",
     "personnel.write",
     "hos.read",
@@ -1464,7 +1557,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "compliance.requirement.verify",
     "compliance.requirement.second_approve",
     "compliance.verification.govern",
+    "safety_program.read",
     "evidence.read_legal",
+    "evidence.browse",
     "evidence.read_safety_summary",
     "evidence.read_job_operational",
     "evidence.export",
@@ -1491,12 +1586,16 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "closeout.terms.approve",
   ],
   auditor: [
+    // 0233 — the source registry, read-only: what is approved, by whom, and how it is answering.
+    "source.directory.read", "source.health.review",
     // SA1 — Sign & Attest
     "attest.read",
     "attest.export",
     "document.read",
+    "safety_program.read",
     "facility.directory.read",
     "evidence.read_job_operational",
+    "evidence.browse",
     "evidence.read_safety_summary",
     "evidence.read_maintenance",
     "evidence.export",
@@ -1572,6 +1671,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "billing.read",
     "compliance.read",
     "evidence.read_commercial",
+    "evidence.browse",
     "evidence.read_job_operational",
     "contractor.read",
     "funding.read",
@@ -1639,8 +1739,15 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.rate.read",
     "payroll.export",
     "evidence.read_personnel",
+    "evidence.browse",
     "personnel.read",
     "payroll.profile.write",
+    "payroll.compensation.read",
+    "payroll.compensation.propose",
+    "payroll.earning_code.manage",
+    "payroll.schedule.read",
+    "payroll.schedule.manage",
+    "payroll.finalize",
     "contractor.read",
     "surface.exceptions.read",
     "surface.search",
@@ -1658,6 +1765,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "tax.adjust",
     "tax.export",
     "evidence.read_commercial",
+    "evidence.browse",
     "evidence.export",
     "contractor.read",
     "funding.read",
@@ -1689,11 +1797,16 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "compliance.requirement.verify",
     "compliance.requirement.second_approve",
     "compliance.requirement.retire",
+    "safety_program.read",
     "facility.directory.read",
     "enforcement.read",
     "oos.policy.manage",
     "oos.policy.approve",
     "geo.source.review",
+    // 0233 — the approved external source registry: the whole lifecycle, as for licence review.
+    "source.directory.read", "source.registry.submit", "source.registry.review", "source.registry.approve",
+    "source.registry.suspend", "source.registry.revoke", "source.endpoint.edit", "source.credential_ref.edit",
+    "source.health.review",
     "hos.read",
     "hos.rule.manage",
     "hos.rule.verify",
@@ -1723,7 +1836,15 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.approve",
     "payroll.rate.read",
     "payroll.rate.write",
+    "payroll.compensation.read",
+    "payroll.compensation.approve",
+    "payroll.earning_code.manage",
+    "payroll.schedule.read",
+    "payroll.schedule.manage",
+    "payroll.finalize",
+    "payroll.void",
     "evidence.read_commercial",
+    "evidence.browse",
     "evidence.export",
     "finance.entity.write",
     "contractor.read",
@@ -1861,6 +1982,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "banking.read",
     "billing.read",
     "evidence.read_commercial",
+    "evidence.browse",
     "evidence.export",
     "contractor.read",
     "funding.read",
@@ -1920,12 +2042,19 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
+  // 0212 — the Driver Wallet: the caller's own operator record, never one the request names.
+  "portfolio.read_own",
+  "portfolio.submit_own",
+  "portfolio.share_own",
   // SA1 — signing or declining your OWN assigned field: the service resolves the signer row to
   // `ctx.user.id` and refuses anything else (WRONG_SIGNER). Nobody signs for somebody else.
   "attest.sign_own",
   "attest.decline_own",
   // 0206 — a person's own availability reads and writes `ctx.user.id` and nothing the request could name.
   "shifts.availability_own",
+  // 0228 — your own policies to acknowledge, your own signature. The router resolves the person from ctx.user.id.
+  "safety_program.read_own",
+  "safety_program.acknowledge_own",
   // 0237 — the driver's own assigned units, resolved from the slot model; the request names no unit.
   "fleet.read_own",
 ] as const;
@@ -1939,20 +2068,29 @@ export function isUniversalPermission(p: Permission): boolean {
  * mechanic has no commercial read to begin with. They stay because a future
  * grant edit that widens a role should still not silently open these.
  */
+/**
+ * Payroll P1 — every compensation authority, denied by name to the roles that work beside payroll but
+ * must never see or set what a person is paid. Sharing a job, a dispatch or a truck grants none of it.
+ */
+const COMPENSATION_PERMISSIONS: readonly Permission[] = ["payroll.compensation.read", "payroll.compensation.propose", "payroll.compensation.approve", "payroll.earning_code.manage",
+  // P2 — the payroll calendar and the period machine, denied to the same roles for the same reason.
+  "payroll.schedule.read", "payroll.schedule.manage", "payroll.finalize", "payroll.void"];
+
 const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
-  mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation"],
-  shop_lead: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation"],
-  dispatcher: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation"],
-  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation"],
-  auditor: ["payroll.read", "billing.write", "personnel.write"],
+  mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  shop_lead: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  dispatcher: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  auditor: ["payroll.read", "billing.write", "personnel.write", ...COMPENSATION_PERMISSIONS],
 
   // The banking and tax-identifier reads are held by nobody in this model.
   // They exist so the permission has a name to be denied under, and so adding
   // a holder is a deliberate, reviewable act rather than a side effect of a
   // broad grant. Same reason `authority_certified` sits empty in the
   // measurement ladder.
-  bookkeeper: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "payroll.approve"],
-  payroll_admin: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.approve", "billing.write"],
+  bookkeeper: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "payroll.approve", ...COMPENSATION_PERMISSIONS],
+  // P1 — the administrator proposes compensation; approving it is the controller's (D4).
+  payroll_admin: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.approve", "billing.write", "payroll.compensation.approve", "payroll.void"],
   tax_preparer: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "billing.write", "banking.reconcile"],
   controller: ["payroll.bank.read", "payroll.tax_identifier.read"],
   external_accountant: [
@@ -1975,6 +2113,10 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
+  // 0212 — a submitted credential, a share of one, and the requirements dispatch reads.
+  "portfolio.submit_own",
+  "portfolio.share_own",
+  "portfolio.requirement.manage",
   "live_assist.use",
   "live_assist.administer",
   "live_assist.review",
@@ -1987,6 +2129,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "document.catalog.manage",
   "document.series.manage",
   "document.template.manage",
+  "safety_program.manage",
+  "safety_program.approve",
+  "safety_program.verify",
+  "safety_program.acknowledge_own",
   "academy.source.review",
   "academy.certificate.issue",
   "academy.certificate.sign_own",
@@ -2039,6 +2185,15 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // Clearing a source decides whether the company may commercially use a
   // government dataset. That is a determination, not an edit.
   "geo.source.review",
+  // 0233 — reviewing, approving, suspending or revoking a source decides whether the server may contact
+  // it; editing an endpoint or the credential it presents changes where the server connects and what it
+  // sends. A registry decision with no audit row is refused.
+  "source.registry.review",
+  "source.registry.approve",
+  "source.registry.suspend",
+  "source.registry.revoke",
+  "source.endpoint.edit",
+  "source.credential_ref.edit",
   // v22.20 — a verified HOS figure becomes a legal determination about a person.
   "hos.rule.verify",
   // v22.1 — approved terms decide what a customer is billed.
@@ -2168,6 +2323,15 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "assistant.commit",
   // B20.7
   "payroll.profile.write",
+  // P1 — proposing or approving compensation, and changing a book's earning codes, are refused when
+  // their authorization row cannot be written.
+  "payroll.compensation.propose",
+  "payroll.compensation.approve",
+  "payroll.earning_code.manage",
+  // P2 — configuring the calendar, finalizing a period and voiding one.
+  "payroll.schedule.manage",
+  "payroll.finalize",
+  "payroll.void",
   "contractor.approve",
   "finance.entity.write",
   // B20.13 — a claim ties an expense to a program on the stacking ledger, and
@@ -2191,6 +2355,9 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "fleet.asset.manage",
   "fleet.lifecycle.set",
   "fleet.component.manage",
+  // 0221 — triage can lower a critical defect, which frees a safety hold; return to service puts a unit back on the road.
+  "maintenance.defect.triage",
+  "maintenance.return_to_service.record",
   // SA1 — Sign & Attest: every act that creates or ends signing evidence fails closed when its
   // authorization row cannot be written. A mark with no record of who was allowed to place it is
   // the label this subsystem exists to end.
@@ -2578,6 +2745,11 @@ export const RECORDS_PROCEDURE_PERMISSIONS = {
   "records.evidence.amend": "evidence.amend",
   "records.evidence.listForOperator": "evidence.read_own",
   "records.evidence.export": "evidence.export",
+  // The Records & File Manager. The gate opens the browser; each record is then
+  // decided on its own category read, and one out of reach is "not found".
+  "records.files.list": "evidence.browse",
+  "records.files.get": "evidence.browse",
+  "records.files.download": "evidence.browse",
   "records.incident.capture": "incident.create",
   "records.incident.readInvestigation": "incident.read_investigation",
   "records.incident.review": "incident.review",
@@ -2872,12 +3044,45 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   // roles. Neither role can do both.
   "payroll.runsList": "payroll.read_all",
   "payroll.runCreate": "payroll.run",
+  // P0.4 / P0.5 — collecting approved earnings into lines and submitting the run for review are the
+  // payroll administrator's acts; approving it stays the controller's (below). Approving ONE earning is
+  // the reviewer's act (payroll_admin, hr): the human door between a proposed earning and a payable line.
+  "payroll.runCollect": "payroll.run",
+  "payroll.runSubmit": "payroll.run",
+  "payroll.earningApprove": "payroll.review",
   "payroll.runApprove": "payroll.approve",
   "payroll.adjustmentRequest": "payroll.adjust",
   "payroll.adjustmentApprove": "payroll.approve",
   "payroll.export": "payroll.export",
 
   // Contractor settlement — a separate ledger from employee payroll.
+  // Payroll P1 (0226) — compensation agreements and the earning-code catalogue.
+  "payrollCompensation.earningCodesList": "payroll.compensation.read",
+  "payrollCompensation.earningCodeCreate": "payroll.earning_code.manage",
+  "payrollCompensation.earningCodeRetire": "payroll.earning_code.manage",
+  "payrollCompensation.profileClassification": "payroll.compensation.read",
+  "payrollCompensation.agreementsList": "payroll.compensation.read",
+  "payrollCompensation.agreementGet": "payroll.compensation.read",
+  "payrollCompensation.agreementCreate": "payroll.compensation.propose",
+  "payrollCompensation.versionPropose": "payroll.compensation.propose",
+  "payrollCompensation.versionApprove": "payroll.compensation.approve",
+  "payrollCompensation.versionReject": "payroll.compensation.approve",
+  "payrollCompensation.versionInForce": "payroll.compensation.read",
+
+  // Payroll P2 (0227) — pay schedules and the pay-period machine.
+  "payrollSchedule.schedulesList": "payroll.schedule.read",
+  "payrollSchedule.scheduleCreate": "payroll.schedule.manage",
+  "payrollSchedule.scheduleRetire": "payroll.schedule.manage",
+  "payrollSchedule.periodsGenerate": "payroll.schedule.manage",
+  "payrollSchedule.periodsList": "payroll.schedule.read",
+  "payrollSchedule.periodGet": "payroll.schedule.read",
+  "payrollSchedule.periodSubmit": "payroll.run",
+  "payrollSchedule.periodApprove": "payroll.approve",
+  "payrollSchedule.periodReopen": "payroll.approve",
+  "payrollSchedule.periodProcess": "payroll.run",
+  "payrollSchedule.periodFinalize": "payroll.finalize",
+  "payrollSchedule.periodVoid": "payroll.void",
+
   "contractors.settlementsList": "contractor.read",
   "contractors.settlementCreate": "contractor.write",
   "contractors.settlementApprove": "contractor.approve",
@@ -3175,6 +3380,25 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "geo.sourceReview": "geo.source.review",
   "geo.transportFeeds": "geo.source.review",
 
+  /* ---- 0233: approved external source registry (server/sourceRegistryRouter.ts) ---- */
+  "sourceRegistry.list": "source.directory.read",
+  "sourceRegistry.get": "source.directory.read",
+  "sourceRegistry.health": "source.health.review",
+  "sourceRegistry.seed": "source.registry.submit",
+  "sourceRegistry.create": "source.registry.submit",
+  "sourceRegistry.update": "source.registry.submit",
+  "sourceRegistry.requestReview": "source.registry.submit",
+  "sourceRegistry.endpointAdd": "source.endpoint.edit",
+  "sourceRegistry.endpointUpdate": "source.endpoint.edit",
+  "sourceRegistry.credentialBind": "source.credential_ref.edit",
+  "sourceRegistry.reject": "source.registry.review",
+  "sourceRegistry.approve": "source.registry.approve",
+  // Resuming re-authorises contact, so it is an approver's act; anyone who may suspend may only stop.
+  "sourceRegistry.resume": "source.registry.approve",
+  "sourceRegistry.suspend": "source.registry.suspend",
+  "sourceRegistry.revoke": "source.registry.revoke",
+  "sourceRegistry.retire": "source.registry.revoke",
+
   /* ---- v22.17: communications on the route ---- */
   "comms.channelSeed": "comms.channel.manage",
   "comms.channelList": "comms.read",
@@ -3397,6 +3621,46 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "telematics.videoView": "safety.video.read",
 
   /* ---- v22.21/v22.22: Training Academy ---- */
+  // 0182 — Safety & Compliance Program Builder
+  "safetyProgram.catalog": "safety_program.read",
+  "safetyProgram.templateDetail": "safety_program.read",
+  "safetyProgram.syncCatalog": "safety_program.manage",
+  "safetyProgram.syncContent": "safety_program.manage",
+  "safetyProgram.obligations": "safety_program.read",
+  "safetyProgram.programGet": "safety_program.read",
+  "safetyProgram.programSet": "safety_program.manage",
+  "safetyProgram.assemble": "safety_program.read",
+  "safetyProgram.policyCreate": "safety_program.write",
+  "safetyProgram.policyList": "safety_program.read",
+  "safetyProgram.policyDetail": "safety_program.read",
+  "safetyProgram.versionDraft": "safety_program.write",
+  "safetyProgram.versionDraftFromTemplate": "safety_program.write",
+  "safetyProgram.versionEdit": "safety_program.write",
+  "safetyProgram.versionApprove": "safety_program.approve",
+  "safetyProgram.versionWithdraw": "safety_program.approve",
+  "safetyProgram.policyRetire": "safety_program.approve",
+  "safetyProgram.myPolicies": "safety_program.read_own",
+  "safetyProgram.acknowledge": "safety_program.acknowledge_own",
+  "safetyProgram.acknowledgementStatus": "safety_program.read",
+  "safetyProgram.overlaySet": "safety_program.write",
+  "safetyProgram.overlayList": "safety_program.read",
+  "safetyProgram.reviewSchedule": "safety_program.write",
+  "safetyProgram.reviewComplete": "safety_program.approve",
+  "safetyProgram.referenceList": "safety_program.read",
+  "safetyProgram.referenceUpsert": "safety_program.manage",
+  "safetyProgram.referenceVerify": "safety_program.verify",
+  "safetyProgram.trainingRequirementList": "safety_program.read",
+  "safetyProgram.trainingRequirementUpsert": "safety_program.manage",
+  "safetyProgram.trainingMatrixCompute": "safety_program.write",
+  "safetyProgram.trainingMatrix": "safety_program.read",
+  "safetyProgram.correctiveActionOpen": "safety_program.write",
+  "safetyProgram.correctiveActionProgress": "safety_program.write",
+  "safetyProgram.correctiveActionVerify": "safety_program.verify",
+  "safetyProgram.correctiveActionList": "safety_program.read",
+  "safetyProgram.corReadiness": "safety_program.read",
+  "safetyProgram.vendorPackageManifest": "safety_program.read",
+  "safetyProgram.events": "safety_program.read",
+
   "academy.catalog": "academy.read_own",
   "academy.myTraining": "academy.read_own",
   "academy.assignmentDetail": "academy.read_own",
@@ -3498,14 +3762,24 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
 
-  /* ---- the page scanner: guidance and review, both read-only ----
-   * Both answer "what does this paperwork need"; neither writes, links or
-   * confirms anything, so both sit on the ordinary compliance read rather
-   * than on a permission of their own. A worker who may not read the
-   * company's compliance material may not read its paperwork guidance
-   * either — that is the same question, and it already has an answer. */
-  "paperwork.guidance": "compliance.read",
-  "paperwork.reviewScan": "compliance.read",
+  /* ---- 0212: Driver Portfolio API ---- */
+  "driverPortfolio.myWallet": "portfolio.read_own",
+  "driverPortfolio.myCredentialHistory": "portfolio.read_own",
+  "driverPortfolio.myShares": "portfolio.read_own",
+  "driverPortfolio.submitCredential": "portfolio.submit_own",
+  "driverPortfolio.shareIssue": "portfolio.share_own",
+  "driverPortfolio.shareRevoke": "portfolio.share_own",
+  "driverPortfolio.operatorReadiness": "dispatch.read",
+  "driverPortfolio.portfolio": "portfolio.read",
+  "driverPortfolio.auditHistory": "portfolio.read",
+  "driverPortfolio.expiryDashboard": "portfolio.read",
+  "driverPortfolio.verificationQueue": "portfolio.read",
+  "driverPortfolio.credentialVerify": "compliance.credential.verify",
+  "driverPortfolio.requirementList": "portfolio.read",
+  "driverPortfolio.requirementGet": "portfolio.read",
+  "driverPortfolio.requirementCreate": "portfolio.requirement.manage",
+  "driverPortfolio.requirementUpdate": "portfolio.requirement.manage",
+  "driverPortfolio.requirementRetire": "portfolio.requirement.manage",
   /* ---- 0199: fleet maintenance, checkpoint 1 ---- */
   "maintenance.workOrderAssignment": "maintenance.read_defect",
   "maintenance.workOrderAssign": "maintenance.workorder.assign",
@@ -3532,6 +3806,24 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "fleet.componentAttach": "fleet.component.manage",
   "fleet.componentDetach": "fleet.component.manage",
   "fleet.myAssignedUnits": "fleet.read_own",
+
+  /* ---- 0221: fleet maintenance, checkpoint 2 — defect to return to service ---- */
+  "maintenance.defectReport": "maintenance.write_defect",
+  "maintenance.defectTriage": "maintenance.defect.triage",
+  "maintenance.defectSendToShop": "maintenance.defect.send_to_shop",
+  "maintenance.taskAdd": "maintenance.task.write",
+  "maintenance.taskSetStatus": "maintenance.task.write",
+  "maintenance.returnToService": "maintenance.return_to_service.record",
+  "maintenance.defectHistory": "maintenance.read_defect",
+
+  /* ---- the page scanner: guidance and review, both read-only ----
+   * Both answer "what does this paperwork need"; neither writes, links or
+   * confirms anything, so both sit on the ordinary compliance read rather
+   * than on a permission of their own. A worker who may not read the
+   * company's compliance material may not read its paperwork guidance
+   * either — that is the same question, and it already has an answer. */
+  "paperwork.guidance": "compliance.read",
+  "paperwork.reviewScan": "compliance.read",
 
   /* ---- SA1: Sign & Attest (server/attestRouter.ts) ---- */
   "attest.open": "attest.document.open",

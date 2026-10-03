@@ -36,6 +36,7 @@ import {
   communicationCoverage, communicationPolicies, companyRadioAuthorizations, radioChannels,
   roadGraphEdges, roadRadioAssignments, routeApprovals, unitRadioCapabilities,
   academyQualifications, academyRequirements, academyRequirementBindings, academyDirectSupervisionRecords,
+  driverRequirementBindings, operatorEquipmentAuthorizations,
   loadProfiles,
 } from "../drizzle/schema";
 import { APPROVED_OVERRIDE_POLICIES, CLASSIFICATION_VERSION, classifyBlocker, mergeFindings, type ComplianceFinding } from "./_core/complianceFinding";
@@ -47,8 +48,10 @@ import { computeEligibilityFingerprint, type EligibilityFacts } from "./_core/di
 import { assessCoverage, INSURANCE_PROOF_DOC_TYPES, proofFromDocuments, type PolicyRecord, type ProofOfCoverage } from "./_core/insuranceRisk";
 import { calibrationEffectOnUse, calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
 import { MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch } from "./_core/compliancePassport";
-import { complianceRequirementValidity } from "./_core/complianceDocumentValidity";
+import { complianceRequirementValidity, driverLicenceVerdict } from "./_core/complianceDocumentValidity";
 import { trainingDispatchDecision } from "./_core/trainingAcademy";
+import { bindingApplies, evaluateDriverReadiness, requirementFromBinding, type BindingFacts, type DriverReadiness, type DriverRequirement } from "./_core/driverPortfolio";
+import { equipmentAuthorizationsInOrg } from "./driverPortfolioService";
 import { listRoleNamesAnyScope } from "./db";
 import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
 import { enforcementReadiness, type OosOrder, type OosScope } from "./_core/enforcement";
@@ -72,6 +75,12 @@ export type ReadinessSubject = {
   routeApprovalRef?: string | null;
   /** Working alone, for the policy rule that only applies then. */
   loneWorker?: boolean;
+  /**
+   * 0202 — when the work ends, when the caller knows. A mandatory ticket that
+   * lapses before then does not cover the job. Absent, credentials are judged
+   * at `now` only, which is what every existing caller already got.
+   */
+  workEndsAt?: Date | null;
   /**
    * v22.20 — active out-of-service orders and unresolved inspections covering
    * this operator, unit or trailer.
@@ -259,6 +268,12 @@ export type ComposedReadiness = {
    * configuration for yesterday's dispatch.
    */
   automationPolicy: PolicySnapshot[];
+  /**
+   * 0202 — the driver's requirement-by-requirement answer, for the dispatch
+   * view and the wallet. Its blockers are already inside `eligibility`; this is
+   * the explanation, not a second verdict.
+   */
+  driverReadiness: DriverReadiness;
   /** C1a-6 — hash of the rules the findings were decided under; also inside `facts`. */
   ruleSetHash: string;
 };
@@ -448,16 +463,16 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   const opCreds = await credentialsFor("operator", op.id);
   for (const c of opCreds) governingExpiries.push({ what: `operatorDoc:${c.id}`, at: c.expiresAt });
   governingExpiries.push({ what: "legacyLicence", at: op.licenseExpiresAt });
-  let licence = credentialState(opCreds, ["driver_licence"], "Driver licence", now);
-  if (!licence.present && op.licenseExpiresAt) {
-    // The flat legacy field is a weak signal: present, unverified. It keeps an
-    // unmigrated operator from reading as "no licence" while the structured
-    // record is still to be entered — and, being unverified, it no longer clears
-    // dispatch on its own (owner's ruling, 2026-09-25). A past date still blocks.
-    licence = {
-      label: "Driver licence (legacy record)", present: true, expiresAt: op.licenseExpiresAt,
-      validity: { state: "unverified", reason: "the date is from the legacy operator record, which nobody has checked against a licence" },
-    };
+  // The one licence verdict (complianceDocumentValidity.driverLicenceVerdict): documents first, the
+  // legacy date only as an unverified claim (owner's ruling, 2026-09-25). A past date still blocks.
+  const licenceVerdict = driverLicenceVerdict(opCreds, op.licenseExpiresAt, now);
+  const licence: CredentialState = {
+    label: licenceVerdict.source === "legacy_record" ? "Driver licence (legacy record)" : "Driver licence",
+    present: licenceVerdict.state !== "none" && licenceVerdict.state !== "rejected",
+    expiresAt: licenceVerdict.claimedExpiresAt,
+    validity: { state: licenceVerdict.state, reason: licenceVerdict.reason },
+  };
+  if (licenceVerdict.source === "legacy_record") {
     contributions.push({ engine: "compliance", finding: "Licence read from the legacy operator record — no structured credential yet" });
   }
   const job = subject.jobId ? (await db.select().from(jobs).where(eq(jobs.id, subject.jobId)).limit(1))[0] ?? null : null;
@@ -556,6 +571,79 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       }
     }
   }
+  /* ---- 0202: the driver portfolio's requirement set ----
+   * What the company, the customer, the site, the job type and the unit demand
+   * of this operator, evaluated against the credentials above and the
+   * operator's equipment authorizations. The findings enter as blockers in
+   * B12's vocabulary, through the same `extra` list as every other engine:
+   * one gate, not two. Informational requirements produce no blocker at all.
+   */
+  const unitForDriver = subject.unitId ? (await db.select({ vehicleType: units.vehicleType }).from(units).where(eq(units.id, subject.unitId)).limit(1))[0] ?? null : null;
+  // The organization whose work this is: the job's; without a job, the organization that owns the
+  // operator (coreRecordOwnership), so a company's own requirements reach its own driver's check.
+  // Neither: the historical single tenant.
+  const operatorOwner = (await db.select({ orgRef: coreRecordOwnership.orgRef }).from(coreRecordOwnership)
+    .where(and(eq(coreRecordOwnership.recordType, "operator"), eq(coreRecordOwnership.recordId, op.id))).limit(1))[0]?.orgRef ?? null;
+  const driverFacts: BindingFacts = {
+    orgRef: job ? ((job as { orgRef?: string | null }).orgRef ?? null) : operatorOwner,
+    customer: job ? [job.customer] : [],
+    site: job ? [job.location] : [],
+    job_type: job ? [job.type, job.mode] : [],
+    equipment: unitForDriver ? [unitForDriver.vehicleType] : [],
+    job: job ? [job.jobCode, String(job.id)] : [],
+  };
+  // Tenant first, in SQL: only this organization's bindings are read (the (orgRef, active) index), and
+  // bindingApplies then matches the subject. NULL is the historical single tenant.
+  const driverBindingRows = await db.select().from(driverRequirementBindings).where(and(
+    eq(driverRequirementBindings.active, true),
+    driverFacts.orgRef == null ? isNull(driverRequirementBindings.orgRef) : eq(driverRequirementBindings.orgRef, driverFacts.orgRef),
+  ));
+  const appliedDriverBindings = driverBindingRows.filter(b => bindingApplies(b, driverFacts, now));
+  let driverRequirements: DriverRequirement[] = appliedDriverBindings.map(requirementFromBinding);
+  // The base gate already evaluates the licence (with its legacy fallback) and, on a dangerous-goods
+  // job, TDG. A binding for either would be the same fact under a second code.
+  const coveredByBase = (r: DriverRequirement) => r.kind === "credential" && (r.code === "driver_licence" || (dangerousGoods && r.code === "tdg_certificate"));
+  if (driverRequirements.some(coveredByBase)) contributions.push({ engine: "portfolio", finding: "Licence/TDG bindings are evaluated by the base gate, not twice" });
+  driverRequirements = driverRequirements.filter(r => !coveredByBase(r));
+  // Only the work's organization's authorizations count: one held from another employer's book never
+  // satisfies this organization's equipment requirement (equipmentAuthorizationsInOrg fails closed).
+  const equipmentRows = op.userId && driverRequirements.some(r => r.kind === "equipment")
+    ? await equipmentAuthorizationsInOrg(db, [op.userId], driverFacts.orgRef)
+    : [];
+  if (!op.userId && driverRequirements.some(r => r.kind === "equipment" && r.enforcement === "mandatory")) {
+    // Authorizations are held by the user; without the link there is nothing to read. Unknown, not "not authorized".
+    extra.push({ code: "portfolio_operator_unlinked", label: "Equipment qualifications apply to this job, but the operator is not linked to a user record", severity: "unknown", subject: "operator", overridable: true, overrideAuthority: "dispatcher" });
+    driverRequirements = driverRequirements.filter(r => r.kind !== "equipment");
+  }
+  const driverReadiness = evaluateDriverReadiness({
+    portfolio: {
+      operatorId: op.id, name: op.name, licenceClass: op.licenseClass ?? null,
+      credentials: opCreds.map(c => ({ id: c.id, docType: c.docType, title: c.title, issuedAt: c.issuedAt, expiresAt: c.expiresAt, verificationStatus: c.verificationStatus, capturedAt: c.capturedAt, identifier: c.identifier, verifiedAt: c.verifiedAt, privateDetail: c.privateDetail })),
+      equipment: equipmentRows.map(e => ({ equipmentType: e.equipmentType, status: e.status, expiresAt: e.expiresAt, authorizedAt: e.authorizedAt })),
+    },
+    requirements: driverRequirements,
+    at: now,
+    validThrough: subject.workEndsAt ?? null,
+  });
+  for (const b of driverReadiness.blockers) extra.push(b);
+  // Time moves these without any row changing: an authorization lapsing, a binding starting or ending.
+  for (const e of equipmentRows) governingExpiries.push({ what: `equipmentAuth:${e.id}`, at: e.expiresAt });
+  for (const b of driverBindingRows) governingExpiries.push({ what: `driverBindingStart:${b.id}`, at: b.effectiveAt }, { what: `driverBindingEnd:${b.id}`, at: b.expiresAt });
+  if (driverRequirements.length) {
+    contributions.push({ engine: "portfolio", finding: `${driverReadiness.items.length} driver requirement(s): ${driverReadiness.verdict}; ${driverReadiness.items.filter(i => i.satisfied).length} satisfied${driverReadiness.notices.length ? `; ${driverReadiness.notices.length} informational not met (not blocking)` : ""}` });
+  }
+  const portfolioVersion = versionOf([
+    ...appliedDriverBindings.map(b => `${b.id}:${b.requirementKind}:${b.requirementCode}:${b.enforcement}`),
+    ...equipmentRows.map(e => `${e.id}:${e.equipmentType}:${e.status}:${e.expiresAt?.toISOString() ?? "∅"}`),
+    `class:${op.licenseClass ?? "∅"}`,
+    // Linked or not decides UNKNOWN (portfolio_operator_unlinked) against not_authorized for the same
+    // empty equipment rows, so the link is a decision-bearing fact.
+    `user:${op.userId ?? "∅"}`,
+    // The work end is not here: it is a parameter of the question, not a fact of the world. A check
+    // made without one still describes the same world at award, and the award refuses directly on a
+    // mandatory credential that lapses before the work it is awarding ends (dispatchRouter.award).
+  ]);
+
   if (dangerousGoods) required.push(credentialState(opCreds, ["tdg_certificate"], "TDG certificate", now));
   // Medical fitness reaches dispatch as a projection only.
   const med = medicalFitnessForDispatch(complianceRequirementValidity(opCreds, MEDICAL_FITNESS_DOC_TYPES, now));
@@ -1004,6 +1092,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       // so a change to it must move the fingerprint too.
       `legacyLicence:${op.licenseExpiresAt?.toISOString() ?? "∅"}`,
       `academy:${academyVersion}`,
+      `portfolio:${portfolioVersion}`,
     ]),
     hoursAvailableMinutes: null,
     unitId: subject.unitId, unitStatusVersion: unitVersion, criticalDefectCount: criticalCount, mechanicReleaseVersion: releaseVersion,
@@ -1025,7 +1114,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   };
   return {
     eligibility, facts, fingerprint: computeEligibilityFingerprint(facts), contributions,
-    capabilities: picture.capabilities, capabilityVerdict: picture.verdict, automationPolicy, ruleSetHash,
+    capabilities: picture.capabilities, capabilityVerdict: picture.verdict, automationPolicy, ruleSetHash, driverReadiness,
   };
 }
 

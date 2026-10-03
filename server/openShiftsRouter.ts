@@ -43,7 +43,7 @@ import {
 } from "./openShiftsService";
 import { enqueueBoardEvent } from "./_core/boardOutbox";
 import { awardPost } from "./shiftAwardService";
-import { requireUnitInScope } from "./unitScope";
+import { requireCallerUnits } from "./unitScope";
 
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
 
@@ -119,12 +119,12 @@ export const openShiftsRouter = router({
       at: z.coerce.date().default(() => new Date()),
     }))
     .mutation(async ({ ctx, input }) => {
+      // CP1.5: another organization's unit is not found, before anything is read or written.
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });
       const d = await db();
       if (input.endsAt.getTime() <= input.startsAt.getTime()) throw new TRPCError({ code: "BAD_REQUEST", message: "The shift ends before it begins" });
       if (input.closesAt && input.closesAt.getTime() > input.startsAt.getTime()) throw new TRPCError({ code: "BAD_REQUEST", message: "A post closes before the work starts, not after" });
       const acting = await resolveActingScope(d, ctx.user.id);
-      // CP1.5 — the unit a post names is written to the post; another organization's is not found.
-      await requireUnitInScope(input.unitId, acting, "Unit");
       const roles = await listActiveUserRoleNames(ctx.user.id);
       const postRef = ref("OS");
       const now = new Date();
@@ -552,12 +552,11 @@ export const openShiftsRouter = router({
       reason: z.string().min(5).max(500).nullable().default(null),
     }).strict())
     .mutation(async ({ ctx, input }) => {
+      // CP1.5: the unit and trailer are checked first, not only by the binding inside the award —
+      // which comes after the readiness read and the refusal the award records.
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId, trailerId: input.trailerId });
       const d = await db();
       const acting = await resolveActingScope(d, ctx.user.id);
-      // CP1.5 — the award binds the unit and trailer it names; another organization's is not found,
-      // before the check is compared against them.
-      await requireUnitInScope(input.unitId, acting, "Unit");
-      await requireUnitInScope(input.trailerId, acting, "Trailer");
       return awardPost({ ...input, actorUserId: ctx.user.id, scope: acting });
     }),
 

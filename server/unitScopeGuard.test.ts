@@ -17,9 +17,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const UNIT_KEYS = /\b(unitId|trailerId|unitIds|trailerUnitId|approvedUnitIds|assignedUnitId|equipmentId)\s*:/;
-// `requireUnit` is F1's finance-scope helper (server/financeScope.ts); it refuses through
-// `unitNotFound`, so it is the same rule in the same words and counts as canonical.
-const CANONICAL = /\b(requireCallerUnits|requireUnitInScope|requireUnitsInScope|unitInScope|workOrderInScope|fieldTicketInScope|assertReadinessSubjectInScope|unitOrNotFound|unitInCallerScope|requireUnit)\(/;
+const CANONICAL = /\b(requireCallerUnits|requireUnitInScope|requireUnitsInScope|requireUnit|unitInScope|workOrderInScope|fieldTicketInScope|assertReadinessSubjectInScope|unitOrNotFound|unitInCallerScope)\(/;
 
 /** Mutations that name a unit and need not check it, each with the reason. Keep this short. */
 const NEED_NOT: Record<string, string> = {
@@ -113,7 +111,15 @@ describe("a router mutation that names a unit checks it through the canonical sc
     }
   });
 
-  it("the exceptions are real and still take a unit", () => {
+  it("the finance scope's unit check is the same refusal, not a second rule", () => {
+    // `financeScope.requireUnit` (F1) is accepted above; it must stay a call into server/unitScope.ts.
+    const src = readFileSync("server/financeScope.ts", "utf8");
+    const at = src.indexOf("export async function requireUnit(");
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(src.slice(at, src.indexOf("\n}", at))).toMatch(/requireUnitInScope\(/);
+  });
+
+    it("the exceptions are real and still take a unit", () => {
     for (const key of Object.keys(NEED_NOT)) {
       const procedure = key.split("#")[0]!;
       expect(all.some(m => m.procedure === procedure), `${procedure} is excused but no longer exists`).toBe(true);

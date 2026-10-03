@@ -24,8 +24,11 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | Surface | Class | Count |
 |---|---|---|
 | `server/routers.ts` | `ROLE_AUTHORIZED` | **85** |
-| `server/recordsRouter.ts` | `ROLE_AUTHORIZED` | **20** |
-| `server/payrollRouter.ts` | `ROLE_AUTHORIZED` | **40** |
+| `server/recordsRouter.ts` | `ROLE_AUTHORIZED` | **23** |
+| `server/payrollRouter.ts` | `ROLE_AUTHORIZED` | **43** |
+| `server/payrollCompensationRouter.ts` | `ROLE_AUTHORIZED` | **11** |
+| `server/payrollScheduleRouter.ts` | `ROLE_AUTHORIZED` | **12** |
+| `server/sourceRegistryRouter.ts` | `ROLE_AUTHORIZED` | **16** |
 | `server/portalFundingRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/purchasingRouter.ts` | `ROLE_AUTHORIZED` | **9** |
 | `server/deviceRouter.ts` | `ROLE_AUTHORIZED` | **7** |
@@ -43,10 +46,11 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/commercialRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/closeoutRouter.ts` | `ROLE_AUTHORIZED` | **20** |
 | `server/shopRouter.ts` | `ROLE_AUTHORIZED` | **25** |
-| `server/maintenanceRouter.ts` | `ROLE_AUTHORIZED` | **3** |
+| `server/maintenanceRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/fleetPortfolioRouter.ts` | `ROLE_AUTHORIZED` | **9** |
 | `server/fleetAssetRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/assetRouter.ts` | `ROLE_AUTHORIZED` | **10** |
+| `server/safetyProgramRouter.ts` (0228, Safety & Compliance Program Builder) | `ROLE_AUTHORIZED` | **38** |
 | `server/projectRouter.ts` | `ROLE_AUTHORIZED` | **9** |
 | `server/integrationRouter.ts` | `ROLE_AUTHORIZED` (`integrationRouter`) / `INTEGRATION_CLIENT` (`inboundRouter`, `integrationProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md`) | **11** |
 | `server/telematicsRouter.ts` | `ROLE_AUTHORIZED` | **7** |
@@ -57,10 +61,12 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/documentControlRouter.ts` | `ROLE_AUTHORIZED` | **23** (DC-A: definitions list/get, catalog seed, overlay/create/retire, source artifacts; DC-B: intake, register rendered, confirm, issue, void, supersede, withdraw, amend, get, list; DC-C: series list, gap report, blocks, allocate/retire device block, void number) |
 | `server/attestRouter.ts` | `ROLE_AUTHORIZED` — SA1 Sign & Attest (`docs/sign-attest/SA1_OWNER_RULING.md`); `attest.sign` and `attest.decline` are universal and self-scoped (the signer row must name `ctx.user.id`); every other write is sensitive | **14** |
 | `server/portalRouter.ts` | `EXTERNAL_IDENTITY` (`externalProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md` and never written here) | **0** |
+| `server/driverPortfolioRouter.ts` | `ROLE_AUTHORIZED` (0212; the three `portfolio.*_own` permissions are universal and self-scoped to the operator linked to the session) | **17** |
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
+| `server/driverPortfolioRouter.ts` | `PUBLIC` | 1 (`shareRedeem`: one credential behind a 256-bit token, only its hash stored; re-read on every redemption; revocable; at most 7 days) |
 | Anywhere | bare `protectedProcedure` | **0** |
 
-**470 role-authorized procedures across the surfaces listed above.** Zero on bare `protectedProcedure`.
+**562 role-authorized procedures across the surfaces listed above.** Zero on bare `protectedProcedure`.
 The table lists the surfaces reviewed here, not every router; the system-wide count is generated into
 `LEASEOS_CURRENT_STATE.md`. The numbers in this table are written by `node scripts/procedure-inventory.mjs`,
 which reads them from the routers (CP1.5: nine rows had drifted below their routers and the total said 356).
@@ -420,6 +426,17 @@ missed them.
   (`fleet.meter.record`, mechanic, shop lead, office — not the driver yet); verifying or rejecting
   one is a second person's and sensitive (`fleet.meter.verify`). Every read is `fleet.read`, and
   another organization's unit, hold or reading answers NOT_FOUND worded as for one that does not exist.
+- **A defect is returned to service by a second person.** (0221, fleet maintenance
+  checkpoint 2) Reporting keeps the reporter's words and proposed severity apart from
+  the decision (`maintenance.write_defect`); triage decides it (`maintenance.defect.triage`:
+  mechanic, shop lead, safety — sensitive), and lowering a critical defect frees its
+  safety hold, which only safety or management may release, never its placer. Sending
+  to the shop (`maintenance.defect.send_to_shop`) opens the work order and its first
+  task together; tasks are `maintenance.task.write`. `shop.workOrderRelease` is the one
+  door a release comes through (`records.maintenance.recordRelease` is closed) and waits
+  for every task. `maintenance.returnToService` (sensitive) is refused to the technician
+  who signed the release and applies the portfolio's hold rule to every hold it lifts;
+  both it and triage are human-authorization permissions an agent never exercises.
 - **A work order is owned by a person, and cancelling it repairs nothing.** (0199, fleet
   maintenance checkpoint 1) Assigning, reassigning and unassigning a work order is
   history, not an edit: the assignee is a user holding a shop role in the unit's

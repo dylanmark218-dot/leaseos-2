@@ -301,7 +301,7 @@ describe("the caller is the driver", () => {
 
 describe("CP1.5 — no agent tool can return anything to service", () => {
   it("refuses, by permission, every procedure that releases a hold or returns a unit to service", () => {
-    for (const procedure of ["fleet.holdRelease", "records.maintenance.recordRelease", "records.maintenance.resolveDefect", "records.maintenance.revokeRelease", "enforcement.orderRelease"]) {
+    for (const procedure of ["fleet.holdRelease", "records.maintenance.recordRelease", "records.maintenance.resolveDefect", "records.maintenance.revokeRelease", "enforcement.orderRelease", "maintenance.returnToService", "maintenance.defectTriage"]) {
       expect(agentMayNotCall(procedure), procedure).toMatch(/never performed by an agent|a person's act/);
     }
   });

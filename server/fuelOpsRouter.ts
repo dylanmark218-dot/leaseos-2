@@ -16,7 +16,7 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { moneyScoped, roleProcedure, router } from "./_core/trpc";
 import { requireOwnedEntity } from "./_core/entityScope";
-import { fuelStatementInScope, fuelTankInScope, fuelTransactionInScope, requireEvidence, requireFuelAccountOfEntity, requireUnit } from "./financeScope";
+import { fuelStatementInScope, fuelTankInScope, fuelTransactionInScope, requireEvidence, requireFuelAccountOfEntity } from "./financeScope";
 import { toCents } from "./_core/money";
 import { getDb } from "./db";
 import { bulkFuelDispenses, bulkFuelReadings, bulkFuelTanks, fleetFuelCards, fuelStatementLines, fuelStatements, fuelTransactions, units } from "../drizzle/schema";
@@ -56,7 +56,6 @@ export const fuelOpsRouter = router({
         if (Math.abs(metered - input.litres) > 0.5) throw new TRPCError({ code: "BAD_REQUEST", message: `Meter says ${metered} L, dispense says ${input.litres} L` });
       }
       if (!input.unitId && !input.equipmentId) throw new TRPCError({ code: "BAD_REQUEST", message: "A dispense goes into a unit or a piece of equipment" });
-      await requireUnit(ctx.money, input.unitId);
       await requireEvidence(ctx.money, input.evidenceRecordId);
       await assertPeriodOpen(tank.financialEntityId, input.occurredAt, "Dispense");
       const dispenseRef = ref("DISP");

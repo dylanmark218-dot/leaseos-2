@@ -30,9 +30,10 @@ import { composeReadiness } from "./readinessComposer";
 import { closeoutState, type EventType } from "./_core/siteCloseout";
 import { storageRead } from "./storage";
 import { invoiceBalanceCents } from "./_core/accountsReceivable";
-import { decideLine, loadTicket, recordSignature, snapshotFor } from "./closeoutRouter";
+import { decideLine, loadTicket, recordSignature, snapshotFor, unsignedMessage } from "./closeoutRouter";
 import { whyTheseHours, type PostSiteAuthorization, type SiteSnapshot, type Supplement } from "./_core/siteCloseout";
-import { signatoryAuthorities } from "../drizzle/schema";
+import { fieldTicketSignatures, signatoryAuthorities } from "../drizzle/schema";
+import { fieldTicketSignatureVerdict } from "./_core/fieldTicketSignature";
 import { ATTEST_INPUT_KINDS, ATTEST_MARK_KINDS, CONSENT_VERSION_V1 } from "../shared/attest";
 import { AttestRefusal, declineSession, listRevisions, submitSession, viewRevision, type RefusalCode } from "./_core/attest/attestService";
 
@@ -284,7 +285,7 @@ export const portalRouter = router({
       for (const l of jobLoads) { const k = l.material ?? "unspecified"; const cur = material.get(k) ?? { quantity: 0, unit: l.quantityUnit ?? "" }; cur.quantity += Number(l.quantity ?? 0); material.set(k, cur); }
       const holds = x.events.filter(ev => ["standby", "customer_hold", "weather_hold"].includes(ev.eventType));
       const firstSite = x.events.filter(ev => ev.eventType === "site_work").sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime())[0];
-      const state = closeoutState({ events: x.events as never, lines: x.lines as never, siteWorkCompleteAt: x.t.completedAt, signature: x.signature ? { signedAt: x.signature.capturedAt, signerName: x.signature.signerName ?? "signer", result: x.signature.result } : null, supplement: null, postSiteRequired: x.t.postSiteRequired, loadsWithDisposalEvidence: 0, loads: jobLoads.length });
+      const state = closeoutState({ events: x.events as never, lines: x.lines as never, siteWorkCompleteAt: x.t.completedAt, signature: x.signatureVerdict, supplement: null, postSiteRequired: x.t.postSiteRequired, loadsWithDisposalEvidence: 0, loads: jobLoads.length });
       rows.push({
         ticketNumber: t.ticketNumber, jobCode: jobRow?.jobCode ?? null, site: jobRow?.location ?? null, purchaseOrder: t.afeNumber ? { afeNumber: t.afeNumber } : null, unitId: t.unitId,
         operational: st,
@@ -401,7 +402,7 @@ export const portalRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const x = await ownTicket(e, input.ticketNumber);
-      if (!x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The ticket is not signed — an adjustment is added to a signed ticket, and after R1 it becomes a later revision" });
+      if (!x.signature || !x.signatureVerdict.satisfied) throw new TRPCError({ code: "PRECONDITION_FAILED", message: unsignedMessage("The ticket is not signed — an adjustment is added to a signed ticket, and after R1 it becomes a later revision", x.signatureVerdict) });
       const site = JSON.parse(x.revisions[0]!.snapshotJson) as { siteBillableHours: number };
       const d = decideAdjustment({ kind: input.kind, amountCents: input.amountCents, percent: input.percent, hourEquivalent: input.hourEquivalent, recipientIntent: input.recipientIntent, namedWorkers: input.namedWorkers, reason: input.reason }, { siteSubtotalCents: Math.round(site.siteBillableHours * (input.agreedHourlyRateCents ?? 0)), siteBillableHours: site.siteBillableHours, agreedHourlyRateCents: input.agreedHourlyRateCents ?? null });
       if (!d.permitted) throw new TRPCError({ code: "BAD_REQUEST", message: d.refusals.join("; ") });
@@ -463,13 +464,19 @@ export const portalRouter = router({
       ids.length ? db.select().from(weatherObservations).where(and(inArray(weatherObservations.fieldTicketId, ids), eq(weatherObservations.customerVisible, true))) : [],
       ids.length ? db.select().from(roadHazardObservations).where(and(inArray(roadHazardObservations.fieldTicketId, ids), eq(roadHazardObservations.customerVisible, true))) : [],
     ]);
+    // SPINE item 2 — "signed" is the site sign-off's verdict per ticket, not the denormalized column.
+    const [sigRows, revRows] = ids.length ? await Promise.all([
+      db.select().from(fieldTicketSignatures).where(inArray(fieldTicketSignatures.fieldTicketId, ids)),
+      db.select().from(fieldTicketRevisions).where(inArray(fieldTicketRevisions.fieldTicketId, ids)),
+    ]) : [[], []];
+    const signedCount = tickets.filter(t => fieldTicketSignatureVerdict({ ticket: t, signatures: sigRows.filter(r => r.fieldTicketId === t.id), revisions: revRows.filter(r => r.fieldTicketId === t.id) }).satisfied).length;
     const adj = ids.length ? await db.select().from(clientAdjustments).where(and(inArray(clientAdjustments.fieldTicketId, ids), eq(clientAdjustments.status, "authorized"))) : [];
     const material = new Map<string, { quantity: number; unit: string }>();
     for (const l of dayLoads) { const k = l.material ?? "unspecified"; const cur = material.get(k) ?? { quantity: 0, unit: l.quantityUnit ?? "" }; cur.quantity += Number(l.quantity ?? 0); material.set(k, cur); }
     await logAccess(e, "view", "dailyReport", input.date, null, null);
     return {
       date: input.date,
-      tickets: { total: tickets.filter(t => events.some(ev => ev.fieldTicketId === t.id)).length, signed: tickets.filter(t => t.signatureStatus === "accepted" || t.signatureStatus === "partially_accepted").length },
+      tickets: { total: tickets.filter(t => events.some(ev => ev.fieldTicketId === t.id)).length, signed: signedCount },
       hours: { customerBillable: round2(byAnswer.yes), underReview: round2(byAnswer.review), companyInternalNotBilled: round2(byAnswer.no) },
       loads: dayLoads.length,
       material: Array.from(material.entries()).map(([m, v]) => ({ material: m, quantity: round2(v.quantity), unit: v.unit })),

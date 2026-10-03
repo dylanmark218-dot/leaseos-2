@@ -28,9 +28,22 @@ import { z } from "zod";
 import { storageKeyInput } from "./_core/storageKey";
 import { adminProcedure, roleProcedure, router } from "./_core/trpc";
 import {
-  authorizeMechanicRelease,
+  authorize,
   authorizeRecordScope,
+  type Permission,
+  type RoleGrant,
 } from "./_core/recordsAuthorization";
+import {
+  fileVisibility,
+  folderCounts,
+  inFolder,
+  lifecycleStage,
+  matchRecord,
+  readCategoryFor,
+  typeFolderFor,
+  type FolderKey,
+} from "./recordFiles";
+import { storageGetSignedUrl } from "./storage";
 import {
   amendSealedEvidence,
   sealEvidence,
@@ -53,7 +66,7 @@ import {
   planEscalation,
   ROADSIDE_INSPECTION_SCOPE,
 } from "./_core/incidentReport";
-import { currentReleaseEvidenceFor, evaluateMechanicRelease } from "./_core/mechanicRelease";
+import { currentReleaseEvidenceFor } from "./_core/mechanicRelease";
 import * as svc from "./recordsService";
 import {
   bootstrapManagementRole,
@@ -111,6 +124,36 @@ const relationshipInput = z.object({
 async function requireJobInScope(jobId: number | null | undefined, scope: TenantScope): Promise<void> {
   if (jobId != null && !(await jobInScope(jobId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${jobId} not found` });
 }
+
+
+/**
+ * The evidence permissions the caller holds globally. Branch-confined grants
+ * do not reach here: a file listing spans the organization, so it cannot
+ * resolve one branch, and `authorize()` refuses to guess.
+ */
+const FILE_PERMISSIONS: readonly Permission[] = [
+  "evidence.read_own", "evidence.read_maintenance", "evidence.read_job_operational",
+  "evidence.read_safety_summary", "evidence.read_commercial", "evidence.read_personnel",
+  "evidence.read_legal", "evidence.verify", "evidence.export",
+];
+function heldFilePermissions(userId: number, grants: readonly RoleGrant[], organization: string | null): Set<Permission> {
+  // B23.1A — decided IN the organization the gate already resolved, like every
+  // other records decision: an organization-confined grant is judged against it,
+  // and a grant in another company answers nothing here.
+  return new Set(FILE_PERMISSIONS.filter(p => authorize({ userId, grants, permission: p, organization }).allowed));
+}
+
+const FOLDER_KEYS = [
+  "all", "field_tickets", "loads_disposal", "photos", "safety", "maintenance", "billing",
+  "personnel", "other", "needs_filing", "needs_review", "legal_hold", "drafts",
+] as const satisfies readonly FolderKey[];
+
+/** The operator relationship is the owner; the seal covers it, so the request cannot. */
+const ownerOperatorOf = (rels: ReadonlyArray<{ entityType: string; entityId: number | null }>) =>
+  rels.find(r => r.entityType === "operator")?.entityId ?? null;
+
+/** `evidenceAccessEvents.actorRole` is forty characters; a long role list is cut, not refused. */
+const actorRoleOf = (roles: readonly string[]) => roles.join(",").slice(0, 40) || "unknown";
 
 export const recordsRouter = router({
   evidence: router({
@@ -494,6 +537,243 @@ export const recordsRouter = router({
       }),
   }),
 
+  /**
+   * Records & File Manager — Phase 1: browse, inspect, download.
+   *
+   * A folder is a saved view over record types and work queues; it is never
+   * the permission. Every record is decided on its own type's category read,
+   * or on `evidence.read_own` for the caller's own records, before any folder
+   * or search is applied — and a record out of reach is absent from the list
+   * and "not found" by id, never "forbidden", so its existence does not leak.
+   */
+  files: router({
+    list: roleProcedure("records.files.list")
+      .input(
+        z.object({
+          folder: z.enum(FOLDER_KEYS).default("all"),
+          query: z.string().max(200).default(""),
+          limit: z.number().int().min(1).max(500).default(200),
+        }).default({ folder: "all", query: "", limit: 200 })
+      )
+      .query(async ({ ctx, input }) => {
+        const scope = await actingScopeFor(ctx.user.id);
+        const me = await svc.resolveOperatorForUser(ctx.user.id);
+        const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id), ctx.organization);
+        // Read one past the window so "there is more" is a fact, not a guess.
+        const candidates = await svc.listFileCandidates(scope, 501);
+        const truncated = candidates.length > 500;
+
+        const visible = candidates.slice(0, 500).flatMap(c => {
+          const ownerOperatorId = ownerOperatorOf(c.relationships);
+          const isOwner =
+            (ownerOperatorId != null && ownerOperatorId === me.operatorId) || c.capturedBy === ctx.user.id;
+          const v = fileVisibility({ held, recordType: c.recordType, isOwner });
+          if (!v.visible) return [];
+          const entityRelationshipCount = c.relationships.filter(r => r.entityType !== "operator").length;
+          return [{ c, basis: v.basis, isOwner, entityRelationshipCount }];
+        });
+
+        const facts = visible.map(({ c, entityRelationshipCount }) => ({ ...c, entityRelationshipCount }));
+        const counts = folderCounts(facts);
+
+        const records = visible
+          .filter(({ c, entityRelationshipCount }) => inFolder(input.folder, { ...c, entityRelationshipCount }))
+          .map(v => ({ ...v, match: matchRecord(input.query, v.c) }))
+          .filter(v => v.match.matched)
+          .slice(0, input.limit)
+          .map(({ c, basis, isOwner, match }) => ({
+            id: c.id,
+            trackingNumber: c.trackingNumber,
+            title: c.title,
+            recordType: c.recordType,
+            category: c.category,
+            folder: typeFolderFor(c.recordType),
+            mimeType: c.mimeType,
+            hasContent: c.hasContent,
+            capturedAt: c.capturedAt,
+            status: c.status,
+            sealState: c.sealState,
+            version: c.currentVersion,
+            legalHold: c.legalHold,
+            lifecycle: lifecycleStage(c),
+            jobId: c.jobId,
+            relationships: c.relationships.filter(r => r.entityType !== "operator"),
+            officeRetainUntil: c.officeRetainUntil,
+            visibleBecause: basis,
+            mine: isOwner,
+            matchReasons: match.reasons,
+          }));
+
+        return {
+          records,
+          counts,
+          truncated,
+          reach: {
+            categories: FILE_PERMISSIONS.filter(p => p.startsWith("evidence.read_") && p !== "evidence.read_own" && held.has(p)),
+            own: held.has("evidence.read_own"),
+            canVerify: held.has("evidence.verify"),
+          },
+        };
+      }),
+
+    get: roleProcedure("records.files.get")
+      .input(z.object({ evidenceId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        const notFound = () => new TRPCError({ code: "NOT_FOUND", message: `Record ${input.evidenceId} not found` });
+        if (!(await evidenceInScope(input.evidenceId, await actingScopeFor(ctx.user.id)))) throw notFound();
+        const d = await svc.loadFileDetail(input.evidenceId);
+        if (!d) throw notFound();
+
+        const me = await svc.resolveOperatorForUser(ctx.user.id);
+        const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id), ctx.organization);
+        const ownerOperatorId = ownerOperatorOf(d.relationships);
+        const isOwner = (ownerOperatorId != null && ownerOperatorId === me.operatorId) || d.rec.capturedBy === ctx.user.id;
+        const v = fileVisibility({ held, recordType: d.rec.recordType, isOwner });
+        if (!v.visible) throw notFound();
+
+        await svc.recordEvidenceAccess({
+          evidenceRecordId: d.rec.id,
+          actorUserId: ctx.user.id,
+          actorRole: actorRoleOf(ctx.roles),
+          action: "viewed",
+          context: "records.files.get",
+        });
+
+        const currentSeal = d.seals.find(s => s.version === d.rec.currentVersion) ?? null;
+        const activeHolds = d.holds.filter(h => h.status === "active");
+        // Who looked at a record is itself sensitive. It is shown to those who
+        // answer for records — export or legal read — and named as withheld otherwise.
+        const mayReadAccess = held.has("evidence.export") || held.has("evidence.read_legal");
+
+        return {
+          id: d.rec.id,
+          trackingNumber: d.rec.trackingNumber ?? null,
+          title: d.rec.title,
+          recordType: d.rec.recordType,
+          category: d.rec.category,
+          readCategory: readCategoryFor(d.rec.recordType),
+          folder: typeFolderFor(d.rec.recordType),
+          mimeType: d.rec.mimeType ?? null,
+          hasContent: Boolean(d.rec.storageKey),
+          capturedAt: d.rec.capturedAt,
+          capturedBy: d.rec.capturedBy ?? null,
+          receivedAt: d.rec.createdAt,
+          latitude: d.rec.latitude ?? null,
+          longitude: d.rec.longitude ?? null,
+          status: d.rec.status,
+          sealState: d.rec.sealState,
+          version: d.rec.currentVersion,
+          notes: d.rec.notes ?? null,
+          lifecycle: lifecycleStage({
+            sealState: d.rec.sealState,
+            syncState: d.latestSync?.state ?? null,
+            sealVerification: currentSeal?.verificationResult ?? null,
+            officeReviewedAt: d.retention?.officeReviewedAt ?? null,
+          }),
+          integrity: currentSeal
+            ? {
+                contentHash: currentSeal.contentHash,
+                manifestHash: currentSeal.manifestHash,
+                algorithm: currentSeal.hashAlgorithm,
+                sealedAt: currentSeal.sealedAt,
+                sealedByUserId: currentSeal.sealedByUserId,
+                deviceId: currentSeal.deviceId ?? null,
+                verification: currentSeal.verificationResult,
+                serverVerifiedAt: currentSeal.serverVerifiedAt ?? null,
+              }
+            : null,
+          relationships: d.relationships.map(r => ({
+            entityType: r.entityType, entityId: r.entityId ?? null, entityRef: r.entityRef ?? null, role: r.role ?? null,
+          })),
+          versions: d.versions.map(x => ({
+            version: x.version,
+            current: x.version === d.rec.currentVersion,
+            supersedesVersion: x.supersedesVersion ?? null,
+            contentHash: x.contentHash,
+            amendmentReason: x.amendmentReason ?? null,
+            createdAt: x.createdAt,
+            hasContent: Boolean(x.storageKey) || (x.version === d.rec.currentVersion && Boolean(d.rec.storageKey)),
+          })),
+          retention: d.retention
+            ? {
+                basis: d.retention.retentionBasis ?? null,
+                months: d.retention.effectiveRetentionMonths ?? null,
+                officeRetainUntil: d.retention.officeRetainUntil ?? null,
+                deviceRetainUntil: d.retention.deviceRetainUntil ?? null,
+                officeReceivedAt: d.retention.officeReceivedAt ?? null,
+                officeIntegrityVerifiedAt: d.retention.officeIntegrityVerifiedAt ?? null,
+                officeReviewedAt: d.retention.officeReviewedAt ?? null,
+                deviceCopyDeletedAt: d.retention.deviceCopyDeletedAt ?? null,
+                // Company policy until a verified statutory source is loaded — said, not implied.
+                statutoryCompliance: "not asserted" as const,
+              }
+            : null,
+          legalHold: {
+            active: d.rec.legalHold || activeHolds.length > 0,
+            holds: d.holds.map(h => ({
+              holdNumber: h.holdNumber, matterRef: h.matterRef ?? null, status: h.status,
+              placedAt: h.placedAt, releasedAt: h.releasedAt ?? null,
+            })),
+          },
+          accessHistory: mayReadAccess
+            ? d.access.map(a => ({ action: a.action, actorUserId: a.actorUserId, actorRole: a.actorRole, context: a.context ?? null, occurredAt: a.occurredAt }))
+            : null,
+          visibleBecause: v.basis,
+          mine: isOwner,
+          actions: {
+            download: Boolean(d.rec.storageKey),
+            verify: held.has("evidence.verify") && d.rec.status === "needs_review",
+            // Evidence is never edited in place: a sealed record is amended into a new version.
+            amend: d.rec.sealState !== "draft",
+          },
+        };
+      }),
+
+    /**
+     * A short-lived signed URL, minted only after the same per-record decision
+     * as `get`, and logged as a download. Never a durable link.
+     */
+    download: roleProcedure("records.files.download")
+      .input(z.object({ evidenceId: z.number().int().positive(), version: z.number().int().positive().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const notFound = () => new TRPCError({ code: "NOT_FOUND", message: `Record ${input.evidenceId} not found` });
+        if (!(await evidenceInScope(input.evidenceId, await actingScopeFor(ctx.user.id)))) throw notFound();
+        const subject = await svc.loadEvidenceSubject(input.evidenceId);
+        if (!subject) throw notFound();
+
+        const me = await svc.resolveOperatorForUser(ctx.user.id);
+        const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id), ctx.organization);
+        const isOwner =
+          (subject.ownerOperatorId != null && subject.ownerOperatorId === me.operatorId) || subject.capturedBy === ctx.user.id;
+        if (!fileVisibility({ held, recordType: subject.recordType, isOwner }).visible) throw notFound();
+
+        const stored = await svc.storageKeyForVersion(subject.id, input.version ?? null);
+        if (!stored?.storageKey) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: input.version ? `Version ${input.version} has no stored file` : "This record has no stored file",
+          });
+        }
+
+        let url: string;
+        try {
+          url = await storageGetSignedUrl(stored.storageKey);
+        } catch {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "File storage is not reachable from this server" });
+        }
+
+        await svc.recordEvidenceAccess({
+          evidenceRecordId: subject.id,
+          actorUserId: ctx.user.id,
+          actorRole: actorRoleOf(ctx.roles),
+          action: "downloaded",
+          context: `records.files.download v${stored.version}`,
+        });
+
+        return { url, mimeType: stored.mimeType, version: stored.version };
+      }),
+  }),
+
   incident: router({
     capture: roleProcedure("records.incident.capture")
       .input(
@@ -752,62 +1032,14 @@ export const recordsRouter = router({
       .mutation(async ({ ctx, input }) => {
       // P4.1: the work order's unit must be in the caller's scope.
       if (!(await workOrderInScope(input.workOrderId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Work order ${input.workOrderId} not found` });
-        const grants = await listActiveUserRoles(ctx.user.id);
-
-        // The signature must be the caller's own.
-        const auth = authorizeMechanicRelease({
-          userId: ctx.user.id,
-          grants,
-          organization: ctx.organization,   // B23.1A — see records.evidence.seal
-          technicianUserId: ctx.user.id,
+        // 0221 — retired (design S-1): there is one door that appends a release, `shop.workOrderRelease`.
+        // This one wrote no `resolvedDefectIds`, so a release made here never counted as evidence for the
+        // defect it repaired, and it could not see the work order's tasks. The scope check above stays, so
+        // another organization's work order is still "not found" rather than learning it exists.
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `records.maintenance.recordRelease is closed. Use shop.workOrderRelease for work order ${input.workOrderId} — it names the defects the release repaired, refuses while tasks are open, and is the one door a release comes through.`,
         });
-        if (!auth.allowed) throw forbidden(auth.detail ?? "Cannot record a release");
-
-        const wo = await svc.loadWorkOrderSubject(input.workOrderId);
-        if (!wo) throw new TRPCError({ code: "NOT_FOUND", message: "No such work order" });
-
-        const decision = evaluateMechanicRelease({
-          workOrderStatus: wo.status,
-          // Read from the defect, never from the request.
-          defectSeverity: wo.defectSeverity,
-          releaseType: input.releaseType,
-          restrictionDetail: input.restrictionDetail,
-          repairSummary: input.repairSummary,
-          testProcedure: input.testProcedure,
-          testResult: input.testResult,
-          roadTestPerformed: input.roadTestPerformed,
-          technicianUserId: ctx.user.id,
-          technicianIdentifier: input.technicianIdentifier,
-        });
-
-        if (!decision.valid) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: decision.blockers.map(b => b.label).join("; "),
-          });
-        }
-
-        await svc.appendWorkOrderRelease({
-          workOrderId: wo.id,
-          unitId: wo.unitId,
-          releaseType: input.releaseType,
-          restrictionDetail: input.restrictionDetail ?? null,
-          repairSummary: input.repairSummary,
-          testProcedure: input.testProcedure ?? null,
-          testResult: input.testResult ?? null,
-          roadTestPerformed: input.roadTestPerformed,
-          roadTestNotes: input.roadTestNotes ?? null,
-          technicianUserId: ctx.user.id,
-          technicianIdentifier: input.technicianIdentifier,
-          releasedAt: new Date(),
-        });
-
-        return {
-          released: true,
-          restricted: decision.restricted,
-          unitId: wo.unitId,
-          dispatchRecalculationRequired: true,
-        };
       }),
 
     /**
@@ -881,6 +1113,7 @@ export const recordsRouter = router({
         const changed = await svc.resolveMaintenanceDefect({
           defectId: defect.id, resolvedByUserId: ctx.user.id,
           resolvedByReleaseId: evidenceId, note: input.note, at: new Date(),
+          actorRole: ctx.roles.find(r => r === "mechanic" || r === "shop_lead") ?? ctx.roles[0] ?? "unknown",
         });
         if (!changed) {
           throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Defect ${defect.id} is already resolved` });

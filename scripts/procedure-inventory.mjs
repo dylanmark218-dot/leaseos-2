@@ -17,7 +17,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 const FILE = "PROCEDURE_AUTHORIZATION_INVENTORY.md";
-const ROW = /^(\| `(server\/[^`]+)` \| `ROLE_AUTHORIZED`[^|]*\| \*\*)(\d+)(\*\* \|)$/;
+const ROW = /^(\| `(server\/[^`]+)` \| `ROLE_AUTHORIZED`[^|]*\| \*\*)(\d+)(\*\*[^|]*\|)$/;
 const TOTAL = /^\*\*(\d+) role-authorized procedures across the surfaces listed above\./;
 const callSites = file => (readFileSync(file, "utf8").match(/roleProcedure\(\s*"/g) ?? []).length;
 

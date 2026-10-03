@@ -271,8 +271,11 @@ describe("CP1.5 — returning a unit to service is a person's act", () => {
 
   it("the boundary names the permissions the real release procedures use, and no registered agent capability requires one", async () => {
     const { permissionForProcedure } = await import("./_core/recordsAuthorization");
-    // 0237: `fleet.lifecycleSet` reactivates a stored or retired unit — a return to service, so a person's act.
-    const releases = ["fleet.holdRelease", "fleet.lifecycleSet", "records.incident.review", "records.maintenance.recordRelease", "records.maintenance.resolveDefect", "records.maintenance.revokeRelease", "enforcement.orderRelease"];
+    const releases = ["fleet.holdRelease", "records.incident.review", "records.maintenance.recordRelease", "records.maintenance.resolveDefect", "records.maintenance.revokeRelease", "enforcement.orderRelease",
+      // 0221 — CP2's return to service, and the triage that can lower a critical defect and free its safety hold.
+      "maintenance.returnToService", "maintenance.defectTriage",
+      // 0237 — `fleet.lifecycleSet` reactivates a stored or retired unit: a return to service, so a person's act.
+      "fleet.lifecycleSet"];
     const used = new Set(releases.map(p => permissionForProcedure(p)));
     // records.incident.review releases an incident's hold under incident.review, a role the hold rule also checks.
     used.delete("incident.review");

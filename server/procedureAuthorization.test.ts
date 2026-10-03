@@ -80,9 +80,15 @@ const trainingAcademyRouter = readFileSync("server/trainingAcademyRouter.ts", "u
 const sessionRouter = readFileSync("server/sessionRouter.ts", "utf8");
 // The page scanner's read-only paperwork surface.
 const paperworkRouter = readFileSync("server/paperworkRouter.ts", "utf8");
+const driverPortfolioRouter = readFileSync("server/driverPortfolioRouter.ts", "utf8");
 // DC-A (0178): Document Control.
 const documentControlRouter = readFileSync("server/documentControlRouter.ts", "utf8");
 const attestRouter = readFileSync("server/attestRouter.ts", "utf8");   // SA1
+const payrollCompensationRouter = readFileSync("server/payrollCompensationRouter.ts", "utf8");   // payroll P1 (0226)
+const payrollScheduleRouter = readFileSync("server/payrollScheduleRouter.ts", "utf8");   // payroll P2 (0227)
+// 0228: the Safety & Compliance Program Builder, gated from the start.
+const safetyProgramRouter = readFileSync("server/safetyProgramRouter.ts", "utf8");
+const sourceRegistryRouter = readFileSync("server/sourceRegistryRouter.ts", "utf8");   // approved external source registry (0233)
 const inventory = readFileSync("PROCEDURE_AUTHORIZATION_INVENTORY.md", "utf8");
 const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
 
@@ -91,7 +97,7 @@ const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
  * payrollRouter.ts both draw from it. Checking only one would let a declared
  * permission go unwired without anyone noticing.
  */
-const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, maintenanceRouter, fleetPortfolioRouter, fleetAssetRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + customerCommercialRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter + attestRouter].join("\n");
+const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, payrollCompensationRouter, payrollScheduleRouter, sourceRegistryRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + customerCommercialRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter + attestRouter, maintenanceRouter, fleetPortfolioRouter + fleetAssetRouter + driverPortfolioRouter + safetyProgramRouter].join("\n");
 
 const countBuilders = (src: string, builder: string) =>
   (src.match(new RegExp(`\\w+:\\s*${builder}\\b`, "g")) ?? []).length;
@@ -113,13 +119,18 @@ const UNREVIEWED_BASELINE = 0;
  * identically whatever the reason, so neither reveals which families exist. The other two remain
  * `auth.me` and `auth.logout`.
  */
-const PUBLIC_BASELINE = 4;
+/*
+ * 4 → 5: `driverPortfolio.shareRedeem`, in driverPortfolioRouter.ts — one credential behind a
+ * 256-bit token whose hash is all that is stored, re-read on every redemption. Counted with the
+ * routers.ts builders below, and pinned by name, so a second public procedure there is seen.
+ */
+const PUBLIC_BASELINE = 5;
 
 describe("records surface is fully role-authorized", () => {
   it("uses roleProcedure for every records procedure", () => {
     const roleCount = (recordsRouter.match(/roleProcedure\(/g) ?? []).length;
     expect(roleCount).toBe(Object.keys(RECORDS_PROCEDURE_PERMISSIONS).length);
-    expect(roleCount).toBe(20);   // merge of main into #64: main's 18 + #64's 2.   // B23.1A: +1 records.roles.resolveLegacy — resolving a grant 0170 quarantined;   // B23.1: +1 records.roles.revoke
+    expect(roleCount).toBe(23);   // +3 records.files.{list,get,download} (Records & File Manager).   // merge of main into #64: main's 18 + #64's 2.   // B23.1A: +1 records.roles.resolveLegacy — resolving a grant 0170 quarantined;   // B23.1: +1 records.roles.revoke
   });
 
   it("has no protectedProcedure fallback in the records router", () => {
@@ -132,7 +143,7 @@ describe("records surface is fully role-authorized", () => {
     const names = Array.from(
       recordsRouter.matchAll(/roleProcedure\("([^"]+)"\)/g)
     ).map(m => m[1]);
-    expect(names.length).toBe(20);   // merge of main into #64: main's 18 + #64's 2.   // B23.1A: +1 records.roles.resolveLegacy;   // B23.1: +1 records.roles.revoke
+    expect(names.length).toBe(23);   // +3 records.files.{list,get,download} (Records & File Manager).   // merge of main into #64: main's 18 + #64's 2.   // B23.1A: +1 records.roles.resolveLegacy;   // B23.1: +1 records.roles.revoke
     for (const n of names) {
       expect(
         Object.prototype.hasOwnProperty.call(RECORDS_PROCEDURE_PERMISSIONS, n),
@@ -179,7 +190,7 @@ describe("migrated operational procedures", () => {
     // 40-procedure payroll/finance surface, all gated from the start.
     // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
     // The merged surface includes 8 Live Assist, 2 paperwork, 23 Document Control, and 10 auth-workspace procedures.
-    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(780);   // merge of main (240b2dd) into the fleet branch: main 758 + the branch's 22 (3 maintenance.*, 9 fleet.* foundation, 10 fleet.* asset core);   // SA1: +14 attest.* (server/attestRouter.ts);   // merge of main (b35bac4) into #59: main 723 + #59's 21 (7 board.*, 14 shifts.*);   // v23.31: +40 customerCommercial.* (customers, contacts, contracts, rate sheets, job commercial basis, expiry sweep);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(884);   // 0237: +10 fleet.* asset core (server/fleetAssetRouter.ts);   // 0233: +16 sourceRegistry.* (approved external source registry);   // 0228: +38 safetyProgram.* (Safety & Compliance Program Builder);   // driver portfolio (#16): +17 driverPortfolio.*;   // payroll P2: +12 payrollSchedule.*;   // payroll P1: +11 payrollCompensation.*;   // payroll P0: +3 payroll.{runCollect,runSubmit,earningApprove};   // 0221: +7 maintenance.{defectReport,defectTriage,defectSendToShop,taskAdd,taskSetStatus,returnToService,defectHistory} (fleet maintenance CP2);   // 0200: +9 fleet.{unitState,holdList,holdPlace,holdRelease,meterReadings,meterProgress,meterRecord,meterDecide,history} (portfolio foundation);   // 0199: +3 maintenance.{workOrderAssignment,workOrderAssign,workOrderCancel} (fleet maintenance CP1);   // SA1: +14 attest.* (server/attestRouter.ts);   // merge of main (b35bac4) into #59: main 723 + #59's 21 (7 board.*, 14 shifts.*);   // v23.31: +40 customerCommercial.* (customers, contacts, contracts, rate sheets, job commercial basis, expiry sweep);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
     expect(UNREVIEWED_BASELINE).toBe(0);
   });
 
@@ -190,6 +201,9 @@ describe("migrated operational procedures", () => {
 
   it("has no bare protectedProcedure in the payroll or finance surface", () => {
     expect(countBuilders(payrollRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(payrollCompensationRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(payrollScheduleRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(sourceRegistryRouter, "protectedProcedure")).toBe(0);
   });
 
   it("has no bare protectedProcedure in the portal or funding surface", () => {
@@ -286,15 +300,17 @@ describe("migrated operational procedures", () => {
 });
 
 describe("the data source document matches the seeded registry", () => {
-  it("states the corrected count of ten verified and eighteen not", () => {
+  it("states the corrected count of ten verified and twenty not", () => {
     // The research summary said nine of eleven were clean; three were unresolved,
     // so it was eight. v22.17 added six spectrum and coverage sources, none of
     // them licence-cleared, so nine are now blocked. The document and the seed
     // must agree or a future reader trusts the wrong number. The Canadian 511 tranche cleared two
-    // (Ontario, Québec) and blocked five (MB, NB, YT, NL, SK).
-    expect(dataSources).toContain("Ten verified, eighteen not");
+    // (Ontario, Québec) and blocked five (MB, NB, YT, NL, SK). 0233 registered the facility
+    // directory's two regulator GIS services (SK Petroleum, BCER) so the approved-source registry can
+    // govern their importer; their licences are named and not yet cleared here, so twenty.
+    expect(dataSources).toContain("Ten verified, twenty not");
     expect(VERIFIED_DATA_SOURCES).toHaveLength(10);
-    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(18);
+    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(20);
   });
 
   it("lists exactly the blocked sources as blocked", () => {
@@ -321,7 +337,9 @@ describe("the untouched API is counted, not forgotten", () => {
   });
 
   it("holds the public procedure count exactly", () => {
-    expect(countBuilders(routers, "publicProcedure")).toBe(PUBLIC_BASELINE);
+    expect(countBuilders(routers, "publicProcedure") + countBuilders(driverPortfolioRouter, "publicProcedure")).toBe(PUBLIC_BASELINE);
+    // The portfolio's one public procedure is the share redemption, and nothing else.
+    expect(driverPortfolioRouter.match(/(\w+):\s*publicProcedure\b/g)).toEqual(["shareRedeem: publicProcedure"]);
   });
 
   it("has no stale narrative claiming completed work is still pending", () => {
@@ -338,7 +356,7 @@ describe("the untouched API is counted, not forgotten", () => {
     // drifted below their routers unseen (complianceRouter listed 9 with 18). Every row is now read from
     // its router; `node scripts/procedure-inventory.mjs` writes the numbers.
     expect(inventory).toContain("ROLE_AUTHORIZED");
-    const rows = Array.from(inventory.matchAll(/^\| `(server\/[^`]+)` \| `ROLE_AUTHORIZED`[^|]*\| \*\*(\d+)\*\* \|$/gm));
+    const rows = Array.from(inventory.matchAll(/^\| `(server\/[^`]+)` \| `ROLE_AUTHORIZED`[^|]*\| \*\*(\d+)\*\*[^|]*\|$/gm));
     expect(rows.length).toBeGreaterThanOrEqual(28);
     const drift = rows
       .map(r => ({ file: r[1]!, listed: Number(r[2]), actual: (readFileSync(r[1]!, "utf8").match(/roleProcedure\(\s*"/g) ?? []).length }))   // the script's own definition

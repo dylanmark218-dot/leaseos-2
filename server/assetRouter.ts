@@ -55,8 +55,6 @@ export const assetRouter = router({
       await requireCallerUnits(ctx.user.id, { unitId: input.unitId, trailerId: input.trailerId });   // CP1.5 — both UNIQUE here: a foreign unit took the owner's slot
       const db = await dbOrThrow();
       requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`);
-      await requireUnit(ctx.money, input.unitId);
-      await requireUnit(ctx.money, input.trailerId);   // a trailer is a units row (manifests.trailerUnitId)
       if (input.acquisitionVendorBillId != null) await vendorBillIdInScope(await dbOrThrow(), ctx.money, input.acquisitionVendorBillId, input.financialEntityId);
       await requireEvidence(ctx.money, input.acquisitionEvidenceRecordId);
       if (input.kind === "unit" && !input.unitId) throw new TRPCError({ code: "BAD_REQUEST", message: "A unit asset must name the unit the shop maintains — one truck, one identity" });

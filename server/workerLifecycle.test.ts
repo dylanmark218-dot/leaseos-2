@@ -121,3 +121,35 @@ describe("queue health says what is wrong first", () => {
       .toBe("outbox: 0 pending");
   });
 });
+
+/*
+ * A claim is a 120-second lease (workflowRuntime.CLAIM_LEASE_SECONDS). If `stop()` abandoned the rest
+ * of a claimed batch, those events would sit claimed and unprocessed until the lease ran out: no other
+ * worker may take them, and a restart within the lease cannot either. The worker's contract is that a
+ * stop lets the current batch finish.
+ */
+describe("stopping the drain worker finishes the batch it has claimed", () => {
+  it("processes every event of the claimed batch even when stop() arrives mid-batch", async () => {
+    const { startDrainWorker } = await import("./_core/drainWorker");
+    const batch = [1, 2, 3, 4, 5].map(id => event("unit.critical_defect_opened", id));
+    const processed: number[] = [];
+    let handle: WorkerHandle | null = null;
+    let claims = 0;
+    const ports = {
+      claimBatch: async () => (claims++ === 0 ? batch : []),
+      processEvent: async (e: ClaimedEvent) => {
+        // The shutdown signal arrives while the first event of the batch is being handled.
+        if (e.id === 1) handle!.stop();
+        return { tasksCreated: 0 };
+      },
+      markProcessed: async (id: number) => { processed.push(id); },
+      markFailed: async () => undefined,
+    } as unknown as WorkerPorts;
+    handle = startDrainWorker(ports, { workerId: "t", pollIntervalMs: 1, idleIntervalMs: 1, batchSize: 5 });
+    const stats = await handle.done;
+    expect(processed).toEqual([1, 2, 3, 4, 5]);
+    expect(stats.claimed).toBe(5);
+    expect(stats.processed).toBe(5);
+    expect(claims).toBe(1);   // and it claims nothing further once stopped
+  });
+});

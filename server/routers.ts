@@ -53,6 +53,9 @@ import {
   financeRouter,
   payrollRouter,
 } from "./payrollRouter";
+import { payrollCompensationRouter } from "./payrollCompensationRouter";   // payroll P1 (0226)
+import { payrollScheduleRouter } from "./payrollScheduleRouter";   // payroll P2 (0227)
+import { sourceRegistryRouter } from "./sourceRegistryRouter";   // approved external source registry (0233)
 import { fundingRouter, portalsRouter } from "./portalFundingRouter";
 import { purchasingRouter, recoveryRouter, roadsideRouter, vendorRouter } from "./purchasingRouter";
 import { deviceRouter, syncRouter } from "./deviceRouter";
@@ -82,6 +85,7 @@ import { drizzleWidgetLayoutStore } from "./widgetLayouts";
 import { widgetReaderFor } from "./widgetSources";
 import { automationPolicyRouter } from "./automationPolicyRouter";
 import { restrictedVaultRouter } from "./restrictedVaultRouter";
+import { safetyProgramRouter } from "./safetyProgramRouter";
 import { composeReadiness } from "./readinessComposer";
 import { branchRolesFor } from "./_core/widgetRoleKeys";
 import { isDomainRole, permissionsForDomainRole } from "./_core/recordsAuthorization";
@@ -141,6 +145,10 @@ import { inboundRouter, integrationRouter } from "./integrationRouter";
 import { telematicsRouter } from "./telematicsRouter";
 import { workforceRouter } from "./workforceRouter";
 import { trainingAcademyRouter } from "./trainingAcademyRouter";
+import { driverPortfolioRouter } from "./driverPortfolioRouter";
+import { decideComplianceCredential, recordCredentialEntry } from "./credentialVerificationService";
+import { dbOrThrow } from "./driverPortfolioService";
+import { isMedicalDocType } from "./_core/compliancePassport";
 import { contractorOperationsRouter } from "./contractorOperationsRouter";
 import { auditRouter } from "./auditRouter";
 import { spatialRouter } from "./spatialRouter";
@@ -178,7 +186,6 @@ import {
   listJobUnits,
   createInspection,
   listInspections,
-  reviewComplianceDocument,
   listLocationIdentities,
   createLocationIdentity,
   listManifests,
@@ -354,6 +361,7 @@ export const appRouter = router({
   widgets: widgetsRouter(widgetDeps),
   automationPolicy: automationPolicyRouter,
   restrictedVault: restrictedVaultRouter,
+  safetyProgram: safetyProgramRouter,
   manifestCustody: manifestCustodyRouter,
   securityIncidents: securityIncidentsRouter,
   commercialOffice: commercialOfficeRouter,
@@ -377,6 +385,9 @@ export const appRouter = router({
   people: peopleRouter,
   records: recordsRouter,
   payroll: payrollRouter,
+  payrollCompensation: payrollCompensationRouter,
+  payrollSchedule: payrollScheduleRouter,
+  sourceRegistry: sourceRegistryRouter,
   contractors: contractorRouter,
   contractorOperations: contractorOperationsRouter,
   finance: financeRouter,
@@ -421,6 +432,7 @@ export const appRouter = router({
   telematics: telematicsRouter,
   workforce: workforceRouter,
   academy: trainingAcademyRouter,
+  driverPortfolio: driverPortfolioRouter,
   audit: auditRouter,
   spatial: spatialRouter,
   // v21.18 — machines only; gated by integrationProcedure, never by roles.
@@ -1734,7 +1746,14 @@ export const appRouter = router({
               confidence: z.enum(["low", "medium", "high"]).default("medium"),
             })
           )
-          .mutation(async ({ ctx, input }) => createComplianceDocument({ ...input, verificationStatus: "needs_review" }, await scopeFor(ctx.user.id))),   // review is documents.review
+          .mutation(async ({ ctx, input }) => {
+            // A medical record is private whichever path files it (as compliance.credentialRecord does).
+            const privateDetail = isMedicalDocType(input.docType);
+            const id = await createComplianceDocument({ ...input, verificationStatus: "needs_review", recordedByUserId: ctx.user.id, privateDetail }, await scopeFor(ctx.user.id));
+            // The same entry row in the portfolio audit as a driver's own submission.
+            if (id) await recordCredentialEntry(await dbOrThrow(), { credentialId: Number(id), ownerType: input.ownerType, ownerId: input.ownerId, docType: input.docType, privateDetail, actorUserId: ctx.user.id, path: "documents.create", at: new Date() });
+            return id;
+          }),   // review is documents.review
         review: roleProcedure("documents.review")
           .input(
             z.object({
@@ -1742,7 +1761,12 @@ export const appRouter = router({
               status: z.enum(["verified", "rejected"]),
             })
           )
-          .mutation(async ({ ctx, input }) => { const ok = await reviewComplianceDocument(input.id, input.status, await scopeFor(ctx.user.id)); if (!ok) throw new TRPCError({ code: "NOT_FOUND", message: `Document ${input.id} not found` }); return ok; }),
+          // Through the one verification door (credentialVerificationService): subject scope, separation of
+          // duties, the needs_review state and the conditional update. Out of scope stays "Document N not found".
+          .mutation(async ({ ctx, input }) => {
+            await decideComplianceCredential({ credentialId: input.id, outcome: input.status, verifierUserId: ctx.user.id, path: "documents.review", notFoundMessage: `Document ${input.id} not found` });
+            return true;
+          }),
       }),
     }),
     compliance: router({

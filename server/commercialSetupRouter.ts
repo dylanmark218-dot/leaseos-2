@@ -95,8 +95,8 @@ export const commercialSetupRouter = router({
       effectiveFrom: z.coerce.date(), effectiveTo: z.coerce.date().optional(), sourceKind: z.enum(["human", "ai_extracted", "imported", "negotiated"]), sourceDocumentEvidenceId: z.number().int().optional(), sourceClause: z.string().max(160).optional(), notes: z.string().max(600).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      // F1: the financial entity must be in the caller's scope; otherwise it does not exist here.
       await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
+      // F1: the financial entity must be in the caller's scope; otherwise it does not exist here.
       { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
       const d = await db();
       if (input.pricingMethod === "per_unit" && input.rateMillis == null) throw new TRPCError({ code: "BAD_REQUEST", message: "A per-unit definition carries a rate; without one it is a question, not a rate" });

@@ -186,6 +186,7 @@ const READERS: Record<string, string> = {
   "server/readinessComposer.ts": "dispatch: credentials, medical fitness and insurance proof, each through complianceRequirementValidity / proofFromDocuments",
   "server/insuranceRouter.ts": "insurance office: the entity's proof through proofFromDocuments",
   "server/complianceRouter.ts": "medicalEligibility through complianceRequirementValidity; the passport's credentials (with id, capture time and owner) for evaluateRequirement → candidateVerdict; writes decide nothing",
+  "server/licenceReads.ts": "a person's driver-licence documents and legacy date for driverLicenceVerdict — open shifts and shift readiness read the licence only through it",
   "server/db.ts": "listComplianceDocuments (the documentExpiry tile's source) and writes; decides nothing",
   "server/surfacesService.ts": "the exception centre: flagged owners' whole history per type through complianceRequirementValidity; exceptionCentre.ts maps the verdicts",
   "server/requirementRouter.ts": "requirement-engine credentials (with id, capture time and owner) for evaluateRequirement → candidateVerdict",
@@ -193,10 +194,19 @@ const READERS: Record<string, string> = {
   "server/hosRouter.ts": "files a scanned paper log as a needs_review document; decides nothing",
   "server/workforceRouter.ts": "writes a verified credential from verified training; decides nothing",
   "server/trainingAcademyRouter.ts": "foreign TDG recognition requires the named document in force by complianceRequirementValidity",
+  // Driver portfolio (#16), added on merging main: both hand the operator's rows to driverPortfolio, whose
+  // credential items decide through complianceDocumentValidity. Their own date comparisons are share-link
+  // and requirement-binding windows, not documents.
+  "server/driverPortfolioRouter.ts": "wallet, dispatch view and credential history through driverPortfolio (complianceDocumentValidity); writes a driver-uploaded credential as needs_review",
+  "server/driverPortfolioService.ts": "loads the operator's complianceDocuments rows for driverPortfolio; decides nothing itself",
+  // Driver Portfolio security hardening: the one verification door.
+  "server/credentialVerificationService.ts": "decides verified/rejected on a needs_review row (separation of duties, conditional update); reads the operator's rows only to name what a renewal supersedes, through credentialHistory (complianceDocumentValidity)",
   // C1b-3's D-05 read adapter (#57), added on merging main.
   "server/qualificationReads.ts": "an Academy grant's evidence document through complianceDocumentValidity; the grant itself through academyVerdict (qualificationValidity)",
   // 0237 — the Fleet portfolio's asset detail.
   "server/fleetAssetService.ts": "the asset detail's Documents tab: the unit's documents per type through complianceDocumentValidity, shown with the engine's verdict; unit-side readiness reads them through the composer's own credentialState; decides nothing itself",
+  // 0228 — the Safety & Compliance Program Builder, added on merging main.
+  "server/safetyProgramRouter.ts": "the vendor compliance package manifest: the carrier's COR, WCB, insurance and Safety Fitness documents and each unit's CVIP through complianceDocumentValidity; decides nothing itself",
 };
 
 function readdirTs(dir: string): string[] {
@@ -219,5 +229,36 @@ describe("the complianceDocuments readers are a known list", () => {
       return hit;
     });
     expect(readers.sort()).toEqual(Object.keys(READERS).sort());
+  });
+});
+
+/*
+ * SPINE item 2 — "is this person's driver licence in force?" has one answer: driverLicenceVerdict.
+ *
+ * Open shifts and shift readiness used to read the legacy operators.licenseExpiresAt themselves and
+ * treat a future date as in force, while dispatch held the same person at "licence unknown" (the
+ * legacy date is an unverified claim, owner's ruling 2026-09-25). Now only the canonical module
+ * judges it; these are the only two production files that may touch the legacy column, and both
+ * hand it to the verdict.
+ */
+describe("the driver licence has one verdict", () => {
+  it("only the licence adapter and the dispatch composer read operators.licenseExpiresAt, and both ask driverLicenceVerdict", () => {
+    const readers = readdirTs("server").filter(f => !/\.test\.tsx?$/.test(f)).filter(f => {
+      let hit = false;
+      walk(parse(f), n => {
+        // `input.licenseExpiresAt` is a procedure argument being written (workforce hiring), not a read.
+        if (ts.isPropertyAccessExpression(n) && n.name.text === "licenseExpiresAt" && n.expression.getText() !== "input") hit = true;
+      });
+      return hit;
+    });
+    expect(readers.sort()).toEqual(["server/licenceReads.ts", "server/readinessComposer.ts"]);
+    for (const f of readers) expect(calls(parse(f), ["driverLicenceVerdict"]), `${f} must judge the licence through driverLicenceVerdict`).toBe(true);
+  });
+
+  it("open shifts and shift readiness reach the licence only through the adapter", () => {
+    for (const f of ["server/openShiftsService.ts", "server/readinessRouter.ts"]) {
+      expect(calls(parse(f), ["driverLicenceStanding"]), `${f} must read the licence through licenceReads.driverLicenceStanding`).toBe(true);
+    }
+    expect(inlineValidity(findNamed(parse("server/_core/openShifts.ts"), "shiftEligibility")!)).toEqual([]);
   });
 });

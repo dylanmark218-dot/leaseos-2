@@ -7,9 +7,11 @@
  * asking about can name itself.
  */
 
-import { and, desc, eq, ne } from "drizzle-orm";
-import { getDb } from "./db";
+import { and, desc, eq, inArray, isNull, ne, notInArray, or } from "drizzle-orm";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
+import { getDb, jobScopeSubquery, type TenantScope } from "./db";
 import { placeHold, releaseHold } from "./fleetPortfolioService";
+import { defectEvent } from "./defectLifecycleService";
 import type { DbOrTx } from "./_core/dbTypes";
 import {
   evidenceAccessEvents,
@@ -23,6 +25,7 @@ import {
   maintenanceDefects,
   nearMissReports,
   operators,
+  organizationMemberships,
   recordRetentionState,
   syncPackageItems,
   syncPackages,
@@ -628,20 +631,33 @@ export async function resolveMaintenanceDefect(args: {
   resolvedByReleaseId: number | null;
   note: string;
   at: Date;
+  /** 0221 — who resolved it, and the role they acted in, for the defect's history. */
+  actorRole?: string;
 }): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
-  const r = await db
-    .update(maintenanceDefects)
-    .set({
-      status: "resolved",
-      resolvedAt: args.at,
-      resolvedByUserId: args.resolvedByUserId,
-      resolvedByReleaseId: args.resolvedByReleaseId,
-      resolutionNote: args.note.slice(0, 400),
-    })
-    .where(and(eq(maintenanceDefects.id, args.defectId), ne(maintenanceDefects.status, "resolved")));
-  return (r[0]?.affectedRows ?? 0) > 0;
+  // 0221 — the resolution and its `resolved` event, together.
+  return db.transaction(async tx => {
+    const before = (await tx.select({ unitId: maintenanceDefects.unitId, status: maintenanceDefects.status }).from(maintenanceDefects).where(eq(maintenanceDefects.id, args.defectId)).limit(1))[0];
+    const r = await tx
+      .update(maintenanceDefects)
+      .set({
+        status: "resolved",
+        resolvedAt: args.at,
+        resolvedByUserId: args.resolvedByUserId,
+        resolvedByReleaseId: args.resolvedByReleaseId,
+        resolutionNote: args.note.slice(0, 400),
+      })
+      .where(and(eq(maintenanceDefects.id, args.defectId), ne(maintenanceDefects.status, "resolved")));
+    const changed = (r[0]?.affectedRows ?? 0) > 0;
+    if (changed && before) {
+      await defectEvent(tx as unknown as DbOrTx, {
+        defectId: args.defectId, unitId: before.unitId, eventType: "resolved", fromValue: before.status, toValue: "resolved",
+        releaseId: args.resolvedByReleaseId, reason: args.note, actor: { userId: args.resolvedByUserId, role: args.actorRole ?? "unknown" }, at: args.at,
+      });
+    }
+    return changed;
+  });
 }
 
 export async function latestRelease(unitId: number) {
@@ -787,4 +803,167 @@ export async function loadRoadsideCandidates(operatorId: number) {
     .limit(500);
 
   return full.filter(r => ids.has(r.id));
+}
+
+/* ------------------------------------------------------------------ */
+/* Records & File Manager                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The tenant half of `evidenceInScope`, as one query rather than a loop: a
+ * record is in scope through its job; failing a job, through the user who
+ * captured it; failing both, only in the historical single tenant.
+ *
+ * Category and ownership are decided afterwards, per record, by the router —
+ * this narrows to what the caller's organization holds and nothing more.
+ */
+function fileScopeWhere(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, scope: TenantScope) {
+  const activeMembers = (orgRef?: string) =>
+    db.select({ userId: organizationMemberships.userId }).from(organizationMemberships).where(
+      orgRef
+        ? and(eq(organizationMemberships.orgRef, orgRef), eq(organizationMemberships.status, "active"))
+        : eq(organizationMemberships.status, "active")
+    );
+  const byJob = inArray(evidenceRecords.jobId, jobScopeSubquery(db, scope));
+  if (scope.tenantId === SINGLE_TENANT_ID) {
+    return or(
+      byJob,
+      and(
+        isNull(evidenceRecords.jobId),
+        or(isNull(evidenceRecords.capturedBy), notInArray(evidenceRecords.capturedBy, activeMembers()))
+      )
+    );
+  }
+  return or(
+    byJob,
+    and(isNull(evidenceRecords.jobId), inArray(evidenceRecords.capturedBy, activeMembers(scope.tenantId)))
+  );
+}
+
+export type FileCandidate = {
+  id: number;
+  jobId: number | null;
+  title: string;
+  category: string;
+  recordType: string;
+  trackingNumber: string | null;
+  mimeType: string | null;
+  hasContent: boolean;
+  capturedAt: Date;
+  capturedBy: number | null;
+  status: "needs_review" | "verified" | "unverified";
+  sealState: "draft" | "sealed" | "amended" | "superseded";
+  currentVersion: number;
+  legalHold: boolean;
+  notes: string | null;
+  relationships: Array<{ entityType: string; entityId: number | null; entityRef: string | null; role: string | null }>;
+  syncState: "pending" | "received" | "verified" | "mismatch" | null;
+  sealVerification: "pending" | "verified" | "hash_mismatch" | "manifest_mismatch" | "content_unavailable" | null;
+  officeReviewedAt: Date | null;
+  officeRetainUntil: Date | null;
+};
+
+/**
+ * Every evidence record in the caller's organization, newest first, with the
+ * facts the file manager presents. Batched: one query per table, not per row.
+ */
+export async function listFileCandidates(scope: TenantScope, limit: number): Promise<FileCandidate[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select()
+    .from(evidenceRecords)
+    .where(fileScopeWhere(db, scope))
+    .orderBy(desc(evidenceRecords.capturedAt))
+    .limit(limit);
+  if (rows.length === 0) return [];
+  const ids = rows.map(r => r.id);
+
+  const [rels, items, seals, retention, held] = await Promise.all([
+    db.select().from(evidenceRelationships).where(inArray(evidenceRelationships.evidenceRecordId, ids)),
+    db.select({ evidenceRecordId: syncPackageItems.evidenceRecordId, state: syncPackageItems.state, id: syncPackageItems.id })
+      .from(syncPackageItems).where(inArray(syncPackageItems.evidenceRecordId, ids)),
+    db.select({ evidenceRecordId: evidenceSeals.evidenceRecordId, version: evidenceSeals.version, verificationResult: evidenceSeals.verificationResult })
+      .from(evidenceSeals).where(inArray(evidenceSeals.evidenceRecordId, ids)),
+    db.select().from(recordRetentionState).where(inArray(recordRetentionState.evidenceRecordId, ids)),
+    db.select({ evidenceRecordId: legalHoldRecords.evidenceRecordId })
+      .from(legalHoldRecords)
+      .innerJoin(legalHolds, eq(legalHolds.id, legalHoldRecords.legalHoldId))
+      .where(and(inArray(legalHoldRecords.evidenceRecordId, ids), eq(legalHolds.status, "active"))),
+  ]);
+
+  const heldIds = new Set(held.map(h => h.evidenceRecordId));
+  return rows.map(r => {
+    // The latest send attempt speaks for the record; an earlier failed one does not.
+    const latestItem = items.filter(i => i.evidenceRecordId === r.id).sort((a, b) => b.id - a.id)[0];
+    const seal = seals.find(s => s.evidenceRecordId === r.id && s.version === r.currentVersion);
+    const ret = retention.find(x => x.evidenceRecordId === r.id);
+    return {
+      id: r.id,
+      jobId: r.jobId ?? null,
+      title: r.title,
+      category: r.category,
+      recordType: r.recordType,
+      trackingNumber: r.trackingNumber ?? null,
+      mimeType: r.mimeType ?? null,
+      hasContent: Boolean(r.storageKey),
+      capturedAt: r.capturedAt,
+      capturedBy: r.capturedBy ?? null,
+      status: r.status,
+      sealState: r.sealState,
+      currentVersion: r.currentVersion,
+      legalHold: r.legalHold || heldIds.has(r.id),
+      notes: r.notes ?? null,
+      relationships: rels
+        .filter(x => x.evidenceRecordId === r.id)
+        .map(x => ({ entityType: x.entityType, entityId: x.entityId ?? null, entityRef: x.entityRef ?? null, role: x.role ?? null })),
+      syncState: latestItem?.state ?? null,
+      sealVerification: seal?.verificationResult ?? null,
+      officeReviewedAt: ret?.officeReviewedAt ?? null,
+      officeRetainUntil: ret?.officeRetainUntil ?? null,
+    };
+  });
+}
+
+/** Everything the inspector shows about one record. Authorization is the caller's job. */
+export async function loadFileDetail(evidenceId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const rec = (await db.select().from(evidenceRecords).where(eq(evidenceRecords.id, evidenceId)).limit(1))[0];
+  if (!rec) return null;
+  const [relationships, versions, seals, retention, holds, items, access] = await Promise.all([
+    db.select().from(evidenceRelationships).where(eq(evidenceRelationships.evidenceRecordId, evidenceId)),
+    db.select().from(evidenceVersions).where(eq(evidenceVersions.evidenceRecordId, evidenceId)).orderBy(desc(evidenceVersions.version)),
+    db.select().from(evidenceSeals).where(eq(evidenceSeals.evidenceRecordId, evidenceId)).orderBy(desc(evidenceSeals.version)),
+    db.select().from(recordRetentionState).where(eq(recordRetentionState.evidenceRecordId, evidenceId)).limit(1),
+    db.select({
+      holdNumber: legalHolds.holdNumber, matterRef: legalHolds.matterRef, status: legalHolds.status,
+      placedAt: legalHolds.placedAt, releasedAt: legalHolds.releasedAt, addedAt: legalHoldRecords.addedAt,
+    }).from(legalHoldRecords)
+      .innerJoin(legalHolds, eq(legalHolds.id, legalHoldRecords.legalHoldId))
+      .where(eq(legalHoldRecords.evidenceRecordId, evidenceId)),
+    db.select({ id: syncPackageItems.id, state: syncPackageItems.state })
+      .from(syncPackageItems).where(eq(syncPackageItems.evidenceRecordId, evidenceId)).orderBy(desc(syncPackageItems.id)).limit(1),
+    db.select().from(evidenceAccessEvents).where(eq(evidenceAccessEvents.evidenceRecordId, evidenceId))
+      .orderBy(desc(evidenceAccessEvents.occurredAt)).limit(50),
+  ]);
+  return { rec, relationships, versions, seals, retention: retention[0] ?? null, holds, latestSync: items[0] ?? null, access };
+}
+
+/** The storage key for one version: the version row when it names one, else the record's own. */
+export async function storageKeyForVersion(evidenceId: number, version: number | null) {
+  const db = await getDb();
+  if (!db) return null;
+  const rec = (await db.select({ storageKey: evidenceRecords.storageKey, mimeType: evidenceRecords.mimeType, currentVersion: evidenceRecords.currentVersion })
+    .from(evidenceRecords).where(eq(evidenceRecords.id, evidenceId)).limit(1))[0];
+  if (!rec) return null;
+  const wanted = version ?? rec.currentVersion;
+  const v = (await db.select({ storageKey: evidenceVersions.storageKey, mimeType: evidenceVersions.mimeType })
+    .from(evidenceVersions)
+    .where(and(eq(evidenceVersions.evidenceRecordId, evidenceId), eq(evidenceVersions.version, wanted))).limit(1))[0];
+  if (v?.storageKey) return { storageKey: v.storageKey, mimeType: v.mimeType ?? rec.mimeType ?? null, version: wanted };
+  // An older version with no stored object of its own has nothing to hand out; the record's
+  // key belongs to the current version, and serving it as an older one would be a lie.
+  if (version != null && version !== rec.currentVersion) return { storageKey: null, mimeType: null, version: wanted };
+  return { storageKey: rec.storageKey ?? null, mimeType: rec.mimeType ?? null, version: wanted };
 }

@@ -14,6 +14,9 @@ model layer. On `main` itself `server/_core/ai/` does not exist until PR #7 merg
 this document says about that directory describes PR #7, and its status column says "declared /
 unwired" for all of it. Nothing below is aspirational unless its status column says so.
 
+**Part II** (§24–§38) adds AI Policy & Claims Guardrails and Voice, surveyed against `main` at
+`6f52b57` and refreshed against `e1d8fd5`. It is also documentation only.
+
 **Why the document lives here.** The repository has no `docs/architecture/`. The two existing
 AI-layer register documents (`SECRETARY_MODEL_LAYER.md`, `SECRETARY_SPINE_MORATORIUM.md`) live in
 `docs/register/`, so this one does too.
@@ -735,19 +738,595 @@ and is stronger for it: a live, durable, deterministic coordinator already exist
 
 The full survey is `docs/register/AI_AGENT_RUNTIME_ARCHITECTURE.md` §23, which uses that
 document's six-word status set. PR #7 has merged since §22 was written, so `server/_core/ai/` is
-in this tree. It is still `DECLARED_UNWIRED` under the moratorium.
+in this tree. It is still `DECLARED_UNWIRED` under the moratorium. Re-verified 2026-10-03 against
+`main` at `9895188`.
 
 **Rule: a Tool carries authority and executes; a Skill carries procedure and grants zero
-authority.**
+authority. Tool availability does not equal Tool authorization.** Effective authority comes only
+from the existing path (`TrpcContext` → `resolveActingScope()` → `roleProcedure` / `authorize()`
+→ `decide()` → automation policy). It never comes from a Skill, task key, agent declaration,
+prompt or model decision.
 
 | Term | LeaseOS definition | Repository home | Status |
 |---|---|---|---|
-| **Tool** | One narrowly defined executable capability: a model-facing key bound server-side to exactly one existing `ProcedureName`. | `ToolDefinition`, `SECRETARY_TOOLS` (11), `resolveTool()`, `invokeTool()` in `server/_core/ai/tools/` | **DECLARED_UNWIRED** |
+| **Tool** | One narrowly defined executable capability: a model-facing key bound server-side to exactly one existing `ProcedureName`. | `ToolDefinition`, `SECRETARY_TOOLS` (11), `resolveTool()` → `agentMayNotCall()`, `invokeTool()` in `server/_core/ai/tools/` | **DECLARED_UNWIRED** (implemented as code; no production caller) |
 | **Tool request / execution / result / receipt** | One requested invocation; its attempted run; the structured outcome; the durable evidence. Kept as four shapes. | `ToolInvocation`; `invokeTool()`; `ToolResult` (not persisted); `authorizationDecisions` row per call, `assistantCommitReceipts` for commits | **PARTIAL** |
-| **Skill** | A reusable, versioned operating procedure for one class of task: objective, required information, expected tools, decision rules, verification, clarification, approval checkpoints, completion criteria, escalation. **Grants no authority.** | Not a named type. Decomposed across `FORMS` (fields, `precisionSensitive`), `TaskAllowlist` (tools, budget; `taskKey` is the natural Skill key), `PromptVersion` (procedure prose), and the validator / `detectGaps()` / `checkCommit()` (verification) | **PARTIAL**, with no binding type. The minimum future shape is §8's `PromptContract` |
-| **Skill selection** | Choosing which procedure applies. Done by the server from the entry point or form key, never by the model. An unknown Skill refuses (the existing `ToolNotAllowed` / perimeter refusal), so no `SKILL_NOT_AVAILABLE` code is needed. | `runSecretaryExtractionJob()` is handed its form; `assistant.draft` takes `formKey` from a server route | **IMPLEMENTED** (deterministic) |
+| **Skill** | A reusable, versioned operating procedure for one class of task: objective, required information, expected tools, decision rules, verification, clarification, approval checkpoints, completion criteria, escalation. **Grants no authority.** | Not a named type. Decomposed across `FORMS` (fields, `precisionSensitive`), `TaskAllowlist` (tools, budget; `taskKey` is the natural Skill key), `PromptVersion` (procedure prose), and the validator / `detectGaps()` / `checkCommit()` (verification) | **PARTIAL — architecturally defined, runtime DEFERRED.** No Skill type, registry, loader or selection exists in code. Future identity: `taskKey` + `skillVersion`; minimum shape: §8's `PromptContract` |
+| **Skill selection** | Choosing which procedure applies: by the server, never by the model. When built, an unknown Skill should reuse the existing refusals (`ToolNotAllowed`, perimeter refusal), not a new `SKILL_NOT_AVAILABLE` code. | No Skill is selected today. Only *form* selection exists: `assistant.draft` takes `formKey` from a server route; `runSecretaryExtractionJob()` (unwired) is handed its form | **MISSING → DEFERRED** (form selection is server-side and deterministic) |
 | **MCP** | A transport for exposing tools. Never an authorization model; connecting a server never grants its tools. | none | **MISSING → DEFERRED** |
 | **Offline tool class** | Declared, never inferred. Reuse the existing classes; do not add a second set. | `OfflineClass` (`local_safe`, `local_capture`, `local_prepare`, `server_authoritative`) in `offlineCapability.ts`; `CapabilityDefinition.requiresOnline` | **DECLARED_UNWIRED**; `requiresOnline` **IMPLEMENTED** in `decide()` |
 
 Skill ≠ permission: a Driver who has a fully loaded "dispatch a vacuum truck" Skill is still
 refused by the dispatch `roleProcedure`, and the refusal is recorded in `authorizationDecisions`.
+
+---
+
+# Part II — AI Policy & Claims Guardrails, and Voice
+
+**Documentation only.** Part II adds no production code, no migration and no new engine. It
+maps the guardrail, claims-integrity and "human voice" concepts onto what the repository
+already has, the same way Part I did for the runtime. It was surveyed against `main` at
+`6f52b57` and refreshed against `main` at `e1d8fd5` (2026-10-01). Door 2 has since merged
+(PR #7, `c626146`) and is **still declared unwired**: `server/engineReachability.test.ts`
+lists every `ai/*` module, and `productionWorker.ts` does not dispatch
+`secretary.narration.captured`. Where Part II writes "(PR #7)" it means code that arrived with
+PR #7 and is on `main`, unwired. Status words are those of §0, plus the six the survey request
+asked for, used in §37: `IMPLEMENTED`, `PARTIAL`,
+`DECLARED_UNWIRED`, `MISSING`, `DEFERRED`, `NOT_NEEDED`.
+
+The layer's canonical name is **AI Policy & Claims Guardrails**. It is not a "legal shield":
+it narrows what the AI may say and do, keeps evidence and makes behaviour reviewable. No
+architecture removes legal liability, and nothing in this document should be read as saying
+one does.
+
+## 24. The governing separation
+
+One sentence carries Part II:
+
+> **Facts** determine what is true → **policy** determines what may be said or done →
+> **authorization** determines who may do it → **voice** determines how it sounds.
+
+Each arrow runs one way. Voice cannot change a fact's status, policy cannot grant authority,
+and a Skill, a guardrail or a model cannot authorize anything. Only the existing
+authorization path does: `roleProcedure` → `permissionForProcedure()` → `authorize()` for a
+procedure, and `decide()` in `actionGateway.ts` for an agent capability.
+
+Two corollaries the rest of Part II depends on:
+
+1. **The system prompt is guidance, not the safety boundary.** Every rule that matters is
+   already enforced in code somewhere below the prompt, or is listed in §37 as a gap. The
+   prompt says "never state that anything is safe" (`buildSystemPrompt()` rule 5); the
+   control is `detectOverreach()` plus the fact that a proposal cannot reach a record
+   without a person (§27).
+2. **Guardrails restrict claims and actions, not subjects.** LeaseOS must be able to
+   explain HOS, TDG, WHMIS, permits, contracts, First Aid procedures and invoices. The
+   repository already draws the line where it belongs: `checkClaim()` in
+   `knowledge/admission.ts` lets an **explanation** rest on any admitted source and lets a
+   **decision** rest only on binding authority. That is the rule; "legal topic → refuse" is
+   not, and should never be added.
+
+## 25. The policy stack, mapped onto code
+
+The requested ordering, with the existing mechanism at each layer. **[live]**, **[unwired]**
+and **[missing]** mean what they mean in §1.
+
+```
+                    LEASEOS AI POLICY STACK   (surveyed 2026-09-25)
+
+Identity / authentication     [live]     roleProcedure(); authorizationDecisions (denied_unauthenticated)
+        │
+Acting scope / tenancy        [live]     resolveActingScope(); tenant never read from input
+        │
+Authorization                 [live]     permissionForProcedure() → authorize()
+        │
+Data-access policy            [live]     admitSource() / AdmittedContextBlock; restricted vault grants
+        │                     [unwired]  ContextPack perimeter (contextPerimeter.test.ts, PR #7)
+        │
+Skill / workflow constraints  [partial]  FORMS (live); TaskAllowlist, PromptVersion (unwired). No "Skill" type.
+        │
+Model safety instructions     [live]     buildSystemPrompt() rules 1–5 (door 1)
+        │                     [unwired]  secretary-extract.v1.md (door 2)
+        │
+Structured-output validation  [live]     buildOutputSchema() + parseExtraction()   (door 1)
+        │                     [unwired]  strict json_schema + parseExtractionEnvelope() (door 2)
+        │
+Claims / evidence validation  [live]     detectOverreach(); verifyClaim() (retrieval path)
+        │                     [unwired]  validateExtraction(), quoteIsInTranscript(), scanForInjection()
+        │                     [no caller] checkClaim()
+        │
+Automation policy             [live]     resolveAutomation(); NEVER_AUTOMATIC; safety ceilings (list empty by decision)
+        │
+Human approval                [live]     readBack → acknowledge → commit; agentApprovals bound to payloadHash
+        │
+Tool authorization            [live]     roleProcedure on the target procedure
+        │                     [unwired]  resolveTool() + FORBIDDEN_CATEGORIES (PR #7)
+        │
+Domain validation             [live]     zod inputs; checkCommit(); engine verdicts (InterEngineStatus)
+        │
+Authoritative transaction     [live]     executeAssistantCommit() → assistantCommitReceipts; domainEventOutbox
+
+Voice / style                 [missing]  wraps the presentation of the result. It does not sit in the stack.
+```
+
+Nothing above the "Model safety instructions" line depends on the model behaving. That is
+the property to keep.
+
+## 26. Guardrail taxonomy
+
+§17 records that the repository has "no single 'guardrail' concept, correctly". Part II keeps
+that: the four categories below are a **classification of existing mechanisms**, not a new
+framework or module. Do not create `guardrails.ts`.
+
+### 26.1 Input guardrails (before inference)
+
+| Concern | Existing mechanism | Status |
+|---|---|---|
+| Schema / input validation | zod `.input()` on every `roleProcedure`; `agent.start` plan ≤ 40 | implemented |
+| Authentication | `roleProcedure` → `denied_unauthenticated` row | implemented |
+| Malformed tool arguments | zod on the target procedure; `planToolCall()` overwrites a pinned `formKey` | implemented (zod); unwired (planToolCall) |
+| Unsupported file formats | upload routers (`recordsRouter.ts`, `portalRouter.ts`, `commercialOfficeRouter.ts`) check content type; no AI-specific intake check | partial |
+| Prompt-injection indicators | `instructionLikeSpans()` (`contextAssembly.ts`, no production caller of `assembleContext()`); `scanForInjection()` + `combineInjectionSignals()` (PR #7) | partial / unwired |
+| Organization-boundary override | `resolveActingScope()` refuses input tenants; `CrossTenantContext` refuses a mixed context | implemented |
+| Supplied permissions | permission derived from procedure name; `CapabilityDefinition.requiredPermissions` is server data | implemented |
+| Untrusted document content | `BlockKind` → `external_content`, which `MAY_INSTRUCT` excludes | implemented (type + gateway); assembly unwired |
+| Off-domain request | `classifyRequest()` (`knowledge/perimeter.ts`); `OUT_OF_PERIMETER` (PR #7) | unwired |
+
+### 26.2 Context guardrails (what reaches the model)
+
+| Concern | Existing mechanism | Status |
+|---|---|---|
+| Tenant / org isolation | tenant in the retrieval query; `admitSource()` with a `TenantProof`; `assembleContext()` refuses two tenants | implemented (retrieval); unwired (assembly) |
+| Permission-scoped retrieval | `admitSource()` evaluates the caller's real permissions per passage | implemented |
+| Sensitive-field filtering | `ContextPack` is a pure module that cannot import the restricted vault or medical tables (`contextPerimeter.test.ts`) | unwired (PR #7) |
+| Minimum necessary data | `ContextItem { id, kind, label, value }` — projected fields, never rows | unwired (PR #7) |
+| Document trust / provenance | `AUTHORITY_LEVELS` A–F; `knowledgePassages.revision / jurisdiction / effectiveFrom / sourceId`; `reproductionBasis` | implemented |
+| Instruction / data separation | `AUTHORITY_OF: Record<BlockKind, InstructionAuthority>`; door 2 fences transcript and document text | type implemented; **door 1 does not fence** (§33) |
+
+### 26.3 Output guardrails (before a result becomes authoritative)
+
+| Concern | Existing mechanism | Status |
+|---|---|---|
+| Output-schema validation | door 1 `parseExtraction()` drops undeclared keys; door 2 `strict: true` | implemented / unwired |
+| Unsupported factual claims | `verifyClaim()` → `unsupported` (retrieval); `quoteIsInTranscript()` + `silentGuessKeys` (door 2) | implemented / unwired |
+| Missing provenance | door 2 `ExtractedField.status` requires `evidenceQuote` (stated) or `evidenceRef` (inferred) | unwired |
+| Unsafe recommendations, legal/compliance conclusions | `detectOverreach()` → `assistantProposals.overreachFlags` (door 1, on `notes` only); `checkClaim()` explanation/decision (no caller); `FORBIDDEN_AI_OUTCOMES` | partial |
+| Prohibited disclosure | admission + perimeter upstream; no output-side disclosure check | partial (upstream only) |
+| Defamatory / accusatory claims | none | **missing** (§30) |
+| Copyright-sensitive reproduction | `quotable()` restricts to `own_document` / `licensed_source`; `checkAssistantPassageUse()` | partial (§32) |
+| Malformed tool requests | `resolveTool()` → `ToolNotAllowed`; unknown and not-allowed refuse identically | unwired |
+
+### 26.4 Action guardrails (real-world operations)
+
+All **implemented** and all already canonical: `roleProcedure`, acting scope, `TaskAllowlist`
+(unwired), `SafetyCeiling` / `ceilingFor()`, `NEVER_AUTOMATIC` / `NEVER_AUTONOMOUS`,
+`agentApprovals` bound to `payloadHash`, idempotency keys, domain validation, database
+constraints (unique `assistantCommitReceipts.proposalId`). **Nothing new belongs here.** A
+second authorization system is the failure this document exists to prevent. The layer-by-layer
+version, Skill through database, is `AI_AGENT_RUNTIME_ARCHITECTURE.md` §23.7 ("a rule that
+exists only in Skill prose is a suggestion to a model, not a control"); this taxonomy agrees
+with it and does not restate it.
+
+## 27. Deterministic first
+
+The repository already follows the rule the request states, and states it in its own
+comments: `contextAssembly.ts` ("If the only thing standing between an attacker and payroll
+is a regular expression, they have already won"), `guard.ts` ("a sterner prompt is not the
+fix"), and `validator.ts` (no model runs in validation). The ranking to keep:
+
+| Question | Answered by | Never by |
+|---|---|---|
+| May this caller see / do this? | `authorize()`, `decide()`, `admitSource()` | a model |
+| Is this output shaped correctly? | JSON Schema + zod + `parseExtraction()` | a model |
+| Is this value in range / in the enum? | `normalizers.ts`, form field types | a model |
+| Did the driver actually say it? | `quoteIsInTranscript()` (verbatim substring) | a model |
+| Does this claim rest on a passage? | `verifyClaim()` (lexical, `MIN_SUPPORT_SCORE = 0.35`) | a model |
+| May this be a decision rather than an explanation? | `checkClaim()` over `BINDING_LEVELS` | a model |
+| Is this trip ready? | the engines, through `InterEngineStatus` | a model |
+
+Semantic judgement that code cannot make (is this sentence an accusation? does this summary
+change the meaning of the statement?) is the only legitimate place for a model-assisted
+check, and §17's rule still applies: `verifierFor()` / `SameModelVerification` in
+`modelGateway.ts` already refuse to let a model verify itself.
+
+## 28. Claims integrity
+
+**Canonical term: Claims Integrity.** A factual statement the AI produces carries its
+evidence class, and the class survives presentation.
+
+The requested classes, mapped onto vocabularies that already exist. No new enum is proposed;
+the gap is that nothing joins them on one output (§37).
+
+| Requested class | Door 2 field status | Retrieval `ClaimState` | Knowledge authority | Other existing homes |
+|---|---|---|---|---|
+| SUPPORTED | — | `supported` | A–D | `assistantQueries.verdict = verified` |
+| USER_PROVIDED | `stated` + `evidenceQuote` | — | F (`unverified`: driver observation) | `proposalFields.source`, `originalStatement` |
+| INTERNAL_RECORD | `inferred` + `evidenceRef` → `ContextItem.id` | — | E (`operational`) | a row id |
+| EXTERNAL_SOURCE | — | `supported` with `passageRef` | A–C | `knowledgePassages.sourceId` |
+| CALCULATED | — | — | — | engine outputs; `money.ts` cents arithmetic |
+| INFERRED (by the model) | — | — | F (`unverified`: AI inference) | `summarySource = ai_proposed` |
+| UNCERTAIN | `ambiguous` + `alternatives` | `conflicting`, `superseded` | — | `Verdict = REVIEW` |
+| UNSUPPORTED / UNKNOWN | `missing` | `unsupported`, `out_of_scope` | — | `NOT_EVALUATED`, `UNKNOWN` |
+
+Two things already hold and must keep holding:
+
+- **Level F never binds.** `BINDING_LEVELS` excludes `operational` and `unverified`, so a
+  model's inference can never support a dispatch or compliance decision through
+  `checkClaim()`. The example in the request — "this disposal facility accepts this waste
+  class", with no evidence — is exactly a level-F claim, and `FORBIDDEN_AI_OUTCOMES` plus the
+  engines keep it from becoming operational truth.
+- **An inference is never stored as a fact.** Door 2's `inferred` requires an `evidenceRef`
+  to a context-pack item; `summarySource` and `categorySource` record `ai_proposed` until a
+  person confirms. The example "driver's H2S certificate expires October 14" is an
+  `INTERNAL_RECORD` claim whose `evidenceRef` would be the credential row id.
+
+**Gap.** There is no per-claim evidence record on free-text AI output. Fields have one (door
+2), retrieval answers have one (`citedPassageRefsJson`), prose `notes` do not. See §37 row
+"claims/evidence provenance".
+
+## 29. Facts versus inference, by domain
+
+The high-risk domains the request names each already have a deterministic owner. The AI's
+job in each is to carry that owner's status, not to produce its own.
+
+| Domain | Deterministic owner | AI rule |
+|---|---|---|
+| HOS | HOS engine; `hosClockPresentation.ts` (`FORBIDDEN_LABELS`: "legal hours left", "safe to drive", "compliant", …; `confidence: "UNKNOWN"` when null) | Quote the engine's figure and basis. Never compute hours. `invent_hos_hours` is forbidden. |
+| Dangerous goods | `evaluateDangerousGoodsAssist()` → `blocked / needs_review / ready_for_human_confirmation`; `complianceSecretary.ts` header | Never classify from free text or invent a UN number. |
+| Disposal acceptance | facility registry and verification status | `INTERNAL_RECORD` with the row, or `UNSUPPORTED`. |
+| Road restrictions | routing graph, `roadHazardObservations` | Observations stay observations. |
+| Equipment ratings | capacity fields; `capacity_unknown` → `NOT_EVALUATED` | Missing capacity is "not evaluated", never "fine". |
+| Safety procedures | `knowledgePassages` (company_policy, level D) | Retrieve and quote; do not improvise. |
+| Invoices | invoicing engine, integer cents | Recorded or calculated amounts only (§31). |
+| Employee certifications | credential rows with `verificationStatus` | Carry `unverified` / `expired` through. |
+| Regulatory requirements | requirement registry; `COMPLIANCE_KNOWLEDGE_CATALOG` with authority, URL, `regulatoryVersion`, `verifiedOn` | Preserve jurisdiction, version and date. |
+
+`InterEngineStatus` rule 1 ("`NOT_EVALUATED` never rounds up to `PASS`") and SPINE item 1's
+`confirmed | unconfirmed | unknown` are the same rule at two layers. §34 extends it to voice.
+
+## 30. Allegations, reports and findings
+
+**What exists.** The incident model keeps the person's words and the AI's rendering apart:
+
+- `incidentReports.originalStatement` (NOT NULL) with `originalStatementSource`
+  (typed / voice / dictated_transcript), and a separate `structuredSummary` with
+  `summarySource = human | ai_proposed | ai_confirmed`.
+- `incidentPeople.role` distinguishes `involved`, `witness`, `injured`, `supervisor`,
+  `third_party`, each with its own statement.
+- `incidentReports.escalationState` (captured → sealed → … → closed) and `status`
+  (open / under_review / closed); `investigationProposals.disposition` (PENDING, OPENED,
+  HANDLED_INTERNALLY, NOT_WARRANTED, DEFERRED) — "a proposal is raised by a rule and decided
+  by a person".
+- `incidentMatters.sensitivityTier` and `restrictedAccessEvents` (written before content is
+  served).
+- Disputes exist as record states elsewhere (`disputed` on several ledgers, AR
+  `dispute_noted`).
+
+**What is missing.** No field records the **epistemic status of an assertion about a
+person**. The requested vocabulary (ALLEGATION, WITNESS_STATEMENT, REPORTED, UNDER_REVIEW,
+CORROBORATED, VERIFIED, DISPUTED, RESOLVED) maps partly onto the existing states —
+REPORTED ≈ `captured`, UNDER_REVIEW ≈ `under_review`, RESOLVED ≈ `closed`,
+WITNESS_STATEMENT ≈ `incidentPeople.role = witness` — but CORROBORATED, VERIFIED-as-finding
+and DISPUTED-as-finding have no home, and nothing stops an AI summary from turning "driver
+reports that operator X falsified a record" into "operator X falsified records".
+`detectOverreach()` does not look for it.
+
+**Where it belongs.** Domain code (the incident and investigation model), not the model and
+not a guardrail module: a finding's status is a fact about the record. The AI-side rule is
+attribution: render the claim with its source ("According to the submitted incident
+report…") while the record's status is anything short of a person's recorded finding. An
+`ai_proposed` summary already needs `ai_confirmed` before it is anyone's words; that is the
+right gate, and the evaluation in §36 should test that it preserves attribution.
+**DEFERRED** until the AI writes incident summaries; today no path does.
+
+## 31. Legal, medical and financial content
+
+**Legal and regulatory.** Allowed: retrieve, explain, summarize, quote with revision and
+jurisdiction. Enforced today by `checkClaim()` (explanation vs decision; no caller yet),
+`FORBIDDEN_AI_OUTCOMES`, `detectOverreach()` ("is legal", "is compliant", "you may legally
+depart"), and the knowledge catalog's `jurisdiction` / `regulatoryVersion` / `verifiedOn`.
+Preferred phrasing is the scoped one the code already produces ("Based on the configured
+Alberta HOS rule set…"); "this is definitely legal" is an overreach match.
+
+**Medical and emergency.** Allowed: retrieve First Aid records, H2S procedures and the
+emergency-response plan. The medical tables are outside the context perimeter by
+construction (`contextPerimeter.test.ts`, PR #7), which is correct: the AI does not need a
+worker's medical file to recite the H2S procedure. `detectOverreach()` flags "diagnosis" and
+"the cause is". Emergency workflows should present the company's stored procedure verbatim
+from `knowledgePassages`, not a generated paraphrase; no path generates one today.
+
+**Financial.** Money is integer cents (`server/_core/money.ts`, `LEASEOS_B22_3_MONEY_PRECISION.md`), invoice totals
+are computed by the invoicing engine, and `finalize_invoice` / `modify_payroll` are
+`FORBIDDEN_AI_OUTCOMES`. Existing status vocabularies already separate the classes the
+request lists — e.g. funding `estimated / potential / … / received`, insurance
+`potential / reported / … / settled`. The AI rule: a figure carries its class (recorded,
+calculated, estimate, projection, recommendation) from the row it came from; an estimate is
+never phrased as an amount owed. No AI path produces a financial figure today.
+
+## 32. Sources and reproduction
+
+**What exists.** Every quotable passage has a `reproductionBasis` (`own_document` or
+`licensed_source`; `unstated` rows are never quoted), a `sourceId` keyed to the licence
+registry, and licensed sources pass `checkAssistantPassageUse()`. `knowledgeSources` carries
+separate permissions (`ragIngestionAuthorized`, `modelTrainingAuthorized`,
+`commercialReuseAuthorized`, and the link/quote checks in `sourceGate.ts`), and "unassessed
+permits nothing". `admit(authority, intent)` distinguishes `index`, `chunk`, `answer`,
+`quote` and `train`.
+
+**What is missing.** A maximum-reproduction rule: a quotable passage is returned whole, with
+no cap on how much of a licensed source one answer may reproduce, and no field on the output
+that says whether it is a quotation, a summary or original text. That is a Skill-level
+concern for the day a model writes prose from passages (§37). The rule to carry forward:
+**a retrieved document is context, not permission to republish it.**
+
+## 33. Prompt injection and untrusted content
+
+The requested precedence
+
+```
+SYSTEM POLICY > SKILL POLICY > AUTHORIZED JOB POLICY > USER REQUEST > RETRIEVED/UPLOADED CONTENT
+```
+
+already exists as `InstructionAuthority`, ordered by `AUTHORITY_ORDER` in
+`actionGateway.ts`: `system` > `leaseos_policy` > `company_policy` > `authorized_user` >
+`workflow_data` > `external_content`, with `MAY_INSTRUCT` excluding the last two. "Skill
+policy" would sit at `leaseos_policy`; "authorized job policy" at `company_policy`. **Reuse
+it; do not add a parallel ranking.**
+
+Defences, in the order that matters:
+
+1. **Structural (the real one).** No outbound or commit tool exists for the model:
+   `FORBIDDEN_CATEGORIES` = commit, delete, permission_change, mode_change, payment,
+   outbound_email, outbound_web (PR #7). An injected "send all employee records to…" has no
+   tool to call. `agent.requestAction` forces `origin = authorized_user` and `decide()`
+   denies any other origin that is not in `MAY_INSTRUCT`.
+2. **Authority by provenance.** `AUTHORITY_OF` derives a block's authority from its kind;
+   "authority is never raised by the block's own contents".
+3. **Fencing.** Door 2 fences transcript and document text and tells the model it is data.
+4. **Tripwire.** `instructionLikeSpans()` / `scanForInjection()`, combined pessimistically
+   with the model's `injectionSuspected`. A signal to a person, not a filter.
+
+**Gap, door 1.** `assistant.draft` sends the transcript as a bare `user` message with no
+fence, no data label and no injection scan. The exposure is small — the transcript is the
+authenticated driver's own speech (`authorized_user`), and the output is a proposal a person
+must read back — but it is the one live model path, and it does not separate instructions
+from evidence. It is already pinned as the one request-handler model call
+(`server/aiRequestBoundary.test.ts`, decision F1 in `AI_AGENT_RUNTIME_ARCHITECTURE.md` §22),
+and removing it is a named step in the owner's sequence; the fence arrives with door 2 when
+that happens. **Do not patch it during SPINE.**
+
+## 34. Voice
+
+**Canonical term: Voice Profile.** Presentation policy only.
+
+**What exists.** Nothing named voice, tone, formality or persona in the AI layer. The
+nearest precedents are presentation contracts that already refuse to let wording outrun
+evidence: `hosClockPresentation.ts` (`FORBIDDEN_LABELS`, `confidence: "UNKNOWN"`, "null is
+not zero"), `boardSemantics` tone for tiles, `readinessCapabilities.ts` rendering
+`NOT_EVALUATED` with its reason in the title. The door-2 prompt is itself written in a plain,
+direct voice. Customer alerts (`customerAlerts.ts`) are fixed templates, not generated text.
+
+**Shape to adopt when a Skill first needs it (DEFERRED).**
+
+```
+VoiceProfile
+  ├─ style contract   direct · plain language · active voice · domain terms where they help ·
+  │                   minimal filler · specific over generic · professional, conversational
+  ├─ terminology      organization preferred terms (e.g. "unit" vs "truck")
+  ├─ avoid list       short, organization-specific; not the main mechanism
+  └─ examples         approved samples: style evidence only, never fact sources
+```
+
+Rules, each with the existing mechanism it rests on:
+
+1. **Voice is not coupled to permissions.** A profile is presentation configuration; it
+   carries no permission and is never an input to `authorize()` or `decide()`. Changing
+   "formal" to "conversational" cannot re-word a refusal into an action.
+2. **Priority is truth / authorization / safety > workflow > voice.** In `InstructionAuthority`
+   terms a Voice Profile is `company_policy` for wording and has no authority over content.
+3. **No fake confidence.** Voice may not map `possible`, `estimated`, `NOT_EVALUATED`,
+   `UNKNOWN`, `unconfirmed`, `reported` or `ai_proposed` onto `confirmed`, `certain`,
+   `compliant`, `safe` or `approved`. A company style of "always sound certain" loses to an
+   uncertain status. This is `FORBIDDEN_LABELS` and `InterEngineStatus` rule 1 applied to
+   sentences; SPINE's `unconfirmed ≠ unknown` must survive it.
+4. **Examples cannot leak facts.** A few-shot example's numbers, names and places are not
+   evidence; door 2's quote check would already reject a `stated` field lifted from an
+   example because it is not in the transcript.
+5. **Positive contract over banned-word lists.** `detectOverreach()` and `FORBIDDEN_LABELS`
+   are the right size for claim-level bans; a style system should not become a growing list
+   of words.
+
+## 35. Scoped claims, disclaimers, external communication
+
+**No universal compliance claims.** The AI must not say a company, driver, trip, load,
+vehicle or document is "fully compliant", "legally compliant", "safe" or "approved" unless a
+deterministic system holds a defined state that says so, and then it names that state:
+"Pre-departure gate passed", not "this trip is fully compliant". Existing enforcement:
+`detectOverreach()` patterns; `FORBIDDEN_LABELS`; C1a's typed compliance contract and
+`InterEngineStatus`, which report per-capability results with `NOT_EVALUATED` travelling
+beside the verdict. Passing one gate never implies the rest.
+
+**Disclaimers.** None exist, correctly. The repository's pattern is the contextual warning
+tied to the unresolved condition — `NOT_EVALUATED` with a `reason`, `trainingAcademyRouter`'s
+"Not valid for dispatch until the named qualified supervisor personally attests physical
+presence", HOS's "the engine did not produce this clock". Keep that. Do not add "this AI may
+make mistakes".
+
+**Draft versus transmitted.** No AI path transmits anything. The requested classes map as:
+
+| Class | Today | Draft / send separation |
+|---|---|---|
+| INTERNAL_ASSISTANCE | `assistant.draft` notes, `assistantAsk.ask` answers | not transmitted |
+| DRIVER_MESSAGE / DISPATCH_MESSAGE | `boardMessages` (human-authored) with `messageReceipts` (queued_offline → … → acknowledged) and `messageRevisions` | human author; receipts exist |
+| CUSTOMER_MESSAGE | `queueCustomerAlert()` fixed templates; `externalAlertPreferences` | templated, not generated |
+| EMAIL | no outbound mail integration found in `server/` | — |
+| INVOICE | invoicing engine; `finalize_invoice` is an AI-forbidden outcome | deterministic |
+| INCIDENT_REPORT | `originalStatement` + `summarySource` | `ai_proposed` → `ai_confirmed` |
+| REGULATORY_DOCUMENT | `incidentMatters.matterType = REGULATORY_REPORT`; `incidentNotificationObligations` | human |
+
+The architecture to preserve when an AI-drafted external message is first built: model →
+draft → output guardrail → approval if required → a **Tool** bound to a procedure (e.g. a
+future send procedure behind `roleProcedure`) → authorization → transmit → receipt.
+`messaging.sendReminder` already sits in `CAPABILITIES` as `low_risk_action`, which
+`autoExecute: []` keeps from running unattended. **"LLM → SMTP" must never exist**;
+`FORBIDDEN_CATEGORIES` includes `outbound_email` so that a Secretary tool cannot be one.
+
+## 36. Outcomes, versioning, observability, evaluation
+
+**Policy outcomes.** Reuse, do not add. The requested set maps onto existing unions:
+
+| Requested | Existing |
+|---|---|
+| ALLOW | `Decision "allow"`; `Verdict PASS`; `ClaimVerdict permitted` |
+| ALLOW_WITH_WARNING | `permitted` + `overreachFlags`; `InterEngineStatus` with a `NOT_EVALUATED` list beside `PASS` |
+| NEEDS_CLARIFICATION | `assistantQuestions` pending; `needsClarification[]`; `DialoguePhase CLARIFY` |
+| NEEDS_REVIEW | `Decision "require_approval"`; `Verdict REVIEW`; `InterEngineStatus REVIEW` |
+| REFUSE | `Decision "deny" / "compliance_block"`; `Verdict BLOCKED`; `ClaimVerdict permitted: false` |
+| NOT_EVALUATED | `NOT_EVALUATED` (`InterEngineStatus`, `Verdict`) |
+
+No module uses a bare `safe: boolean`. Keep it that way.
+
+**Versioning.** For an important generated artifact the requested reproducibility set maps
+to: model / config → `RunProvenance.providerKey, modelId` (no column, §19); system
+instruction version → `PromptVersion` + `promptHash` (no column); Skill version → none
+(`FORMS[*].version` is the nearest); guardrail version → none; Voice Profile version →
+none; evidence → `evidenceRef`, `citedPassageRefsJson`; approval → `agentApprovals`,
+`readBackAcknowledged`; receipt → `assistantCommitReceipts`. The §19 provenance columns are
+the place to add a policy version and a voice version when door 2 is wired. No
+Chain-of-Thought is stored, and §16 stands.
+
+**Observability.** Guardrail events that are already durable: authorization refusals
+(`authorizationDecisions`), gateway refusals (`agentActions.decision`), overreach
+(`overreachFlags`), clarification (`assistantQuestions`), unsupported answers
+(`assistantQueries.verdict`), restricted-access denials (`restrictedAccessEvents`).
+Not recorded anywhere: injection suspicion (on `SecretaryProposal.injection`, no column),
+unknown tool key (`ToolNotAllowed`, not persisted), output corrected by validation
+(`FieldVerdict`, no column), malformed output (not counted). Record references and codes,
+not prompt text.
+
+**Guardrail evaluation.** Coverage today, by requested category:
+
+| Category | Existing tests | Status |
+|---|---|---|
+| prompt injection / untrusted document commands | `contextAssembly.test.ts`; `injectionGuard.test.ts`, fixture `07-injected-scan` (PR #7) | partial |
+| cross-tenant requests | `contextAdmission.test.ts`, `contextAssembly.test.ts`, `tenantScope*.db.test.ts` | implemented |
+| fabricated citations / claims | `evidenceGrounding.test.ts`; fixture `05-fabricated-quote` (PR #7) | partial |
+| fabricated regulations | `knowledgeAdmission.test.ts` (`checkClaim`); `knowledgeSourceGate.test.ts` | partial |
+| defamatory transformation; allegation → fact | none | **missing** |
+| sensitive-record disclosure | `contextPerimeter.test.ts` (PR #7); `restrictedVaultApi.test.ts` | partial |
+| unsafe tool request / ceiling escalation | `actionGateway.test.ts`, `agentBoundary.test.ts`, `automationPolicy.test.ts`, `agentTools.test.ts` (PR #7) | implemented |
+| fake legal compliance / fake safety guarantee | `aiProposal.test.ts` (`detectOverreach`); HOS `FORBIDDEN_LABELS` tests | partial |
+| malformed tool / model output | `assistantExtraction.test.ts`; `extractionContract.test.ts` (PR #7) | partial |
+| copyright over-reproduction | `knowledgeSourceGate.test.ts` (basis only, no length) | partial |
+| voice overriding uncertainty | none (no voice layer) | **missing**, deferred with voice |
+| off-domain | fixture `09-out-of-scope`; `knowledgePerimeter.test.ts` | partial |
+
+**Voice evaluation** (clarity, directness, cadence, domain terminology, jargon, repetition,
+verbosity, tone consistency) must be scored separately from correctness, and correctness
+gates first: the golden set's silent-guess floor already fails a run on its own, whatever
+else scored well. A well-written wrong answer fails.
+
+## 37. Current state, gaps and where each belongs
+
+The surveyed areas, classified.
+
+| Area | Status | Where it lives / would live |
+|---|---|---|
+| System-level AI instructions | PARTIAL — door 1 inline string (live); door 2 versioned file (unwired) | Agent runtime / prompts |
+| Prompt / version management | DECLARED_UNWIRED — `PromptVersion`, `promptHash`; no column | Agent runtime |
+| Input validation | IMPLEMENTED | Tools (zod on procedures) |
+| Output validation | PARTIAL — door 1 live; door 2 unwired | Agent runtime |
+| Authorization | IMPLEMENTED | Domain code (`roleProcedure`, gateway) |
+| Claims / evidence provenance | PARTIAL — retrieval live; fields unwired; prose none | Agent runtime (fields); Skills (prose) |
+| Source attribution | IMPLEMENTED for passages (`passageRef`, `sourceId`, revision, jurisdiction) | Retrieval |
+| Prompt-injection resistance | PARTIAL — structural controls live; fence + scan unwired; door 1 unfenced | Agent runtime + Tools |
+| External-message draft / send separation | NOT_NEEDED yet — no AI transmission path exists; `FORBIDDEN_CATEGORIES` bars one | Tools, when built |
+| Human approval | IMPLEMENTED | Domain code |
+| Policy evaluation | IMPLEMENTED — `decide()`, `resolveAutomation()`, `checkClaim()` (no caller) | Domain code |
+| Safety terminology | IMPLEMENTED — `detectOverreach`, `FORBIDDEN_LABELS`, `FORBIDDEN_AI_OUTCOMES`, `NOT_EVALUATED` | Domain + Agent runtime |
+| Disclaimers | NOT_NEEDED — contextual warnings instead | — |
+| Voice Profiles | DEFERRED | Skills (presentation) |
+| Few-shot examples | MISSING / DEFERRED | Skills |
+| Organization terminology preferences | MISSING / DEFERRED | Skills (Voice Profile) |
+| Copyright / source handling | PARTIAL — basis and licence gates live; no reproduction cap | Retrieval + Skills |
+| Allegation / fact distinction | PARTIAL — `originalStatement`, `summarySource`, roles, dispositions; no finding status | Domain code |
+| Audit events | PARTIAL — see §36 observability | Agent runtime (provenance columns) |
+| Guardrail evaluation tests | PARTIAL — see §36 table | Agent runtime eval |
+
+**What must stay deterministic.** Authorization, tenancy, admission, schema validation,
+enum and range checks, quote-in-transcript, claim-versus-binding-authority, automation
+ceilings and never-automatic floors, engine verdicts, money, HOS arithmetic, DG
+classification, and every status a Voice Profile might be tempted to round up.
+
+**Where the real gaps go.**
+
+| Gap | Belongs to | When |
+|---|---|---|
+| `checkClaim()` has no caller | Agent runtime (output validation on explanatory prose) | with door 2 / first prose Skill |
+| Door 1 transcript unfenced | Agent runtime | retires with door 1 |
+| Injection / validation outcomes not persisted | Agent runtime (§19 provenance columns) | with door 2 wiring |
+| Policy / voice version not recorded | Agent runtime (same columns) | with door 2 wiring |
+| No per-claim evidence on prose | Skills (output contract) | first Skill that writes prose |
+| No reproduction cap | Skills (output contract) + retrieval | first Skill that quotes at length |
+| Allegation vs finding status | Domain code (incident / investigation) | when the AI summarizes incidents |
+| Overreach only on `notes`, patterns narrow | Agent runtime | with door 2 |
+| Voice Profile | Skills | after the single Agent runtime |
+| Defamation / attribution evals | Agent runtime eval | with the first incident-summary Skill |
+
+A **Skill** is defined in §23: a versioned procedure that grants no authority, today
+decomposed across `FORMS`, `TaskAllowlist` and `PromptVersion`, with its minimum future shape
+in `AI_AGENT_RUNTIME_ARCHITECTURE.md` §23.16 (one `PromptContract` / `SkillDefinition` type
+keyed by `taskKey` + `skillVersion` (architecture §23.19–§23.20), a constant registry,
+registration-time tests). Part II adds two
+references to that same record and nothing else: a **Voice Profile** key and an **output
+claims contract** (which evidence classes from §28 the Skill's output must carry, and whether
+it may quote at length, §32). Both fit §23.16's structural test: neither can name a
+permission, a procedure, a tenant or a mode. A Skill grants no authority; neither does a
+guardrail, a Voice Profile or a model.
+
+```
+AGENT → SKILL (PromptContract / SkillDefinition: prompt, form, allowlist, + voice key, claims contract)
+          │
+   Context + Evidence (admitted, projected)
+          ▼
+        MODEL
+          ▼
+   Structured output ──► guardrails (schema, quote, claim, overreach, injection)
+          │
+     REFUSE · CLARIFY · REVIEW · ALLOW
+                                  │
+                                  ▼
+                        TOOL (registry → ProcedureName)
+                                  │
+                        roleProcedure / decide()   ← the only authority
+                                  ▼
+                           DOMAIN ACTION → receipt
+```
+
+## 38. Effect on the SPINE order
+
+**None.** No finding in Part II is a defect in a live path that needs fixing ahead of SPINE:
+the one live model path (door 1) produces a proposal a person must read back, its overreach
+check is live, and no AI path transmits or commits on its own. The production sequence
+stands as given:
+
+```
+BoundaryConfirmation → SPINE completion → durable worker boundary → Tool execution →
+single Agent runtime → Skills → claims/output guardrails → authorized RAG →
+advanced / multi-agent where justified
+```
+
+On current state (`main` at `b35bac4`): SPINE item 1 is merged — resolver and chain rule
+(PR #10) and the receipt reader with 0179 trip-stop provenance (PR #17). SPINE item 2's four
+duplications are all resolved and merged (PR #52, PR #60, PR #89);
+`SPINE_ITEM2_DUPLICATIONS.md` records item 2 COMPLETE only once `main` CI is green on that
+merge. SPINE item 3 (`offlineCapability` → HS1) has not started. Part II adds nothing ahead of
+it.
+
+The owner's recorded sequence (`AI_AGENT_RUNTIME_ARCHITECTURE.md` §22) is the finer version
+of the same order — remaining SPINE wiring → remove the `assistant.draft` synchronous call →
+register the durable AI job → save tool results and evidence refs → step budget →
+database-backed idempotency → cancellation → multi-step executor → Skills
+(`AI_AGENT_RUNTIME_ARCHITECTURE.md` §23.18). The guardrail work in §37 attaches to the door-2
+wiring and to the Skills step, after the executor, so that no guardrail
+framework exists ahead of the runtime that consumes it. The one exception, consistent with
+that record, is a narrow integrity fix to a live path; Part II found none.

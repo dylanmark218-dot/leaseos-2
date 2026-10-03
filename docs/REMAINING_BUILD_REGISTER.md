@@ -333,3 +333,16 @@ Three things it deliberately does not do: redesign the UNKNOWN/silent-check beha
 tested), adopt an external router as the authority (finding a path is not permission to drive it),
 or import anything (M2).
 
+
+### Calendar tripwire: the year-end fixture batch comes due 2026-12-10 (open, 2026-10-03)
+
+`server/calendarFixtures.test.ts` fails the gate 21 days before an unreviewed fixture date that a
+clock-reading test file holds. CI-0.2 (`docs/compliance/checkpoints/CI_0_2_CALENDAR_TRIPWIRE_OCTOBER.md`)
+reviewed every file due before December, and the tripwire was projected green through 2026-12-09.
+**From 2026-12-10 it fails**: `commercialLifecycle`, `commercialProjects` (new date 2026-12-31),
+`tenantScopeProjectFinance.db` and `termsComplete` first, then about nine files on 2027-01-01. The
+review needs to land before then, with the same method: `scripts/clock-sweep.sh` with `FRESH=1` over
+each file. A date the sweep shows is genuinely judged against now is made clock-relative in the test,
+not recorded as reviewed. Re-run the tripwire under `scripts/clock-sweep/vitest.config.ts` with
+`CLOCK_SWEEP_AT` set to project the next date, since the batch may have moved by the time this is
+picked up.

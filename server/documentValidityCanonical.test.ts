@@ -100,9 +100,13 @@ describe("census", () => {
       const visit = (n: ts.Node): void => {
         if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier)) {
           const from = n.moduleSpecifier.text;
-          expect(ENGINES, `${f} imports the validity engine ${from}`).not.toContain(from);
           const names = n.importClause?.namedBindings && ts.isNamedImports(n.importClause.namedBindings)
             ? n.importClause.namedBindings.elements.map(e => (e.propertyName ?? e.name).text) : [];
+          // No exception. The open-shift rule once judged the legacy licence date here with `readExpiry`
+          // (#117 allowed it); that date is an unverified claim, so the licence now arrives as a standing
+          // from `licenceReads` over the canonical `driverLicenceVerdict`, and nothing in open work
+          // imports a validity engine — for a qualification or a licence.
+          expect(ENGINES, `${f} imports the validity engine ${from}`).not.toContain(from);
           if (from.endsWith("drizzle/schema")) {
             for (const t of STORES) expect(names, `${f} reads ${t} directly`).not.toContain(t);
           }

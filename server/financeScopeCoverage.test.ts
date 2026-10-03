@@ -19,6 +19,7 @@
  * What this cannot see: a handler that reads `ctx.money` and then also queries a row without it. The
  * refusal suite (`tenantScopeFinance.db.test.ts`) is the behavioural half of this net.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 
@@ -26,8 +27,12 @@ type ZodLike = { shape?: Record<string, unknown>; _def?: { innerType?: ZodLike; 
 type Proc = { _def: { meta?: { moneyScoped?: true }; inputs?: ZodLike[]; resolver?: unknown } };
 const procs = (appRouter as unknown as { _def: { procedures: Record<string, Proc> } })._def.procedures;
 
-/** The ten F1 routers as mounted (CCA lives under `asset`), plus insurance (F1.1), plus projects (P0-A3). */
-const MONEY_NAMESPACES = ["bank", "ar", "period", "gst", "roadside", "purchasing", "vendor", "recovery", "invoicing", "asset", "fuel", "ifta", "commercial", "portalAdmin", "audit", "insurance", "project"];
+/**
+ * The ten F1 routers as mounted (CCA lives under `asset`), plus insurance (F1.1), plus projects (P0-A3),
+ * plus payroll and contractor settlement (payroll P0, D2) compensation agreements (payroll P1) and pay schedules (payroll P2): every procedure in those two namespaces carries
+ * `ctx.money` and proves each named record with the 0146 helpers. `finance` keeps the in-handler convention.
+ */
+const MONEY_NAMESPACES = ["bank", "ar", "period", "gst", "roadside", "purchasing", "vendor", "recovery", "invoicing", "asset", "fuel", "ifta", "commercial", "portalAdmin", "audit", "insurance", "project", "payroll", "contractors", "payrollCompensation", "payrollSchedule"];
 /**
  * Keys that name a money record wherever they appear. Generic names that other domains reuse for
  * something else (`deviceRef` is also a field device, `policyRef` a comms policy, `claimRef` a funding
@@ -108,10 +113,14 @@ const source = (p: Proc) => String(p._def.resolver);
 describe("F1 / F1.1 — every money procedure is money-scoped, structurally", () => {
   const money = Object.entries(procs).filter(([k]) => MONEY_NAMESPACES.includes(k.split(".")[0]!));
 
-  it("finds the procedures it is guarding: 72 in the ten F1 routers, 12 in insurance and 9 in projects", () => {
+  it("finds the procedures it is guarding: 72 in the ten F1 routers, 12 in insurance, 9 in projects, 25 in payroll, 3 in contractors, 11 in compensation and 12 in schedules", () => {
     expect(money.filter(([k]) => k.startsWith("insurance.")).length).toBe(12);
     expect(money.filter(([k]) => k.startsWith("project.")).length).toBe(9);
-    expect(money.length).toBe(93);
+    expect(money.filter(([k]) => k.startsWith("payroll.")).length).toBe(25);   // payroll P0: 22 + runCollect, runSubmit, earningApprove
+    expect(money.filter(([k]) => k.startsWith("contractors.")).length).toBe(3);
+    expect(money.filter(([k]) => k.startsWith("payrollCompensation.")).length).toBe(11);   // payroll P1 (0226)
+    expect(money.filter(([k]) => k.startsWith("payrollSchedule.")).length).toBe(12);   // payroll P2 (0227)
+    expect(money.length).toBe(144);
   });
 
   it("marks every one of them moneyScoped", () => {
@@ -161,9 +170,18 @@ describe("F1.2 — every compliance procedure is classified, and the ones that n
   it("proves the subject, or the book, in every procedure classified that way", () => {
     for (const [name, cls] of Object.entries(COMPLIANCE)) {
       const src = source(procs[`compliance.${name}`]!);
-      if (cls === "subject_scoped") expect(src.includes("requireSubjectInScope"), name).toBe(true);
+      // A procedure proves its subject itself, or decides through the one verification service, which does
+      // (pinned by the next test, so delegating to it can never be delegating to nothing).
+      if (cls === "subject_scoped") expect(src.includes("requireSubjectInScope") || src.includes("decideComplianceCredential"), name).toBe(true);
       if (cls === "book_scoped") expect(SELF_SCOPED.test(src), name).toBe(true);
     }
+  });
+
+  it("the verification service a procedure may delegate to proves the subject before it decides anything", () => {
+    const svc = readFileSync("server/credentialVerificationService.ts", "utf8");
+    const body = svc.slice(svc.indexOf("export async function decideComplianceCredential"));
+    expect(body.indexOf("await requireSubjectInScope(")).toBeGreaterThan(-1);
+    expect(body.indexOf("await requireSubjectInScope(")).toBeLessThan(body.indexOf("tx.update(complianceDocuments)"));
   });
 
   it("reads no table in the pure evaluators", () => {

@@ -91,6 +91,9 @@ export const HUMAN_AUTHORIZATION_PERMISSIONS: readonly string[] = [
   "maintenance.record_release",   // mechanic release (return to service) and resolving the defects it names
   "maintenance.revoke_release",   // withdrawing a return to service
   "enforcement.release",          // clearing an out-of-service order
+  // 0221 — CP2 adds its permissions here in the same change, as CP1.5 required:
+  "maintenance.return_to_service.record",   // the second person's return to service, lifting a defect's hold
+  "maintenance.defect.triage",              // deciding severity — lowering a critical defect frees its safety hold
 ];
 
 export class CapabilityUnknown extends Error {}
