@@ -399,7 +399,7 @@ every slot in use, so it moved to `0228`. The migration creates only new tables 
 
 | Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
 |---|---|---|---|---|---|---|---|
-| 0237 | `0237_safety_program_event_chain_unique.sql` | `claude/safety-compliance-program-builder-2qnty0` | follow-up to #99 | `60de8c2` (main merged in) | gated | none | keeps 0237 |
+| 0237 | `0237_safety_program_event_chain_unique.sql` | `claude/safety-compliance-program-builder-2qnty0` | follow-up to #99 | `beafeeb` (main merged in) | gated | none | keeps 0237 |
 
 A follow-up to #99, which merged with `0228`. It adds a UNIQUE index to `safetyProgramEvents.previousHash` so the
 hash chain cannot fork under concurrent writes. It is a new file rather than an edit to `0228` because the
@@ -407,10 +407,26 @@ migration ledger refuses a changed, already-applied file. Drafted as `0233` (abo
 `claude/integration-hub-subsystem-6nzrkw`), then `0236` when `0233` became a three-way collision
 (`claude/external-source-registry`, `claude/leaseos-billing-invoicing-ar`; recorded in main's SPINE
 reconciliation) and `0234`–`0235` were held by `claude/payroll-p4-expenses-reimbursements`. While the PR's gate
-ran, `0236` was claimed by `claude/marketplace-main-reconcile` and `security/driver-portfolio-hardening`, so at the
+ran, `0236` was claimed by `claude/marketplace-main-reconcile` and `security/driver-portfolio-hardening` (which then
+merged it to `main` as #135), so at the
 final scan of main and all 141 remote branches it takes `0237`, the first slot above every slot in use. It was
-not merged or applied anywhere under either earlier number. This branch claims neither `0233` nor `0236`.
+not merged or applied anywhere under either earlier number. This branch claims neither `0233` nor `0236`. It
+takes the number main's register named as next free after #135. **Next free number after this: `0238`** (re-check
+with the scan before committing).
 
 ## Change log (continued)
 
 * **2026-10-01 (SA1 merge)**: Sign & Attest `0214`–`0216` recorded against `main` `ce27fec`; next free `0220`.
+
+## State at the Driver Portfolio security hardening (2026-10-03, `main` = `60de8c2`)
+
+`main` migration head: **`0228_safety_program_builder.sql`**. The security-hardening branch
+(`security/driver-portfolio-hardening`, PR #135) takes **`0236_compliance_document_recorder.sql`** — one
+nullable column, `complianceDocuments.recordedByUserId`, no back-fill (NULL = recorder unknown). Drafted as
+`0229`; the scan across all 144 remote branches found `0229` claimed by
+`claude/integration-hub-subsystem-6nzrkw` and `0230`–`0235` by other open branches, so it moved to `0236`
+before it was ever applied on main. The ledger runner applies it by name.
+
+**Next free number after this: `0237`** (re-check with the scan before committing).
+
+* **2026-10-03 (Driver Portfolio hardening)**: drafted `0229`, renumbered to `0236` on merging `main` `60de8c2` (0229–0235 claimed by open branches); next free `0237`.

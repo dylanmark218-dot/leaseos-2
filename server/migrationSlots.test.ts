@@ -73,12 +73,17 @@ describe("the real tree", () => {
     // the first slot free on main and on all 131 remote branches at the scan.
     expect(files).toContain("0228_safety_program_builder.sql");
     expect(files.filter(f => f.startsWith("0182_"))).toEqual([]);
-    // Its follow-up, the event-chain uniqueness guard, took 0237. Drafted as 0233, then 0236; other branches claimed
-    // each before it merged (0233: external-source-registry, billing-invoicing-ar; 0234–0235: payroll P4; 0236:
-    // marketplace-main-reconcile, security/driver-portfolio-hardening), so it moved above them. It is a new file
-    // because the ledger refuses an edited 0228.
+    // Driver Portfolio security hardening took 0236 (compliance document recorder). Drafted as 0229; on
+    // merging main, 0229 was claimed by the integration hub and 0230–0235 by other open branches, so it
+    // moved to 0236, the first slot free on main and on all 144 remote branches at the scan.
+    expect(files).toContain("0236_compliance_document_recorder.sql");
+    // The Safety Program Builder's follow-up, the event-chain uniqueness guard, took 0237. Drafted as 0233, then 0236;
+    // other branches claimed each before it merged (0233: external-source-registry, billing-invoicing-ar; 0234–0235:
+    // payroll P4; 0236: marketplace-main-reconcile and the driver portfolio hardening above, which merged it), so it
+    // moved above them. It is a new file because the ledger refuses an edited 0228.
     expect(files).toContain("0237_safety_program_event_chain_unique.sql");
-    expect(files.filter(f => f.startsWith("0233_") || f.startsWith("0236_"))).toEqual([]);
+    expect(files.filter(f => f.startsWith("0233_"))).toEqual([]);
+    expect(files).not.toContain("0236_safety_program_event_chain_unique.sql");
     expect(headSlot(files)).toBe("0237");
   });
 

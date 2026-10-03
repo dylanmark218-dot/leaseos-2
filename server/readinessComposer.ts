@@ -51,6 +51,7 @@ import { MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch } from "./_core/co
 import { complianceRequirementValidity, driverLicenceVerdict } from "./_core/complianceDocumentValidity";
 import { trainingDispatchDecision } from "./_core/trainingAcademy";
 import { bindingApplies, evaluateDriverReadiness, requirementFromBinding, type BindingFacts, type DriverReadiness, type DriverRequirement } from "./_core/driverPortfolio";
+import { equipmentAuthorizationsInOrg } from "./driverPortfolioService";
 import { listRoleNamesAnyScope } from "./db";
 import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
 import { enforcementReadiness, type OosOrder, type OosScope } from "./_core/enforcement";
@@ -602,8 +603,10 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   const coveredByBase = (r: DriverRequirement) => r.kind === "credential" && (r.code === "driver_licence" || (dangerousGoods && r.code === "tdg_certificate"));
   if (driverRequirements.some(coveredByBase)) contributions.push({ engine: "portfolio", finding: "Licence/TDG bindings are evaluated by the base gate, not twice" });
   driverRequirements = driverRequirements.filter(r => !coveredByBase(r));
+  // Only the work's organization's authorizations count: one held from another employer's book never
+  // satisfies this organization's equipment requirement (equipmentAuthorizationsInOrg fails closed).
   const equipmentRows = op.userId && driverRequirements.some(r => r.kind === "equipment")
-    ? await db.select().from(operatorEquipmentAuthorizations).where(eq(operatorEquipmentAuthorizations.userId, op.userId))
+    ? await equipmentAuthorizationsInOrg(db, [op.userId], driverFacts.orgRef)
     : [];
   if (!op.userId && driverRequirements.some(r => r.kind === "equipment" && r.enforcement === "mandatory")) {
     // Authorizations are held by the user; without the link there is nothing to read. Unknown, not "not authorized".
