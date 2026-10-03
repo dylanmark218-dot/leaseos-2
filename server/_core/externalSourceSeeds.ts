@@ -39,6 +39,8 @@ const OGL_ONTARIO_ATTRIBUTION =
  * retrieval date is quietly moved to cover the other.
  */
 export const TRANSPORT_RETRIEVAL_DATE = new Date("2026-09-24T00:00:00Z");
+/** When the facility directory's regulator layers and their licences were researched (0143). */
+export const FACILITY_LAYER_RETRIEVAL_DATE = new Date("2026-09-17T00:00:00Z");
 
 /**
  * Sources whose licence, attribution, commercial-use and redistribution terms
@@ -692,6 +694,56 @@ export const UNVERIFIED_DATA_SOURCES: readonly ExternalDataSource[] = [
     rateLimitWindowSeconds: null,
     updateIntervalHours: null,
     retrievedAt: TRANSPORT_RETRIEVAL_DATE,
+    verifiedAt: null,
+    status: "unverified",
+  },
+  {
+    /*
+     * The facility directory's ArcGIS layers (0143), registered so the approved-source registry
+     * (0233) can govern the importer that reads them. The licence is named so a reviewer knows what
+     * to read; everything a reviewer must confirm stays as every unverified seed keeps it — commercial
+     * use and redistribution unknown, no attribution text — until a person clears it here with
+     * `geo.sourceReview`. The facility licence register (`facilitySourceLicences`, 0143) already
+     * records the grant ("including for commercial purposes", retrieved 2026-09-17), and the
+     * importer's own licence gate reads that register, unchanged.
+     */
+    sourceKey: "sk_petroleum_gis",
+    displayName: "Saskatchewan Petroleum GIS — Facilities layer",
+    authority: "Government of Saskatchewan — Ministry of Energy and Resources",
+    category: "oilfield_assets",
+    jurisdiction: "CA-SK",
+    licenceName: "Government of Saskatchewan Standard Unrestricted Use Data Licence (Version 2.0)",
+    licenceUrl: "https://gisappl.saskatchewan.ca/Html5Ext/Resources/GOS_Standard_Unrestricted_Use_Data_Licence_v2.0.pdf",
+    attributionRequired: true,
+    attributionText: null,
+    shareAlikeObligation: false,
+    commercialUsePermitted: "unknown",
+    redistributionPermitted: "unknown",
+    rateLimitCalls: null,
+    rateLimitWindowSeconds: null,
+    updateIntervalHours: null,
+    retrievedAt: FACILITY_LAYER_RETRIEVAL_DATE,
+    verifiedAt: null,
+    status: "unverified",
+  },
+  {
+    /* The BC Energy Regulator's GIS service: facility points and sump locations (0143). Same treatment as above. */
+    sourceKey: "bcer_gis",
+    displayName: "BC Energy Regulator GIS — facility and sump layers",
+    authority: "BC Energy Regulator",
+    category: "oilfield_assets",
+    jurisdiction: "CA-BC",
+    licenceName: "BC Energy Regulator Open Data Licence",
+    licenceUrl: "https://www.bc-er.ca/files/gis/BCER-Open-Data-Licence.pdf",
+    attributionRequired: true,
+    attributionText: null,
+    shareAlikeObligation: false,
+    commercialUsePermitted: "unknown",
+    redistributionPermitted: "unknown",
+    rateLimitCalls: null,
+    rateLimitWindowSeconds: null,
+    updateIntervalHours: null,
+    retrievedAt: FACILITY_LAYER_RETRIEVAL_DATE,
     verifiedAt: null,
     status: "unverified",
   },

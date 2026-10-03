@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  addressRefusal, checkEgressUrl, EgressRefused, guardedGet, guardedPost, hostNameRefusal,
+  addressRefusal, checkEgressUrl, EGRESS_CEILINGS, EgressRefused, guardedGet, guardedPost, hostNameRefusal,
   type EgressLimits, type EgressPostTransport, type EgressTransport, type ResolvedAddress, type TransportResponse,
 } from "./egressGuard";
 
@@ -245,6 +245,95 @@ describe("a guarded GET", () => {
     const e = await refusal(guardedGet(LAYER, { resolve: dns({ "gis.example.ca": [PUBLIC] }).resolve, transport: w.transport }, LIMITS));
     expect(e).toMatchObject({ code: "transport", destination: false });
     expect(e.message).toContain("gis.example.ca");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* What a caller's configuration may add: a narrower destination rule  */
+/* (the source registry's endpoint), never a wider limit.              */
+/* ------------------------------------------------------------------ */
+
+describe("a caller's destination policy narrows the guard and cannot widen it", () => {
+  const onlyLayer = (u: URL) => (u.hostname === "gis.example.ca" && u.pathname.startsWith("/arcgis/rest/services/Petroleum/FeatureServer/17") ? null : "outside the layer");
+
+  it("runs on the first URL, before any lookup, and refuses with a destination code", async () => {
+    const d = dns({ "gis.example.ca": [PUBLIC] });
+    const w = web({});
+    const e = await refusal(guardedGet("https://gis.example.ca/arcgis/rest/services/Other/FeatureServer/1?f=pjson", { resolve: d.resolve, transport: w.transport }, { ...LIMITS, destinationPolicy: onlyLayer }));
+    expect(e).toMatchObject({ code: "unapproved_destination", destination: true });
+    expect(d.asked).toEqual([]);
+    expect(w.sent).toEqual([]);
+  });
+
+  it("runs again on every redirect hop: a public host the policy does not name is not followed", async () => {
+    const d = dns({ "gis.example.ca": [PUBLIC], "mirror.example.org": [PUBLIC] });
+    const w = web({ [LAYER]: { status: 302, headers: { location: "https://mirror.example.org/arcgis/rest/services/Petroleum/FeatureServer/17?f=pjson" } } });
+    const e = await refusal(guardedGet(LAYER, { resolve: d.resolve, transport: w.transport }, { ...LIMITS, destinationPolicy: onlyLayer }));
+    expect(e.code).toBe("unapproved_destination");
+    expect(d.asked).toEqual(["gis.example.ca"]);
+    expect(w.sent.map(s => s.url)).toEqual([LAYER]);
+    expect(w.closed()).toBe(1);
+  });
+
+  it("refuses a redirect that climbs out of the approved path on the same host", async () => {
+    const w = web({ [LAYER]: { status: 301, headers: { location: "/arcgis/rest/services/Petroleum/FeatureServer/17/../../../Admin/MapServer/0" } } });
+    const e = await refusal(guardedGet(LAYER, { resolve: dns({ "gis.example.ca": [PUBLIC] }).resolve, transport: w.transport }, { ...LIMITS, destinationPolicy: onlyLayer }));
+    expect(e.code).toBe("unapproved_destination");
+    expect(w.sent).toHaveLength(1);
+  });
+
+  it("cannot admit what the guard refuses: a policy that accepts everything still loses to a private answer, http and the metadata address", async () => {
+    const everything = () => null;
+    const priv = await refusal(guardedGet(LAYER, { resolve: dns({ "gis.example.ca": ["10.0.0.7"] }).resolve, transport: web({}).transport }, { ...LIMITS, destinationPolicy: everything }));
+    expect(priv.code).toBe("blocked_address");
+    const http = await refusal(guardedGet("http://gis.example.ca/", { resolve: dns({ "gis.example.ca": [PUBLIC] }).resolve, transport: web({}).transport }, { ...LIMITS, destinationPolicy: everything }));
+    expect(http.code).toBe("scheme");
+    const w = web({ [LAYER]: { status: 302, headers: { location: "https://169.254.169.254/latest/meta-data/" } } });
+    const meta = await refusal(guardedGet(LAYER, { resolve: dns({ "gis.example.ca": [PUBLIC] }).resolve, transport: w.transport }, { ...LIMITS, destinationPolicy: everything }));
+    expect(meta.code).toBe("blocked_address");
+    expect(w.sent).toHaveLength(1);
+  });
+
+  it("the guard's own check runs first, so a policy never sees a URL the guard refused", async () => {
+    const seen: string[] = [];
+    const watching = (u: URL) => { seen.push(u.href); return null; };
+    await refusal(guardedGet("https://169.254.169.254/latest/meta-data/", { resolve: dns({}).resolve, transport: web({}).transport }, { ...LIMITS, destinationPolicy: watching }));
+    expect(seen).toEqual([]);
+  });
+
+  it("still lets a policy-approved, public answer through", async () => {
+    const w = web({ [LAYER]: { chunks: ['{"name":"Facilities"}'] } });
+    const res = await guardedGet(LAYER, { resolve: dns({ "gis.example.ca": [PUBLIC] }).resolve, transport: w.transport }, { ...LIMITS, destinationPolicy: onlyLayer });
+    expect(res.json()).toEqual({ name: "Facilities" });
+  });
+});
+
+describe("limits above the guard's ceiling are refused before any request", () => {
+  it.each([
+    ["timeoutMs", { timeoutMs: EGRESS_CEILINGS.timeoutMs + 1 }],
+    ["maxBytes", { maxBytes: EGRESS_CEILINGS.maxBytes + 1 }],
+    ["maxRedirects", { maxRedirects: EGRESS_CEILINGS.maxRedirects + 1 }],
+    ["a zero timeout", { timeoutMs: 0 }],
+    ["a fractional size", { maxBytes: 1.5 }],
+    ["a negative redirect count", { maxRedirects: -1 }],
+  ])("refuses %s", async (_label, over) => {
+    const d = dns({ "gis.example.ca": [PUBLIC] });
+    const w = web({ [LAYER]: {} });
+    const e = await refusal(guardedGet(LAYER, { resolve: d.resolve, transport: w.transport }, { ...LIMITS, ...over }));
+    expect(e).toMatchObject({ code: "limits", destination: false });
+    expect(d.asked).toEqual([]);
+    expect(w.sent).toEqual([]);
+  });
+
+  it("accepts the ceilings themselves", async () => {
+    const w = web({ [LAYER]: {} });
+    const res = await guardedGet(LAYER, { resolve: dns({ "gis.example.ca": [PUBLIC] }).resolve, transport: w.transport }, { ...LIMITS, ...EGRESS_CEILINGS });
+    expect(res.ok).toBe(true);
+  });
+
+  it("holds a delivery to the same timeout ceiling", async () => {
+    const e = await refusal(guardedPost("https://hooks.example.ca/leaseos", { resolve: dns({ "hooks.example.ca": [PUBLIC] }).resolve, transport: { post: () => Promise.reject(new Error("not reached")) } }, { body: "{}", timeoutMs: EGRESS_CEILINGS.timeoutMs + 1 }));
+    expect(e.code).toBe("limits");
   });
 });
 
