@@ -1,13 +1,14 @@
--- 0236 — Safety program event ledger: one successor per event.
+-- 0237 — Safety program event ledger: one successor per event.
 --
 -- Slot: 0228 (the Safety & Compliance Program Builder) merged to main as #99 on 2026-10-03. This follow-up
--- was first numbered 0233, the first slot free at that day's scan. By the time its PR was opened, 0233 had
--- also been claimed by `claude/external-source-registry` and `claude/leaseos-billing-invoicing-ar` (main's
--- SPINE reconciliation records the three-way collision), and `claude/payroll-p4-expenses-reimbursements`
--- held 0234 and 0235. Under the register's rule a checkpoint takes the first slot above every slot in use in
--- any lineage, so it moved to 0236 before it was merged or applied anywhere. It is a separate migration, not
--- an edit to 0228: the migration ledger checksums every applied file and refuses one that changed, so a
--- database that has run 0228 would never see an edited copy.
+-- was first numbered 0233, then 0236, each the first slot above every slot in use at its scan; each was
+-- claimed by other branches before this merged (0233: external-source-registry and billing-invoicing-ar,
+-- recorded in main's SPINE reconciliation; 0234–0235: payroll P4; 0236: marketplace-main-reconcile and
+-- security/driver-portfolio-hardening). Under the register's rule a checkpoint takes the first slot above
+-- every slot in use in any lineage, so it is 0237 at the PR's final scan of 141 remote branches. It had not
+-- been merged or applied anywhere before. It is a separate migration, not an edit to 0228: the migration
+-- ledger checksums every applied file and refuses one that changed, so a database that has run 0228 would
+-- never see an edited copy.
 --
 -- Why. `safetyProgramEvents` is a hash chain: each row stores the previous row's hash. The writer read the head
 -- and inserted without any guard, so two concurrent writers could both link to the same head and fork the

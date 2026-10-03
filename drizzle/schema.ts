@@ -10982,7 +10982,7 @@ export const safetyProgramEvents = mysqlTable("safetyProgramEvents", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, t => ({
   subjectIdx: index("safetyProgramEvents_subject").on(t.subjectType, t.subjectRef),
-  /** One successor per event (0236): a concurrent writer extends the chain instead of forking it. */
+  /** One successor per event (0237): a concurrent writer extends the chain instead of forking it. */
   previousHashUnique: uniqueIndex("safetyProgramEvents_previousHash_unique").on(t.previousHash),
 }));
 export type SafetyProgramEventRow = typeof safetyProgramEvents.$inferSelect;
