@@ -388,7 +388,14 @@ d("a job freezes its commercial basis, and billing reads the frozen basis", () =
     if ("contacts" in field) expect(field.contacts).toEqual([expect.objectContaining({ displayName: "Kyle", phone: "403-555-0100" })]);
     const text = JSON.stringify(field);
     for (const f of CONFIDENTIAL_COMMERCIAL_FIELDS) expect(text, f).not.toContain(`"${f}"`);
-    expect(text).not.toContain("185"); expect(text).not.toContain("gstNumber");
+    // No price term, by value: the $185/h line is stored as rateMillis 185_000. Matching the substring
+    // "185" in the whole JSON failed whenever a random id, name or timestamp happened to contain it.
+    const leaves: unknown[] = [];
+    const walk = (v: unknown): void => { if (v && typeof v === "object") Object.values(v).forEach(walk); else leaves.push(v); };
+    walk(field);
+    const isPrice = (v: unknown) => (typeof v === "number" && [185, 18_500, 185_000].includes(v)) || (typeof v === "string" && /^\$?(185(\.0+)?|18500|185000)$/.test(v.trim()));
+    expect(leaves.filter(isPrice)).toEqual([]);
+    expect(text).not.toContain("gstNumber");
     const otherDriver = await member(t.orgRef, ["driver"]);
     const [other] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name) VALUES (?, ?)", [otherDriver, "Someone Else"]);
     await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'operator', ?, 1)", [t.orgRef, other.insertId]);

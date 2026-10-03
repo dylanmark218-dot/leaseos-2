@@ -294,9 +294,10 @@ d("a driver, a unit and a carrier, through the registry", () => {
     expect(p2.verdict).toBe("review");
     expect(p2.items.find(i => i.requirementKey === "ab.driver.licence.class1")?.status).toBe("evidence_unverified");
 
-    // Dispatch cannot verify it; office can.
+    // Dispatch cannot verify it; the office user who recorded it may not either; a second office user can.
     await expect(callerFor(dispatcher).compliance.credentialVerify({ credentialId: rec.credentialId, outcome: "verified" })).rejects.toBeTruthy();
-    await callerFor(office).compliance.credentialVerify({ credentialId: rec.credentialId, outcome: "verified" });
+    await expect(callerFor(office).compliance.credentialVerify({ credentialId: rec.credentialId, outcome: "verified" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await callerFor(await withRole("office")).compliance.credentialVerify({ credentialId: rec.credentialId, outcome: "verified" });
     const p3 = await callerFor(dispatcher).compliance.passport({ subjectType: "operator", subjectId: operatorId, jurisdiction: "CA-AB", attributes: { licenceClassRequired: "1" } });
     expect(p3.verdict).toBe("ready");
     expect(p3.satisfied).toBe(1);

@@ -28,14 +28,15 @@ describe("current-state's test universe", () => {
     expect(listed).toEqual(runnerFiles);
   }, 120_000);
 
-  it("the generated document's file count is the runner's count", () => {
+  // CI-STATE-1: the count left the committed document for the generated metrics; the property it
+  // pinned — the generator's count is the runner's count — moved with it, unchanged.
+  it("the generated metrics' file count is the runner's count", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "cs-"));
     try {
-      const out = path.join(dir, "state.md");
-      sh("bash", ["scripts/current-state.sh", "", out]);
-      const row = readFileSync(out, "utf8").match(/Test files \/ cases \| \*\*(\d+) \/ (\d+)\*\*/);
-      expect(row, "the document has a test files row").not.toBeNull();
-      expect(Number(row![1])).toBe(runnerFiles.length);
+      const out = path.join(dir, "metrics.json");
+      sh("bash", ["scripts/current-state.sh", "--metrics", out]);
+      const metrics = JSON.parse(readFileSync(out, "utf8")) as { testFiles: number };
+      expect(metrics.testFiles).toBe(runnerFiles.length);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 

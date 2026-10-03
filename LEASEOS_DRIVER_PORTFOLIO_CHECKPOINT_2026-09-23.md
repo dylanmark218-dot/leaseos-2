@@ -87,7 +87,7 @@ certificates would give a second answer to "does this person hold H2S".
 
 ## Projections (pure, ready for the API and UI)
 
-- **Wallet.** Shows `READY FOR WORK`, `ACTION REQUIRED` or `NOT READY` against
+- **Wallet.** Shows `BASELINE MET`, `ACTION REQUIRED` or `NOT READY` against
   the company baseline, with a card per requirement and for every ticket held.
   It is built to be cached offline and carries `validUntil`: the earlier of 24
   hours and the first lapse of a required ticket. `walletHeadlineAt()` turns a
