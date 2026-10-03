@@ -118,7 +118,15 @@ not hold, ends access with the membership rather than with the grant, and
 verifies a named organization against the membership table before it scopes
 anything · payroll, finance, tax
 rules (unverified) · geospatial source registry (8 verified licences, 10
-blocked) · AI Secretary typed commits, OCR forms, fingerprinting · secure
+blocked) · approved external source registry (a publisher is contacted only
+through an endpoint a person approved — exact host, port, method and path,
+for a named purpose, until a review-by date — by someone who neither asked
+for the approval nor made the revision it covers; an edit to what may be
+contacted reopens review, a revocation stops the next request, every step
+is append-only evidence; the facility directory's ArcGIS importer runs
+through it and then through the egress guard, which it can only narrow, and
+records the source, endpoint, revision and approval of every import) · AI
+Secretary typed commits, OCR forms, fingerprinting · secure
 field runtime protocol (server half) · fuel ledger, bulk fuel, card
 statements, anomalies · roadside, purchasing, AP · compliance registry,
 requirement engine, packs, calibration · safety & compliance program builder

@@ -73,7 +73,12 @@ describe("the real tree", () => {
     // the first slot free on main and on all 131 remote branches at the scan.
     expect(files).toContain("0228_safety_program_builder.sql");
     expect(files.filter(f => f.startsWith("0182_"))).toEqual([]);
-    expect(headSlot(files)).toBe("0228");
+    // The approved external source registry took 0233. Drafted as 0228 when that was free, it moved before any
+    // environment applied it when the pre-commit scan found 0228 claimed by payroll P3 and 0229–0232 by the
+    // integration hub; main has since taken 0228 itself (the program builder, #99). 0233 was still free on main
+    // and on all 133 remote branches at the rescan before rebasing onto it.
+    expect(files).toContain("0233_external_source_registry.sql");
+    expect(headSlot(files)).toBe("0233");
   });
 
   it("keeps the reserved slots empty", () => {

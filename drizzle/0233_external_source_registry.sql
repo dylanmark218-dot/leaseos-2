@@ -1,10 +1,11 @@
 -- 0233 — Approved external source registry: endpoints, approvals and their audit trail, over the B20.8
 -- source registry. Design and operating notes: docs/architecture/EXTERNAL_SOURCE_REGISTRY.md.
 --
--- Numbered 0233: the first number free on `main` (`48a64e1`, head 0227) and on every open remote branch at
--- the scan of 2026-10-03 immediately before this commit. Drafted as 0228, it moved before any environment
--- applied it: 0228 is claimed by `claude/payroll-p3-time-candidates` and 0229–0232 by
--- `claude/integration-hub-subsystem-6nzrkw`. docs/architecture/MIGRATION_COLLISION_REGISTER.md carries the claim.
+-- Numbered 0233: the first number free on `main` and on every open remote branch at the scans of 2026-10-03
+-- (main `48a64e1`, head 0227; then `9ec123a`, head 0228). Drafted as 0228, it moved before any environment
+-- applied it: 0228 was claimed by `claude/payroll-p3-time-candidates` (and has since been taken on main by the
+-- program builder, #99), 0229–0232 by `claude/integration-hub-subsystem-6nzrkw`.
+-- docs/architecture/MIGRATION_COLLISION_REGISTER.md carries the claim.
 --
 -- EXTENDS, DOES NOT DUPLICATE.
 --   externalDataSources (0024) stays the one record of a source's identity, licence and terms, and its
