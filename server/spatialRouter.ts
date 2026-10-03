@@ -320,7 +320,8 @@ export const spatialRouter = router({
     const rows = await db.select().from(inboundEvents).where(and(eq(inboundEvents.feed, "gps_position"), eq(inboundEvents.status, "accepted"))).orderBy(desc(inboundEvents.id)).limit(500);
     const mine = rows.map(r => ({ r, p: JSON.parse(r.payloadJson) as { unitRef?: string; latitude?: number; longitude?: number; recordedAt?: string } })).filter(x => x.p.unitRef === u.unitNumber).sort((a, b) => Date.parse(b.p.recordedAt ?? "") - Date.parse(a.p.recordedAt ?? ""))[0];
     if (!mine) return { unitId: input.unitId, position: null, note: "No position evidence on record for this unit" };
-    const client = (await db.select({ name: integrationClients.name }).from(integrationClients).where(eq(integrationClients.id, mine.r.clientId)).limit(1))[0];
+    // 0229: a Hub-received event has no machine client; its source is the connector.
+    const client = mine.r.clientId == null ? undefined : (await db.select({ name: integrationClients.name }).from(integrationClients).where(eq(integrationClients.id, mine.r.clientId)).limit(1))[0];
     const ageMinutes = Math.round((Date.now() - Date.parse(mine.p.recordedAt!)) / 60_000);
     return { unitId: input.unitId, position: { latitude: mine.p.latitude!, longitude: mine.p.longitude!, recordedAt: mine.p.recordedAt!, ageMinutes, source: client?.name ?? "integration", inboundRef: mine.r.inboundRef }, note: `Evidence from ${client?.name ?? "a feed"}, ${ageMinutes} min old. A position is not a work state.` };
   }),

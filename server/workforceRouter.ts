@@ -2,15 +2,20 @@
  * Workforce lifecycle — the API.
  */
 import { TRPCError } from "@trpc/server";
-import { actingScopeFor, orgScopeWhere, userInScope, type TenantScope } from "./db";
+import { actingScopeFor, createOperator, operatorForUserInScope, orgScopeWhere, userInScope, type TenantScope } from "./db";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { z } from "zod";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb, revokeUserRole } from "./db";
 import { resolveActingScope } from "./_core/actingScope";
-import { applicantScreenings, applicants, competencySignoffs, complianceDocuments, fieldDevices, offboardings, onboardingPlans, onboardingTasks, operators, probationReviews, serializedTools, toolCheckouts, trainingRecords, userRoleAssignments } from "../drizzle/schema";
+import { applicantScreenings, applicants, competencySignoffs, complianceDocuments, fieldDevices, offboardings, onboardingPlans, onboardingTasks, probationReviews, serializedTools, toolCheckouts, trainingRecords, userRoleAssignments } from "../drizzle/schema";
 import { COURSE_CREDENTIALS, competencyDecision, hireReadiness, offboardingClose, onboardingGaps, probationDecision, screeningRecordDecision, trainingVerification } from "./_core/workforce";
+import { assertMayDecide } from "./credentialVerificationService";
+import { recordPortfolioEvent } from "./driverPortfolioService";
+import { affectedRows } from "./_core/enforcementCommit";
+import { isMedicalDocType } from "./_core/compliancePassport";
+import { credentialType } from "./_core/driverPortfolio";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 async function dbOrThrow() { const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return db; }
@@ -44,16 +49,45 @@ async function platformWideGrantsHeldBy(db: Awaited<ReturnType<typeof dbOrThrow>
   return rows.length;
 }
 
-async function ownerFor(userId: number): Promise<{ ownerType: "operator" | "user"; ownerId: number }> {
-  const db = await dbOrThrow();
-  const op = (await db.select({ id: operators.id }).from(operators).where(eq(operators.userId, userId)).limit(1))[0];
-  return op ? { ownerType: "operator", ownerId: op.id } : { ownerType: "user", ownerId: userId };
+type Db = Awaited<ReturnType<typeof dbOrThrow>>;
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+/**
+ * The record a minted credential belongs to: the person's operator record IN THE VERIFIER'S
+ * ORGANIZATION. One person can drive for several organizations, each with its own operator row;
+ * a credential verified here never lands on another organization's record. More than one here is
+ * ambiguous and refused rather than guessed.
+ */
+async function ownerFor(db: Db | Tx, userId: number, scope: TenantScope): Promise<{ ownerType: "operator" | "user"; ownerId: number }> {
+  // The one lookup of a person's operator record (operatorIdentityGuard), read inside the caller's transaction.
+  const op = await operatorForUserInScope(userId, scope, db);
+  if (op.kind === "ambiguous") throw new TRPCError({ code: "CONFLICT", message: "This person has more than one operator record in this organization; resolve that before verifying" });
+  return op.kind === "resolved" ? { ownerType: "operator", ownerId: op.operatorId } : { ownerType: "user", ownerId: userId };
 }
-async function writeCredential(args: { userId: number; docType: string; title: string; issuedAt: Date; expiresAt: Date | null; evidenceRecordId: number; source: string; verifiedByUserId: number }) {
-  const db = await dbOrThrow();
-  const owner = await ownerFor(args.userId);
-  const ins = await db.insert(complianceDocuments).values({ ownerType: owner.ownerType, ownerId: owner.ownerId, docType: args.docType, requirementKey: null, title: args.title, identifier: null, storageKey: null, storageUrl: null, capturedAt: new Date(), issuedAt: args.issuedAt, expiresAt: args.expiresAt, jurisdiction: null, verificationStatus: "verified", verifiedByUserId: args.verifiedByUserId, verifiedAt: new Date(), privateDetail: false, evidenceRecordId: args.evidenceRecordId, source: args.source, confidence: "high" } as never);
-  return Number(ins[0]?.insertId ?? 0);
+
+/**
+ * Mint the verified credential, inside the caller's transaction (after its conditional claim), with
+ * the portfolio audit an operator's credential gets on every other path: who recorded it, and who
+ * verified it, via which procedure.
+ */
+async function writeCredential(tx: Tx, scope: TenantScope, args: { userId: number; docType: string; title: string; issuedAt: Date; expiresAt: Date | null; evidenceRecordId: number; source: string; verifiedByUserId: number; recordedByUserId: number | null; path: "workforce.taskVerify" | "workforce.trainingVerify" }) {
+  const owner = await ownerFor(tx, args.userId, scope);
+  const now = new Date();
+  const privateDetail = isMedicalDocType(args.docType);
+  const ins = await tx.insert(complianceDocuments).values({ ownerType: owner.ownerType, ownerId: owner.ownerId, docType: args.docType, requirementKey: null, title: args.title, identifier: null, storageKey: null, storageUrl: null, capturedAt: now, issuedAt: args.issuedAt, expiresAt: args.expiresAt, jurisdiction: null, verificationStatus: "verified", verifiedByUserId: args.verifiedByUserId, verifiedAt: now, privateDetail, evidenceRecordId: args.evidenceRecordId, source: args.source, confidence: "high", recordedByUserId: args.recordedByUserId } as never);
+  const credentialId = Number(ins[0]?.insertId ?? 0);
+  if (owner.ownerType === "operator" && !privateDetail && credentialId) {
+    const orgRef = scope.tenantId === SINGLE_TENANT_ID ? null : scope.tenantId;
+    const label = credentialType(args.docType)?.label ?? args.docType;
+    if (args.recordedByUserId != null) await recordPortfolioEvent(tx, { orgRef, operatorId: owner.ownerId, credentialId, actorUserId: args.recordedByUserId, eventType: "credential_uploaded", detail: `${label} recorded via ${args.path === "workforce.taskVerify" ? "workforce.taskComplete" : "workforce.trainingRecord"} for verification`, at: now });
+    await recordPortfolioEvent(tx, { orgRef, operatorId: owner.ownerId, credentialId, actorUserId: args.verifiedByUserId, eventType: "credential_verified", detail: `${label} verified via ${args.path}`, at: now });
+  }
+  return credentialId;
+}
+
+/** Exactly one row, or another decision got there first. */
+function claimed(r: unknown) {
+  if (affectedRows(r) !== 1) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Another decision on this record completed first" });
 }
 
 export const workforceRouter = router({
@@ -101,7 +135,11 @@ export const workforceRouter = router({
       const existing = (await db.select({ id: onboardingPlans.id }).from(onboardingPlans).where(eq(onboardingPlans.userId, input.userId)).limit(1))[0];
       if (existing) throw new TRPCError({ code: "CONFLICT", message: "This user already has an onboarding plan" });
       const isDriver = /driver|operator/i.test(a.roleApplied);
-      if (isDriver && !(await db.select({ id: operators.id }).from(operators).where(eq(operators.userId, input.userId)).limit(1))[0]) await db.insert(operators).values({ userId: input.userId, name: a.fullName, licenseExpiresAt: input.licenseExpiresAt ?? null } as never);
+      // The driver's operator record belongs to the hiring organization: one there already counts, one elsewhere does not.
+      if (isDriver) {
+        const scope = await actingScopeFor(ctx.user.id);
+        if ((await operatorForUserInScope(input.userId, scope)).kind === "none") await createOperator({ userId: input.userId, name: a.fullName, licenseExpiresAt: input.licenseExpiresAt ?? null } as never, scope, ctx.user.id);
+      }
       const planRef = ref("ONB");
       const probationEndsAt = new Date(input.startDate.getTime() + input.probationDays * 86_400_000);
       const ins = await db.insert(onboardingPlans).values({ planRef, userId: input.userId, applicantId: a.id, position: a.roleApplied, startDate: input.startDate, probationEndsAt, createdByUserId: ctx.user.id });
@@ -162,8 +200,18 @@ export const workforceRouter = router({
     if (!t.completedAt || !t.evidenceRecordId) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Not completed with evidence" });
     if (t.completedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The person who completed the task may not verify it" });
     if (t.verifiedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Already verified" });
-    const docId = await writeCredential({ userId: p.userId, docType: t.credentialDocType, title: t.title, issuedAt: t.completedAt, expiresAt: t.credentialValidDays ? new Date(t.completedAt.getTime() + t.credentialValidDays * 86_400_000) : null, evidenceRecordId: t.evidenceRecordId, source: `onboarding ${p.planRef}/${t.taskCode}`, verifiedByUserId: ctx.user.id });
-    await db.update(onboardingTasks).set({ verifiedByUserId: ctx.user.id, verifiedAt: new Date(), complianceDocumentId: docId }).where(eq(onboardingTasks.id, t.id));
+    // The credential this mints is verified at birth: the one separation-of-duties rule also refuses the
+    // person the plan is for, not only the person who completed the task.
+    assertMayDecide({ verifierUserId: ctx.user.id, subjectUserId: p.userId, recordedByUserIds: t.completedByUserId != null ? [t.completedByUserId] : [], state: "needs_review" });
+    const scope = await actingScopeFor(ctx.user.id);
+    const completedAt = t.completedAt, evidenceRecordId = t.evidenceRecordId, docType = t.credentialDocType;
+    const docId = await db.transaction(async tx => {
+      // Claim first, conditionally: two verifiers holding the same read cannot both mint.
+      claimed(await tx.update(onboardingTasks).set({ verifiedByUserId: ctx.user.id, verifiedAt: new Date() }).where(and(eq(onboardingTasks.id, t.id), isNull(onboardingTasks.verifiedAt))));
+      const id = await writeCredential(tx, scope, { userId: p.userId, docType, title: t.title, issuedAt: completedAt, expiresAt: t.credentialValidDays ? new Date(completedAt.getTime() + t.credentialValidDays * 86_400_000) : null, evidenceRecordId, source: `onboarding ${p.planRef}/${t.taskCode}`, verifiedByUserId: ctx.user.id, recordedByUserId: t.completedByUserId ?? null, path: "workforce.taskVerify" });
+      await tx.update(onboardingTasks).set({ complianceDocumentId: id }).where(eq(onboardingTasks.id, t.id));
+      return id;
+    });
     const tasks = await db.select().from(onboardingTasks).where(eq(onboardingTasks.planId, p.id));
     const gaps = onboardingGaps(tasks, new Date());
     if (gaps.complete && p.status === "in_progress") await db.update(onboardingPlans).set({ status: "complete" }).where(eq(onboardingPlans.id, p.id));
@@ -190,12 +238,23 @@ export const workforceRouter = router({
     const t = (await db.select().from(trainingRecords).where(eq(trainingRecords.trainingRef, input.trainingRef)).limit(1))[0];
     if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "Training record not found" });
     if (t.verificationStatus !== "unverified") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Already ${t.verificationStatus}` });
-    if (input.decision === "rejected") { await db.update(trainingRecords).set({ verificationStatus: "rejected", verifiedByUserId: ctx.user.id, verifiedAt: new Date() }).where(eq(trainingRecords.id, t.id)); return { trainingRef: t.trainingRef, verificationStatus: "rejected" as const, complianceDocumentId: null }; }
+    const unverified = and(eq(trainingRecords.id, t.id), eq(trainingRecords.verificationStatus, "unverified"));
+    if (input.decision === "rejected") { claimed(await db.update(trainingRecords).set({ verificationStatus: "rejected", verifiedByUserId: ctx.user.id, verifiedAt: new Date() }).where(unverified)); return { trainingRef: t.trainingRef, verificationStatus: "rejected" as const, complianceDocumentId: null }; }
+    // The credential this mints is verified at birth, so the one separation-of-duties rule applies here too:
+    // neither the person trained nor the person who recorded the training may verify it.
+    assertMayDecide({ verifierUserId: ctx.user.id, subjectUserId: t.userId, recordedByUserIds: [t.recordedByUserId], state: "needs_review" });
     const v = trainingVerification({ courseCode: t.courseCode, evidenceRecordId: t.evidenceRecordId, expiresAt: t.expiresAt, completedAt: t.completedAt, recordedByUserId: t.recordedByUserId, verifierUserId: ctx.user.id });
     if (!v.permitted) throw new TRPCError({ code: v.refusals.some(r => r.includes("may not verify")) ? "FORBIDDEN" : "PRECONDITION_FAILED", message: v.refusals.join("; ") });
-    let docId: number | null = null;
-    if (v.credential) docId = await writeCredential({ userId: t.userId, docType: v.credential.docType, title: t.title, issuedAt: t.completedAt, expiresAt: v.credential.expiresAt, evidenceRecordId: t.evidenceRecordId!, source: `training ${t.trainingRef}${t.certificateNumber ? ` #${t.certificateNumber}` : ""}`, verifiedByUserId: ctx.user.id });
-    await db.update(trainingRecords).set({ verificationStatus: "verified", verifiedByUserId: ctx.user.id, verifiedAt: new Date(), complianceDocumentId: docId }).where(eq(trainingRecords.id, t.id));
+    const scope = await actingScopeFor(ctx.user.id);
+    const credential = v.credential;
+    const docId = await db.transaction(async tx => {
+      // Claim first, conditionally: a concurrent reject or verify that landed first wins, and this mints nothing.
+      claimed(await tx.update(trainingRecords).set({ verificationStatus: "verified", verifiedByUserId: ctx.user.id, verifiedAt: new Date() }).where(unverified));
+      if (!credential) return null;
+      const id = await writeCredential(tx, scope, { userId: t.userId, docType: credential.docType, title: t.title, issuedAt: t.completedAt, expiresAt: credential.expiresAt, evidenceRecordId: t.evidenceRecordId!, source: `training ${t.trainingRef}${t.certificateNumber ? ` #${t.certificateNumber}` : ""}`, verifiedByUserId: ctx.user.id, recordedByUserId: t.recordedByUserId, path: "workforce.trainingVerify" });
+      await tx.update(trainingRecords).set({ complianceDocumentId: id }).where(eq(trainingRecords.id, t.id));
+      return id;
+    });
     return { trainingRef: t.trainingRef, verificationStatus: "verified" as const, complianceDocumentId: docId, expiresAt: v.credential?.expiresAt ?? null, note: v.refusals[0] ?? null };
   }),
 

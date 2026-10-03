@@ -20,6 +20,8 @@ import { resolveSheetScan, ticketClassOf } from "./_core/sheetSerial";
 import { academyAssessmentSheets } from "../drizzle/schema";
 import { roleProcedure, router } from "./_core/trpc";
 import { actingScopeFor, getDb, userInScope } from "./db";
+import { userKeyedWhere } from "./financeScope";
+import { financeScopeFor } from "./_core/entityScope";
 import {
   academyAssignments,
   academyAssessmentAttempts,
@@ -749,7 +751,8 @@ export const trainingAcademyRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const cert = (await db.select().from(academyCertificates).where(eq(academyCertificates.certificateRef, input.certificateRef)).limit(1))[0];
-      if (!cert) throw new TRPCError({ code: "NOT_FOUND", message: "Certificate not found" });
+      // SEC-1: a request is about a learner, and the learner must be in the caller's organization.
+      if (!cert || !(await userInScope(cert.userId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Certificate not found" });
       const requestRef = ref("ACAD-INSP");
       const req = { requestRef, requestDatedAt: input.requestDatedAt, requestReceivedAt: input.requestReceivedAt ?? null, subjectUserId: cert.userId, certificateRef: cert.certificateRef };
       const deadline = responseDeadline(req, new Date());
@@ -764,7 +767,8 @@ export const trainingAcademyRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const r = (await db.select().from(academyInspectorRequests).where(eq(academyInspectorRequests.requestRef, input.requestRef)).limit(1))[0];
-      if (!r) throw new TRPCError({ code: "NOT_FOUND", message: "Inspector request not found" });
+      // SEC-1: through its learner, as at creation.
+      if (!r || r.subjectUserId == null || !(await userInScope(r.subjectUserId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: "Inspector request not found" });
       if (r.state === "withdrawn") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Request was withdrawn" });
       const cert = (await db.select().from(academyCertificates).where(eq(academyCertificates.id, r.certificateId)).limit(1))[0] ?? null;
       const attempts = cert ? await db.select({ id: academyAssessmentAttempts.id }).from(academyAssessmentAttempts).where(eq(academyAssessmentAttempts.assignmentId, cert.assignmentId)) : [];
@@ -787,9 +791,10 @@ export const trainingAcademyRouter = router({
 
   /** Open requests with their deadlines — the exception-centre feed. */
   inspectorRequestList: roleProcedure("academy.inspectorRequestList")
-    .query(async () => {
+    .query(async ({ ctx }) => {
       const db = await dbOrThrow();
-      const rows = await db.select().from(academyInspectorRequests).orderBy(academyInspectorRequests.dueAt);
+      // SEC-1: requests about this organization's learners only.
+      const rows = await db.select().from(academyInspectorRequests).where(userKeyedWhere(db as never, academyInspectorRequests.subjectUserId, await financeScopeFor(db as never, ctx.user.id))).orderBy(academyInspectorRequests.dueAt);
       const now = new Date();
       return rows.map(r => {
         const d = responseDeadline({ requestRef: r.requestRef, requestDatedAt: r.requestDatedAt, requestReceivedAt: r.requestReceivedAt, subjectUserId: r.subjectUserId, certificateRef: String(r.certificateId) }, now);

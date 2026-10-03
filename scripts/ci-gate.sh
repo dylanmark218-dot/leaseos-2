@@ -201,4 +201,12 @@ cp LEASEOS_CURRENT_STATE.md "$CURRENT_STATE_BEFORE"
 bash scripts/current-state.sh >/dev/null
 if ! diff -q "$CURRENT_STATE_BEFORE" LEASEOS_CURRENT_STATE.md >/dev/null; then echo "LEASEOS_CURRENT_STATE.md is stale — regenerate with scripts/current-state.sh"; diff "$CURRENT_STATE_BEFORE" LEASEOS_CURRENT_STATE.md | head -20; exit 1; fi
 echo "current"
+# CI-STATE-1: the test totals are measured here and published, not committed — the document's
+# `Test files / cases` row says so. Fail-closed like the document: a runner that lists no tests
+# fails the gate rather than reporting zero. Printed to the log, and to the job summary on Actions.
+bash scripts/current-state.sh --metrics artifacts/current-state-metrics.json
+cat artifacts/current-state-metrics.json
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  { echo "### Current-state metrics (generated, not committed)"; echo; echo '```json'; cat artifacts/current-state-metrics.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+fi
 echo "== PASS =="

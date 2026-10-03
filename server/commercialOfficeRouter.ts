@@ -665,9 +665,11 @@ export const commercialOfficeRouter = router({
     deliveryUpdate: roleProcedure("commercialOffice.documentDeliveryUpdate")
       .input(z.object({ deliveryRef: z.string().min(1), status: z.enum(["sent", "delivered", "failed", "bounced", "acknowledged"]), deliveryEvidence: z.string().max(300).optional(), failureReason: z.string().max(500).optional() }))
       .mutation(async ({ ctx, input }) => {
-        const { db } = await bookFor(ctx.user.id);
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
         const d = (await db.select().from(commercialDocumentDeliveries).where(eq(commercialDocumentDeliveries.deliveryRef, input.deliveryRef)).limit(1))[0];
-        if (!d) throw new TRPCError({ code: "NOT_FOUND", message: "Delivery not found" });
+        // SEC-1: a delivery is its document's, and the document is a book's — the check deliveryRecord already makes.
+        const doc = d ? (await db.select({ bookOrgRef: commercialDocuments.bookOrgRef }).from(commercialDocuments).where(eq(commercialDocuments.id, d.documentId)).limit(1))[0] : undefined;
+        if (!d || !doc || (bookOrgRef ? doc.bookOrgRef !== bookOrgRef : doc.bookOrgRef !== null)) throw new TRPCError({ code: "NOT_FOUND", message: "Delivery not found" });
         if ((input.status === "failed" || input.status === "bounced") && !input.failureReason) throw new TRPCError({ code: "BAD_REQUEST", message: "A failed or bounced delivery needs the reason" });
         await db.update(commercialDocumentDeliveries).set({ status: input.status, sentAt: d.sentAt ?? new Date(), sentByUserId: d.sentByUserId ?? ctx.user.id, deliveredAt: input.status === "delivered" || input.status === "acknowledged" ? new Date() : d.deliveredAt, deliveryEvidence: input.deliveryEvidence ?? d.deliveryEvidence, failureReason: input.failureReason ?? d.failureReason }).where(eq(commercialDocumentDeliveries.id, d.id));
         return { deliveryRef: input.deliveryRef, status: input.status };

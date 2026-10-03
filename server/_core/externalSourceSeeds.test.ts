@@ -31,7 +31,7 @@ const byKey = (k: string) =>
   ALL_DATA_SOURCES.find(s => s.sourceKey === k)!;
 
 describe("the count is eight, not nine", () => {
-  it("has twenty-eight sources, ten verified and eighteen not", () => {
+  it("has thirty sources, ten verified and twenty not", () => {
     // The research summary said "nine of eleven are clean" while separately
     // flagging three as unresolved. Eleven minus three is eight. Seeding nine
     // would have marked a blocked source usable.
@@ -46,9 +46,12 @@ describe("the count is eight, not nine", () => {
     // Ontario 511 under OGL – Ontario, Québec's roadworks under CC BY 4.0 — so eight becomes ten.
     // Manitoba, New Brunswick, Yukon and Newfoundland and Labrador publish no licence beside their
     // keys, exactly like Alberta, and Saskatchewan publishes no API. Those five seed unverified.
-    expect(ALL_DATA_SOURCES).toHaveLength(28);
+    // 0233 registered the facility directory's two regulator GIS services (Saskatchewan Petroleum,
+    // BC Energy Regulator) so the approved-source registry can govern their importer. Their licences
+    // are named; nothing a reviewer confirms is recorded, so both seed unverified.
+    expect(ALL_DATA_SOURCES).toHaveLength(30);
     expect(VERIFIED_DATA_SOURCES).toHaveLength(10);
-    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(18);
+    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(20);
   });
 
   it("names exactly the ones that could not be verified", () => {
@@ -58,6 +61,7 @@ describe("the count is eight, not nine", () => {
       "aer_st107",
       "aer_st37",
       "bc_resource_road_maps",
+      "bcer_gis",
       "crtc_coverage",
       "ised_b1_western",
       "ised_bc_rr",
@@ -69,6 +73,7 @@ describe("the count is eight, not nine", () => {
       "nl511",
       "sk_highway_hotline",
       "sk_iris",
+      "sk_petroleum_gis",
       "statcan_boundaries",
       "yt511",
     ]);
@@ -261,6 +266,7 @@ describe("attribution is collected, and gaps are named", () => {
       "aer_st107",
       "aer_st37",
       "bc_resource_road_maps",
+      "bcer_gis",
       "crtc_coverage",
       "ised_b1_western",
       "ised_bc_rr",
@@ -272,6 +278,7 @@ describe("attribution is collected, and gaps are named", () => {
       "nl511",
       "sk_highway_hotline",
       "sk_iris",
+      "sk_petroleum_gis",
       "statcan_boundaries",
       "yt511",
     ]);
@@ -362,16 +369,22 @@ beforeAll(async () => {
   // the database persists between runs. Without this reset the second run of
   // the file reads the first run's mutations and fails for the wrong reason.
   await pool.execute("DELETE FROM externalDataSources");
+  // The approval registry (0233) hangs off those rows by id. Its endpoints carry a unique
+  // `endpointRef`, so a re-seed after the reset would collide with the orphans; they and their
+  // approvals go too. Its events are append-only (the database refuses a DELETE) and stay, as
+  // history of rows that no longer exist — nothing reads an event to authorise anything.
+  await pool.execute("DELETE FROM externalSourceEndpoints");
+  await pool.execute("DELETE FROM externalSourceApprovals");
 });
 
 d("seeding into the database", () => {
-  it("inserts all twenty-eight and is idempotent on a second run", async () => {
+  it("inserts all thirty and is idempotent on a second run", async () => {
     const first = await seedExternalDataSources();
-    expect(first.inserted.length + first.existing.length).toBe(28);
+    expect(first.inserted.length + first.existing.length).toBe(30);
 
     const second = await seedExternalDataSources();
     expect(second.inserted).toEqual([]);
-    expect(second.existing).toHaveLength(28);
+    expect(second.existing).toHaveLength(30);
   });
 
   it("persists status, rate limit and retrieval date", async () => {

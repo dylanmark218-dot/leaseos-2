@@ -406,6 +406,14 @@ export function medicalFitnessForDispatch(verdict: ComplianceVerdict): { eligibl
 /** The one document type medical fitness is read from. */
 export const MEDICAL_FITNESS_DOC_TYPES: readonly string[] = ["medical_fitness"];
 
+/**
+ * Whether a doc type is a medical record, for PRIVACY decisions (the private flag, what the
+ * portfolio projects): case, spacing and hyphens do not matter, so "Medical_Fitness " is still
+ * medical. The canonical medical verdict reads MEDICAL_FITNESS_DOC_TYPES exactly.
+ */
+export const isMedicalDocType = (docType: string) => /medical/.test(docType.trim().toLowerCase().replace(/[\s-]+/g, "_"))
+  || MEDICAL_FITNESS_DOC_TYPES.includes(docType.trim().toLowerCase().replace(/[\s-]+/g, "_"));
+
 /** Everything a private credential must never expose beyond HR. */
 export const PRIVATE_CREDENTIAL_FIELDS_NEVER_PROJECTED = ["title", "identifier", "storageKey", "storageUrl", "source", "notes"] as const;
 

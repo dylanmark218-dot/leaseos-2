@@ -22,15 +22,13 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
-import { roleProcedure, router } from "./_core/trpc";
+import { assertGovernedTarget, platformOrOrganizationProcedure, roleProcedure, router, type GovernedAuthority } from "./_core/trpc";
 import { commercialScope, jobSnapshotCaptureIfReady } from "./customerCommercialService";
 import { financeScopeFor } from "./_core/entityScope";
-import { getDb, jobInScope, listActiveUserRoleNames } from "./db";
+import { getDb, jobInScope, listActiveUserRoleNames, operatorForUserInScope } from "./db";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { assertEntityInScope } from "./_core/entityScope";
-import { singleOwnershipDomain } from "./ownershipDomain";
-import { platformAuthorityProven } from "./platformAuthority";
-import { dispatchEligibilityChecks, dispatchEnforcementSettings, dispatchOverrides, dispatchPostings, operators } from "../drizzle/schema";
+import { dispatchEligibilityChecks, dispatchEnforcementSettings, dispatchOverrides, dispatchPostings } from "../drizzle/schema";
 import { assertReadinessSubjectInScope, checkInScope, dispatchScopeFor, loadEnforcementMode, loadGrantedOverrides } from "./dispatchEnforcementService";
 import { asFinding, resolveOverridePolicy } from "./_core/complianceFinding";
 import { asChecklist, composeReadiness } from "./readinessComposer";
@@ -75,23 +73,24 @@ async function scopedDb(userId: number) {
 }
 
 /**
- * The enforcement setting a caller may read or write. An entity row must belong to the caller's
- * organization (NOT_FOUND otherwise).
+ * The enforcement setting a caller may read or write.
  *
- * The global row (no entity) is the fallback for every organization without a mode of its own, and the
- * mode of the legacy path. F1.3 — it is PLATFORM-GOVERNED: once any organization exists, only platform
- * authority (`platformAuthorityProven`, read from the users row) may change it. Being unaffiliated is
- * not authority. While no organization exists, the one tenant governs its own deployment, as before.
- * Reading it keeps C1a's rule (the single tenant, not an organization), plus platform authority.
+ * GLOBAL row (no entity) — the fallback for every organization without a mode of its own, and the mode of
+ * the legacy path. PLATFORM configuration (F1.3): `platformOrOrganizationProcedure` admitted the caller on
+ * platform authority (the users row), or during bootstrap (zero organizations) on the domain permission.
+ * An organization role never reaches it.
+ *
+ * ORGANIZATION row — the domain permission admitted the caller; the entity must belong to the caller's
+ * organization, NOT_FOUND otherwise. Platform authority does not bypass this.
  */
-async function assertEnforcementScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, scope: Awaited<ReturnType<typeof dispatchScopeFor>>, financialEntityId: number | null, userId: number, access: "read" | "write") {
-  if (financialEntityId != null) return assertEntityInScope(db, financialEntityId, scope);
-  if (await platformAuthorityProven(userId)) return;
-  if (access === "write") {
-    if (await singleOwnershipDomain()) return;
-    throw new TRPCError({ code: "FORBIDDEN", message: "The global dispatch enforcement setting is the fallback for every organization; only platform authority may change it — name your own entity" });
-  }
-  if (scope.tenantId !== SINGLE_TENANT_ID) throw new TRPCError({ code: "FORBIDDEN", message: "The global dispatch enforcement setting is not an organization's to read — name your own entity" });
+const GLOBAL_DISPATCH_MODE = "The global dispatch enforcement setting";
+const targetsGlobalMode = (raw: unknown) => raw == null || typeof raw !== "object" || (raw as { financialEntityId?: unknown }).financialEntityId == null;
+async function assertEnforcementScope(userId: number, authority: GovernedAuthority, financialEntityId: number | null) {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  assertGovernedTarget(authority, financialEntityId == null, GLOBAL_DISPATCH_MODE);
+  if (financialEntityId != null) await assertEntityInScope(db, financialEntityId, await dispatchScopeFor(userId));
+  return db;
 }
 
 /** A stored check the caller's organization may act on, or "not found". */
@@ -366,21 +365,19 @@ export const dispatchGateRouter = router({
     }),
 
   /** v21.2 — append a setting row. The history of when enforcement was on is audit trail. */
-  enforcementSet: roleProcedure("dispatch.enforcementSet")
+  enforcementSet: platformOrOrganizationProcedure("dispatch.enforcementSet", GLOBAL_DISPATCH_MODE, targetsGlobalMode)
     .input(z.object({ mode: z.enum(["off", "advisory", "enforced"]), reason: z.string().min(10).max(400), financialEntityId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
-      const { db, scope } = await scopedDb(ctx.user.id);
-      await assertEnforcementScope(db, scope, input.financialEntityId ?? null, ctx.user.id, "write");
+      const db = await assertEnforcementScope(ctx.user.id, ctx.authority, input.financialEntityId ?? null);
       const before = await loadEnforcementMode(input.financialEntityId ?? null);
       await db.insert(dispatchEnforcementSettings).values({ financialEntityId: input.financialEntityId ?? null, mode: input.mode, reason: input.reason, setByUserId: ctx.user.id, setAt: new Date() });
       return { scope: input.financialEntityId ?? "global", previous: before.mode, mode: input.mode };
     }),
 
-  enforcementGet: roleProcedure("dispatch.enforcementGet")
+  enforcementGet: platformOrOrganizationProcedure("dispatch.enforcementGet", GLOBAL_DISPATCH_MODE, targetsGlobalMode)
     .input(z.object({ financialEntityId: z.number().int().positive().nullable().optional() }).optional())
     .query(async ({ ctx, input }) => {
-      const { db, scope } = await scopedDb(ctx.user.id);
-      await assertEnforcementScope(db, scope, input?.financialEntityId ?? null, ctx.user.id, "read");
+      await assertEnforcementScope(ctx.user.id, ctx.authority, input?.financialEntityId ?? null);
       return loadEnforcementMode(input?.financialEntityId ?? null);
     }),
 
@@ -389,8 +386,11 @@ export const dispatchGateRouter = router({
     .input(z.object({ unitId: z.number().int().positive().nullable().optional(), jobId: z.number().int().positive().nullable().optional() }).optional())
     .query(async ({ ctx, input }) => {
       const { db, scope } = await scopedDb(ctx.user.id);
-      const me = (await db.select({ id: operators.id }).from(operators).where(eq(operators.userId, ctx.user.id)).limit(1))[0];
-      if (!me) return { verdict: "unknown" as const, items: [], note: "No operator record is linked to your user" };
+      // The caller's own record in the acting organization; another organization's is not theirs here, and two is a refusal.
+      const mine = await operatorForUserInScope(ctx.user.id, scope);
+      if (mine.kind === "none") return { verdict: "unknown" as const, items: [], note: "No operator record is linked to your user in this organization" };
+      if (mine.kind === "ambiguous") return { verdict: "unknown" as const, items: [], note: "There is more than one operator record for your user in this organization" };
+      const me = { id: mine.operatorId };
       // C1a — the operator is the caller's own, but the unit and job are named by the caller.
       await assertReadinessSubjectInScope(db, scope, { operatorId: me.id, unitId: input?.unitId ?? null, jobId: input?.jobId ?? null });
       const r = await composeReadiness({ operatorId: me.id, unitId: input?.unitId ?? null, trailerId: null, jobId: input?.jobId ?? null });

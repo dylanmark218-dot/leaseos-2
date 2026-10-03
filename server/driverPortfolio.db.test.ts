@@ -33,6 +33,12 @@ async function world(opts: { userId?: number | null; orgRef?: string | null } = 
   return { customer, vehicleType, unitId: Number(u.insertId), operatorId: Number(o.insertId), jobId: Number(j.insertId) };
 }
 
+/** A book (the employer an equipment authorization belongs to) owned by `orgRef`; NULL = the single tenant. */
+async function book(orgRef: string | null) {
+  const [e] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Fixture Employer Ltd.', 'corporation', 'CA-AB', ?)", [key("FE").slice(0, 60), orgRef]);
+  return Number(e.insertId);
+}
+
 async function bind(subjectType: string, subjectCode: string, kind: string, code: string, enforcement: "mandatory" | "informational" = "mandatory", label: string | null = null, orgRef: string | null = null) {
   await pool.execute(
     "INSERT INTO driverRequirementBindings (bindingRef, orgRef, subjectType, subjectCode, requirementKind, requirementCode, label, enforcement, active, createdByUserId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, true, 1, NOW())",
@@ -126,8 +132,8 @@ d("equipment qualifications come from the authorizations already on record", () 
     const w = await world({ userId });
     await bind("equipment", w.vehicleType, "equipment", "tri_drive_vac_truck");
     await pool.execute(
-      "INSERT INTO operatorEquipmentAuthorizations (authorizationRef, userId, financialEntityId, equipmentType, status, createdAt) VALUES (?, ?, 1, 'tri_drive_vac_truck', 'pending', NOW())",
-      [key("OEA").slice(0, 64), userId],
+      "INSERT INTO operatorEquipmentAuthorizations (authorizationRef, userId, financialEntityId, equipmentType, status, createdAt) VALUES (?, ?, ?, 'tri_drive_vac_truck', 'pending', NOW())",
+      [key("OEA").slice(0, 64), userId, await book(null)],
     );
     const r = await composeReadiness({ operatorId: w.operatorId, unitId: w.unitId, trailerId: null, jobId: w.jobId }, NOW);
     expect(r.eligibility.blockers.find(x => x.code === "driver_equipment_tri_drive_vac_truck_training_required")).toMatchObject({ severity: "blocking", overridable: false });

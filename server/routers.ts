@@ -55,6 +55,7 @@ import {
 } from "./payrollRouter";
 import { payrollCompensationRouter } from "./payrollCompensationRouter";   // payroll P1 (0226)
 import { payrollScheduleRouter } from "./payrollScheduleRouter";   // payroll P2 (0227)
+import { sourceRegistryRouter } from "./sourceRegistryRouter";   // approved external source registry (0233)
 import { fundingRouter, portalsRouter } from "./portalFundingRouter";
 import { purchasingRouter, recoveryRouter, roadsideRouter, vendorRouter } from "./purchasingRouter";
 import { deviceRouter, syncRouter } from "./deviceRouter";
@@ -100,6 +101,7 @@ import {
   unitInScope,
   workOrderInScope,
   proposalInScope,
+  assistantTargetsInScope,
   rateCardInScope,
   trackingSubjectInScope,
   transferTrackingNumber,
@@ -141,10 +143,14 @@ import { fleetPortfolioRouter } from "./fleetPortfolioRouter";
 import { assetRouter } from "./assetRouter";
 import { projectRouter } from "./projectRouter";
 import { inboundRouter, integrationRouter } from "./integrationRouter";
+import { integrationHubRouter } from "./integrationHubRouter";
 import { telematicsRouter } from "./telematicsRouter";
 import { workforceRouter } from "./workforceRouter";
 import { trainingAcademyRouter } from "./trainingAcademyRouter";
 import { driverPortfolioRouter } from "./driverPortfolioRouter";
+import { decideComplianceCredential, recordCredentialEntry } from "./credentialVerificationService";
+import { dbOrThrow } from "./driverPortfolioService";
+import { isMedicalDocType } from "./_core/compliancePassport";
 import { contractorOperationsRouter } from "./contractorOperationsRouter";
 import { auditRouter } from "./auditRouter";
 import { spatialRouter } from "./spatialRouter";
@@ -182,7 +188,6 @@ import {
   listJobUnits,
   createInspection,
   listInspections,
-  reviewComplianceDocument,
   listLocationIdentities,
   createLocationIdentity,
   listManifests,
@@ -384,6 +389,7 @@ export const appRouter = router({
   payroll: payrollRouter,
   payrollCompensation: payrollCompensationRouter,
   payrollSchedule: payrollScheduleRouter,
+  sourceRegistry: sourceRegistryRouter,
   contractors: contractorRouter,
   contractorOperations: contractorOperationsRouter,
   finance: financeRouter,
@@ -425,6 +431,7 @@ export const appRouter = router({
   asset: assetRouter,
   project: projectRouter,
   integration: integrationRouter,
+  integrationHub: integrationHubRouter,
   telematics: telematicsRouter,
   workforce: workforceRouter,
   academy: trainingAcademyRouter,
@@ -570,6 +577,9 @@ export const appRouter = router({
           }
           if (input.clientCaptureRef) {
             const existing = await findEvidenceByClientCaptureRef(input.clientCaptureRef);
+            // SEC-1: idempotent for the person who uploaded it. The reference is globally unique, so
+            // anyone else sending it is refused — never handed that record's id and storage key.
+            if (existing && existing.capturedBy !== ctx.user.id) throw new TRPCError({ code: "CONFLICT", message: "This capture reference is already in use" });
             if (existing) return { id: existing.id, key: existing.storageKey ?? "", alreadyUploaded: true as const };
           }
           const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "-");
@@ -861,6 +871,12 @@ export const appRouter = router({
         )
         .mutation(async ({ ctx, input }) => {
           await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5 — before the model is asked anything; the proposal would be visible to the unit's owner
+          // SEC-1: every id the draft will store is authority at commit, so each must be in the
+          // caller's organization — refused here, before the model is called, with the same
+          // not-found a missing record gets.
+          if (!(await assistantTargetsInScope(input, await scopeFor(ctx.user.id)))) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Record not found" });
+          }
           if (input.idempotencyKey) {
             const existing = await getAssistantProposal(input.idempotencyKey);
             if (existing) {
@@ -1742,7 +1758,14 @@ export const appRouter = router({
               confidence: z.enum(["low", "medium", "high"]).default("medium"),
             })
           )
-          .mutation(async ({ ctx, input }) => createComplianceDocument({ ...input, verificationStatus: "needs_review" }, await scopeFor(ctx.user.id))),   // review is documents.review
+          .mutation(async ({ ctx, input }) => {
+            // A medical record is private whichever path files it (as compliance.credentialRecord does).
+            const privateDetail = isMedicalDocType(input.docType);
+            const id = await createComplianceDocument({ ...input, verificationStatus: "needs_review", recordedByUserId: ctx.user.id, privateDetail }, await scopeFor(ctx.user.id));
+            // The same entry row in the portfolio audit as a driver's own submission.
+            if (id) await recordCredentialEntry(await dbOrThrow(), { credentialId: Number(id), ownerType: input.ownerType, ownerId: input.ownerId, docType: input.docType, privateDetail, actorUserId: ctx.user.id, path: "documents.create", at: new Date() });
+            return id;
+          }),   // review is documents.review
         review: roleProcedure("documents.review")
           .input(
             z.object({
@@ -1750,7 +1773,12 @@ export const appRouter = router({
               status: z.enum(["verified", "rejected"]),
             })
           )
-          .mutation(async ({ ctx, input }) => { const ok = await reviewComplianceDocument(input.id, input.status, await scopeFor(ctx.user.id)); if (!ok) throw new TRPCError({ code: "NOT_FOUND", message: `Document ${input.id} not found` }); return ok; }),
+          // Through the one verification door (credentialVerificationService): subject scope, separation of
+          // duties, the needs_review state and the conditional update. Out of scope stays "Document N not found".
+          .mutation(async ({ ctx, input }) => {
+            await decideComplianceCredential({ credentialId: input.id, outcome: input.status, verifierUserId: ctx.user.id, path: "documents.review", notFoundMessage: `Document ${input.id} not found` });
+            return true;
+          }),
       }),
     }),
     compliance: router({
