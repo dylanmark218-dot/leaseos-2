@@ -10,12 +10,13 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { moneyScoped, roleProcedure, router } from "./_core/trpc";
 import { requireOwnedEntity } from "./_core/entityScope";
-import { fuelStatementInScope, fuelTankInScope, fuelTransactionInScope, requireEvidence, requireFuelAccountOfEntity, requireUnit } from "./financeScope";
+import { fuelStatementInScope, fuelTankInScope, fuelTransactionInScope, requireEvidence, requireFuelAccountOfEntity } from "./financeScope";
 import { toCents } from "./_core/money";
 import { getDb } from "./db";
 import { bulkFuelDispenses, bulkFuelReadings, bulkFuelTanks, fleetFuelCards, fuelStatementLines, fuelStatements, fuelTransactions, units } from "../drizzle/schema";
@@ -43,6 +44,7 @@ export const fuelOpsRouter = router({
   dispenseRecord: moneyScoped(roleProcedure("fuel.dispenseRecord"))
     .input(z.object({ tankRef: z.string().min(1).max(64), unitId: z.number().int().positive().nullable(), equipmentId: z.number().int().positive().nullable().optional(), litres: z.number().positive(), quantitySource: z.enum(["meter", "stick_before_after", "stated"]), meterBefore: z.number().nonnegative().nullable().optional(), meterAfter: z.number().nonnegative().nullable().optional(), odometerKm: z.number().nonnegative().nullable().optional(), occurredAt: z.coerce.date(), evidenceRecordId: z.number().int().positive().nullable().optional() }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5 — a dispense's odometer joins the unit's meter sequence
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const tank = await fuelTankInScope(db, ctx.money, input.tankRef);
@@ -54,7 +56,6 @@ export const fuelOpsRouter = router({
         if (Math.abs(metered - input.litres) > 0.5) throw new TRPCError({ code: "BAD_REQUEST", message: `Meter says ${metered} L, dispense says ${input.litres} L` });
       }
       if (!input.unitId && !input.equipmentId) throw new TRPCError({ code: "BAD_REQUEST", message: "A dispense goes into a unit or a piece of equipment" });
-      await requireUnit(ctx.money, input.unitId);
       await requireEvidence(ctx.money, input.evidenceRecordId);
       await assertPeriodOpen(tank.financialEntityId, input.occurredAt, "Dispense");
       const dispenseRef = ref("DISP");

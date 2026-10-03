@@ -23,7 +23,9 @@ describe("contractor commercial chain boundary",()=>{
   });
   it("requires real organization relationships and owned crew resources",()=>{
     expect(router).toContain('No active commercial relationship authorizes this assignment.');
-    expect(router).toContain('recordBelongsToOrganization(db,org,"unit",input.unitId)');
+    // CP1.5 — the crew's unit is checked by the canonical unit scope (another organization's unit is not
+    // found, like a missing one), no longer by recordBelongsToOrganization, which passed a missing id.
+    expect(router).toContain('await requireCallerUnits(ctx.user.id,{unitId:input.unitId});');
     expect(router).toContain('Every assigned crew member must be an active worker');
   });
   it("refuses automatic salary and percentage settlement",()=>{

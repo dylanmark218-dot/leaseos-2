@@ -9,6 +9,7 @@ import {
   resourceBookings,
 } from "../../drizzle/schema";
 import { getDb } from "../db";
+import { conflictingBookingsWhere } from "./bookingConflict";
 import {
   assessEligibilityValidity,
   awardIdempotencyKey,
@@ -186,15 +187,9 @@ export async function awardAssignment(input: AwardInput): Promise<AwardResult> {
       const overlapping = await tx
         .select()
         .from(resourceBookings)
-        .where(
-          and(
-            eq(resourceBookings.resourceType, type),
-            eq(resourceBookings.resourceRef, ref),
-            lt(resourceBookings.startsAt, input.endsAt),
-            gt(resourceBookings.endsAt, input.startsAt),
-            sql`${resourceBookings.bookingState} in ('tentative','confirmed')`
-          )
-        );
+        // The final revalidation, inside the transaction, by the one booking-conflict rule
+        // (_core/bookingConflict.ts) — the same rule open-shift eligibility applied earlier.
+        .where(conflictingBookingsWhere({ type, ref }, input));
       for (const o of overlapping) {
         if (o.postingId === input.postingId) continue;
         conflicts.push({
