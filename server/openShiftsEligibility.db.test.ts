@@ -9,6 +9,8 @@
  * work (shifts.post) stay three different permissions; only the work-taking action is gated by
  * eligibility, and it fails closed.
  */
+import { composeReadiness } from "./readinessComposer";
+import { operatorIdFromRecord } from "./_core/operatorIdentity";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { appRouter } from "./routers";
@@ -32,10 +34,19 @@ async function member(orgRef: string, roles: string[]) {
   for (const role of roles) await pool.execute("INSERT INTO userRoleAssignments (userId, role, scopeType, grantedByUserId, grantedAt) VALUES (?,?,'global',1,NOW())", [userId, role]);
   return userId;
 }
-/** The person's operator record, owned by the organization, with a licence expiry (or none). */
-async function licence(orgRef: string, userId: number, expires: Date | null) {
+/**
+ * The person's operator record, owned by the organization, with a licence. `verified` files a
+ * verified driver_licence document with that expiry — what the canonical licence verdict reads.
+ * `legacy` sets only operators.licenseExpiresAt, which the verdict treats as an unverified claim
+ * (owner's ruling, 2026-09-25), so it establishes no licence on its own.
+ */
+async function licence(orgRef: string, userId: number, expires: Date | null, as: "verified" | "legacy" = "verified") {
   const [o] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,NOW())", [userId, `Op ${rnd()}`, "1", expires]);
   await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?,'operator',?,1)", [orgRef, o.insertId]);
+  if (as === "verified") {
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Licence', ?, ?, 'verified')",
+      [o.insertId, new Date("2026-01-01T00:00:00Z"), expires]);
+  }
   return o.insertId;
 }
 /** On this organization's roster: an active crew membership, optionally on a rotation. */
@@ -180,4 +191,55 @@ d("seeing, wanting and assigning are three permissions", () => {
     // ASSIGN_SHIFT (shifts.post): a worker cannot post work.
     await expect(post(mechanic.userId)).rejects.toMatchObject({ code: "FORBIDDEN" });
   }, 60_000);
+});
+
+/*
+ * SPINE item 2 — the same licence records, one answer, in all three places that ask.
+ *
+ * Open shifts and shift readiness used to read operators.licenseExpiresAt themselves and treat a
+ * future date as in force, while dispatch held the same person at "licence unknown". Each shape
+ * below is filed once and asked three ways: the open-shift view (shifts.eligibility), shift readiness
+ * (readiness.forShift) and the dispatch composer (composeReadiness). Their words differ; the
+ * standing may not.
+ */
+d("the licence has one verdict across open shifts, shift readiness and dispatch", () => {
+  type Shape = { name: string; file: (orgRef: string, userId: number) => Promise<number>; openShift: string | null; readiness: string; dispatch: string | null };
+  const doc = async (operatorId: number, expires: Date | null, status: "verified" | "needs_review" | "rejected") =>
+    pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Licence', ?, ?, ?)",
+      [operatorId, new Date("2026-01-01T00:00:00Z"), expires, status]);
+  const LATER = new Date("2027-06-01T00:00:00Z");
+  const EARLIER = new Date("2026-09-01T00:00:00Z");   // before the shift and before now
+  const SHAPES: Shape[] = [
+    { name: "a verified licence in force", file: (A, u) => licence(A, u, LATER), openShift: null, readiness: "satisfied", dispatch: null },
+    { name: "only the legacy date, in the future", file: (A, u) => licence(A, u, LATER, "legacy"), openShift: "licence_not_established", readiness: "unknown", dispatch: "operator_licence_unknown" },
+    { name: "only the legacy date, already past", file: (A, u) => licence(A, u, EARLIER, "legacy"), openShift: "licence_expired", readiness: "failed", dispatch: "operator_licence_expired" },
+    { name: "a verified licence with no expiry recorded", file: async (A, u) => { const o = await licence(A, u, null, "legacy"); await doc(o, null, "verified"); return o; }, openShift: "licence_not_established", readiness: "unknown", dispatch: "operator_licence_unknown" },
+    { name: "a verified licence already expired", file: (A, u) => licence(A, u, EARLIER), openShift: "licence_expired", readiness: "failed", dispatch: "operator_licence_expired" },
+    { name: "only an unverified upload", file: async (A, u) => { const o = await licence(A, u, null, "legacy"); await doc(o, LATER, "needs_review"); return o; }, openShift: "licence_not_established", readiness: "unknown", dispatch: "operator_licence_unknown" },
+    { name: "a verified licence beside a newer unverified upload", file: async (A, u) => { const o = await licence(A, u, LATER); await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Licence', ?, ?, 'needs_review')", [o, new Date("2026-06-01T00:00:00Z"), new Date("2030-01-01T00:00:00Z")]); return o; }, openShift: null, readiness: "satisfied", dispatch: null },
+  ];
+  for (const s of SHAPES) {
+    it(s.name, async () => {
+      const A = await org();
+      const dispatcher = await member(A, ["dispatcher"]);
+      const userId = await member(A, ["driver"]);
+      const operatorId = await s.file(A, userId);
+      await roster(A, userId);
+      const p = await post(dispatcher);
+
+      const view = await caller(dispatcher).shifts.eligibility({ postRef: p.postRef, userId });
+      const licenceCodes = view.reasons.map(x => x.code).filter(c => c.startsWith("licence") || c === "no_licence_recorded");
+      expect(licenceCodes).toEqual(s.openShift ? [s.openShift] : []);
+
+      // readiness.forShift reports each check as a marked line: OK, MISSING (failed) or UNKNOWN.
+      const ready = await caller(userId).readiness.forShift({ postRef: p.postRef });
+      const MARK = { satisfied: "OK", failed: "MISSING", unknown: "UNKNOWN" } as const;
+      const licenceLine = ready.lines.find(l => / · Licence\b/.test(l));
+      expect(licenceLine, ready.lines.join("\n")).toMatch(new RegExp(`^${MARK[s.readiness as keyof typeof MARK]} · `));
+
+      const composed = await composeReadiness({ operatorId: operatorIdFromRecord(operatorId), unitId: null, trailerId: null, jobId: null });
+      const dispatchCodes = composed.eligibility.blockers.map(b => b.code).filter(c => c.startsWith("operator_licence"));
+      expect(dispatchCodes).toEqual(s.dispatch ? [s.dispatch] : []);
+    }, 30_000);
+  }
 });

@@ -21,6 +21,8 @@ import {
 import { resolveRoleType, requirementDefaultsOf, type RoleType } from "./_core/dispatchRoleCatalog";
 import { assessStaffing, canTransitionPosting } from "./_core/dispatchLifecycle";
 import { describeTransition, headEventId, type AssignmentEventType, type Binding } from "./_core/dispatchAssignmentEvents";
+import type { Tx } from "./_core/dbTypes";
+import { syncJobRoomWithBinding, type JobRoomResult } from "./jobRoomService";
 
 export type Scope = { tenantId: string };
 
@@ -293,6 +295,8 @@ export type AssignmentOutcome = {
   lastEventId: number;
   planningState: string;
   staffing: ReturnType<typeof assessStaffing>;
+  /** 0205 — the job room the binding kept in step: the operator bound joins it, the one displaced leaves it. */
+  jobRoom: JobRoomResult | null;
 };
 
 /**
@@ -330,11 +334,16 @@ async function applyBinding(args: {
   scope: Scope;
   /** A clear always needs a reason; a first binding does not. */
   requireReason: boolean;
-}): Promise<AssignmentOutcome> {
+}, outer?: Tx): Promise<AssignmentOutcome> {
   const db = await database();
   const now = new Date();
 
-  return db.transaction(async tx => {
+  /*
+   * 0206 — a caller that already holds the posting lock (the marketplace award, which locks the
+   * posting first, then the role, then the post and its offers) runs the binding inside its own
+   * transaction. The body is unchanged: the same lock order, the same checks, the same writes.
+   */
+  const body = async (tx: Tx): Promise<AssignmentOutcome> => {
     // 1. The role, and through it the posting we must serialise on.
     const role = (await tx.select().from(dispatchRoles).where(eq(dispatchRoles.id, args.roleId)).limit(1))[0];
     if (!role) throw new TRPCError({ code: "NOT_FOUND", message: `Role ${args.roleId} not found` });
@@ -465,14 +474,51 @@ async function applyBinding(args: {
     }
     const planningState = from !== desired && canTransitionPosting(from, desired) ? desired : from;
 
+    // 10. The job room, kept in step with the binding in the same transaction. An operator with no
+    //     linked user is reported, never invented.
+    const jobRoom = await syncJobRoomWithBinding(tx, {
+      tenantId: args.scope.tenantId, jobId: lockedPosting.jobId, roleId: args.roleId,
+      fromOperatorId: previous.operatorId, toOperatorId: args.next.operatorId,
+      actorUserId: args.actorUserId, actorRole: args.actorRole, at: now,
+    });
+
     return {
       roleId: args.roleId,
       status: eventType === "assignment_unassigned" ? "open" : "assigned",
       binding: { ...args.next },
       eventId, eventType, lastEventId: eventId,
-      planningState, staffing,
+      planningState, staffing, jobRoom,
     };
-  });
+  };
+  return outer ? body(outer) : db.transaction(body);
+}
+
+/**
+ * 0206 — the binding inside a transaction the caller already holds. The marketplace award takes
+ * the posting lock first, exactly as this does, so the two never deadlock; then it asks for the
+ * binding here rather than restating any of it.
+ */
+export function setRoleAssignmentIn(tx: Tx, args: {
+  roleId: number;
+  operatorId: number | null;
+  unitId: number | null;
+  trailerId: number | null;
+  expectedLastEventId: number | null;
+  reason: string | null;
+  actorUserId: number;
+  actorRole: string;
+  scope: Scope;
+}): Promise<AssignmentOutcome> {
+  return applyBinding({
+    roleId: args.roleId,
+    next: { operatorId: args.operatorId, unitId: args.unitId, trailerId: args.trailerId },
+    expectedLastEventId: args.expectedLastEventId,
+    reason: args.reason,
+    actorUserId: args.actorUserId,
+    actorRole: args.actorRole,
+    scope: args.scope,
+    requireReason: false,
+  }, tx);
 }
 
 /** Assign or reassign — which one it is, is server state, not caller intent. */

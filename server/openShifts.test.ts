@@ -22,7 +22,7 @@ const held = (...codes: string[]) => codes.map(code => ({ code, held: true, notH
 const member = (name: string, o: Partial<PersonFacts> = {}): PersonFacts => ({
   userId: name.charCodeAt(0), name, inOrganization: true, roles: ["driver"],
   rosters: [{ rotation }], leave: [], commitments: [],
-  licence: { kind: "recorded", expiresAt: new Date("2027-06-01T00:00:00Z") },
+  licence: { kind: "in_force" },
   qualifications: held("CLASS1", "TDG"), ...o,
 });
 
@@ -88,13 +88,14 @@ describe("who could take it, and why the rest could not", () => {
 });
 
 describe("the rules the router used to hold alone are the engine's now", () => {
-  it("refuses no licence, an ambiguous operator record, a blank expiry and a licence expiring before the shift", () => {
+  it("maps the licence standing and judges no date: none, ambiguous, lapsed, not established", () => {
     const codes = (licence: PersonFacts["licence"]) => shiftEligibility(post(), member("Lee", { licence })).reasons.map(r => r.code);
+    expect(codes({ kind: "in_force" })).toEqual([]);
     expect(codes({ kind: "none" })).toEqual(["no_licence_recorded"]);
     expect(codes({ kind: "ambiguous" })).toEqual(["no_licence_recorded"]);
-    expect(codes({ kind: "recorded", expiresAt: null })).toEqual(["no_licence_recorded"]);
-    expect(codes({ kind: "recorded", expiresAt: new Date("2026-10-01T00:00:00Z") })).toEqual(["licence_expired"]);
-    expect(codes({ kind: "recorded", expiresAt: new Date("2027-06-01T00:00:00Z") })).toEqual([]);
+    expect(codes({ kind: "lapsed", expiresAt: new Date("2026-10-01T00:00:00Z") })).toEqual(["licence_expired"]);
+    // Unknown never becomes eligible: the legacy date, a verified licence with no expiry, a rejection.
+    expect(codes({ kind: "not_established", reason: "the date is from the legacy operator record" })).toEqual(["licence_not_established"]);
   });
 
   it("says nothing about a person outside the organization beyond that", () => {

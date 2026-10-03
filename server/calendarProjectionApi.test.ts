@@ -74,8 +74,10 @@ d("every event names the record it came from", () => {
   it("projects an expressed interest and says it is not an assignment", async () => {
     const dispatcher = await withRole("dispatcher");
     const driver = await withRole("driver");
-    // A worker the open-shift rule passes: licensed (their own operator record) and on the roster.
+    // A worker the open-shift rule passes: licensed (their own operator record, with a verified
+    // driver_licence document — SPINE item 2: the legacy date alone is an unverified claim) and on the roster.
     await pool.execute("INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,?,NOW())", [driver, driver, `Op ${rnd()}`, "1", new Date("2030-01-01T00:00:00Z")]);
+    await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Licence', NOW(), ?, 'verified')", [driver, new Date("2030-01-01T00:00:00Z")]);
     await onRoster(driver);
     const p = await caller(dispatcher).shifts.post({ title: "Night vac", startsAt: day(6), endsAt: day(7), requiredRole: "driver" });
     await caller(driver).shifts.expressInterest({ postRef: p.postRef });
