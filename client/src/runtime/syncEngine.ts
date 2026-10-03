@@ -21,7 +21,7 @@
  */
 
 import { classifySendFailure, queueDisposition, retryDelayMs, scopeTransition, type QueueDisposition, type ScopeTransition, type SessionObservation, type SessionScope } from "@shared/clientContract";
-import type { CaptureKind, Clock, Connectivity, FileVault, Keystore, LocalCapture, LocalStore, Transport } from "./contracts";
+import { isDirectCapture, type CaptureKind, type Clock, type Connectivity, type FileVault, type Keystore, type LocalCapture, type LocalStore, type Transport } from "./contracts";
 import { canonicalJson, sha256Hex, sha256HexOfString, toBase64 } from "./crypto";
 import { Outbox } from "./outbox";
 
@@ -66,6 +66,12 @@ export function captureSyncPriority(kind: CaptureKind): number {
       return 20;
     case "photo":
       return 40;
+    // 0205/0206 — never packaged (see DIRECT_CAPTURE_KINDS); ranked only so the switch is total.
+    // Their own sender orders them: acknowledgements first.
+    case "board_acknowledgement":
+    case "board_message":
+    case "shift_response":
+      return 10;
   }
 }
 
@@ -225,7 +231,9 @@ export class SyncEngine {
     const notBefore = await this.deps.store.getMeta("syncNotBefore");
     if (!opts.force && notBefore && new Date(notBefore).getTime() > this.deps.clock.now().getTime()) return none(`Waiting to retry — captures stay queued on the device until ${notBefore}`, "unknown", "retry", notBefore);
 
-    const queued = prioritizeQueuedCaptures(await this.deps.store.listCaptures({ syncState: "queued" })).slice(0, MAX_ITEMS_PER_PACKAGE);
+    // 0205/0206 — direct captures (a message, an acknowledgement, a response to open work) go to
+    // their own procedure through BoardQueue. Packaging one would upload a conversation as evidence.
+    const queued = prioritizeQueuedCaptures((await this.deps.store.listCaptures({ syncState: "queued" })).filter(c => !isDirectCapture(c.kind))).slice(0, MAX_ITEMS_PER_PACKAGE);
     if (queued.length === 0) return none("Nothing to sync", "active");
     // Asked only when there is something to send: who is signed in, and for which company.
     const scope = await this.checkScope();

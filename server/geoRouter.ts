@@ -8,6 +8,7 @@
  */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { and, between, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import { accessRoadSegments, atsLegalSubdivisions, communicationCoverage, companyRadioAuthorizations, externalDataSources, geoImportRuns, locationIdentities, radioChannels, roadGraphBuilds, roadGraphEdges, roadGraphNodes, roadRadioAssignments, siteAccessConfirmations, siteAccessPoints, unitRadioCapabilities } from "../drizzle/schema";
 import { planCommunications, type CoverageObservation, type GeoCondition, type PathSegment } from "./_core/commRoute";
@@ -300,6 +301,7 @@ export const geoRouter = router({
   accessConfirmPassage: roleProcedure("geo.accessConfirmPassage")
     .input(z.object({ accessRef: z.string().min(1).max(64), outcome: z.enum(["reached", "could_not_reach", "reached_with_difficulty"]), tripId: z.number().int().positive().optional(), unitId: z.number().int().positive().optional(), operatorId: z.number().int().positive().optional(), configurationFingerprint: z.string().max(120).optional(), detail: z.string().max(400).optional(), observedAt: z.coerce.date().default(() => new Date()) }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       const d = await db();
       const a = (await d.select().from(siteAccessPoints).where(eq(siteAccessPoints.accessRef, input.accessRef)).limit(1))[0];
       if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "No such access point" });
