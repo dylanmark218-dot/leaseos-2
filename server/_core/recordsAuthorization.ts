@@ -378,6 +378,12 @@ export type Permission =
   | "academy.read_own" | "academy.progress_own" | "academy.assessment_own" | "academy.certificate.sign_own" | "academy.direct_supervision_attest_own"
   | "academy.assign" | "academy.manage" | "academy.evaluate" | "academy.source.review"
   | "academy.certificate.issue" | "academy.requirement.manage" | "academy.direct_supervision.manage"
+  // 0212 — Driver Portfolio. The `_own` three are universal and self-scoped in the router: they read
+  // the operator linked to ctx.user.id and take no operator id. Reading another driver's portfolio is
+  // safety/HR/management's; managing requirements is safety's and management's. Verification reuses
+  // compliance.credential.verify, and dispatch's view reuses dispatch.read.
+  | "portfolio.read_own" | "portfolio.submit_own" | "portfolio.share_own"
+  | "portfolio.read" | "portfolio.requirement.manage"
   // 0199 — fleet maintenance, checkpoint 1. Assigning a work order names who owns the repair; cancelling
   // one can leave a defect unrepaired, so it is sensitive.
   | "maintenance.workorder.assign" | "maintenance.workorder.cancel"
@@ -843,6 +849,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.time.read_team",
     "payroll.time.approve",
     "payroll.time.reject",
+    "portfolio.read",
+    "portfolio.requirement.manage",
     // SA1 — Sign & Attest
     "attest.read",
     "attest.document.open",
@@ -1185,6 +1193,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.time.read_team",
     "payroll.time.approve",
     "payroll.time.reject",
+    "portfolio.read",
+    "portfolio.requirement.manage",
     // SA1 — Sign & Attest
     "attest.read",
     "attest.document.open",
@@ -1486,6 +1496,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "fleet.meter.verify",
   ],
   hr: [
+    "portfolio.read",
     "document.read",
     "academy.assign",
     "academy.manage",
@@ -2026,6 +2037,10 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "academy.assessment_own",
   "academy.certificate.sign_own",
   "academy.direct_supervision_attest_own",
+  // 0212 — the Driver Wallet: the caller's own operator record, never one the request names.
+  "portfolio.read_own",
+  "portfolio.submit_own",
+  "portfolio.share_own",
   // SA1 — signing or declining your OWN assigned field: the service resolves the signer row to
   // `ctx.user.id` and refuses anything else (WRONG_SIGNER). Nobody signs for somebody else.
   "attest.sign_own",
@@ -2097,6 +2112,10 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
  * sensitive act with no record of who authorized it is worse than a refusal.
  */
 export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
+  // 0212 — a submitted credential, a share of one, and the requirements dispatch reads.
+  "portfolio.submit_own",
+  "portfolio.share_own",
+  "portfolio.requirement.manage",
   "live_assist.use",
   "live_assist.administer",
   "live_assist.review",
@@ -3691,6 +3710,24 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "closeout.termsApprove": "closeout.terms.approve",
   "closeout.termsApply": "closeout.terms.record",
 
+  /* ---- 0212: Driver Portfolio API ---- */
+  "driverPortfolio.myWallet": "portfolio.read_own",
+  "driverPortfolio.myCredentialHistory": "portfolio.read_own",
+  "driverPortfolio.myShares": "portfolio.read_own",
+  "driverPortfolio.submitCredential": "portfolio.submit_own",
+  "driverPortfolio.shareIssue": "portfolio.share_own",
+  "driverPortfolio.shareRevoke": "portfolio.share_own",
+  "driverPortfolio.operatorReadiness": "dispatch.read",
+  "driverPortfolio.portfolio": "portfolio.read",
+  "driverPortfolio.auditHistory": "portfolio.read",
+  "driverPortfolio.expiryDashboard": "portfolio.read",
+  "driverPortfolio.verificationQueue": "portfolio.read",
+  "driverPortfolio.credentialVerify": "compliance.credential.verify",
+  "driverPortfolio.requirementList": "portfolio.read",
+  "driverPortfolio.requirementGet": "portfolio.read",
+  "driverPortfolio.requirementCreate": "portfolio.requirement.manage",
+  "driverPortfolio.requirementUpdate": "portfolio.requirement.manage",
+  "driverPortfolio.requirementRetire": "portfolio.requirement.manage",
   /* ---- 0199: fleet maintenance, checkpoint 1 ---- */
   "maintenance.workOrderAssignment": "maintenance.read_defect",
   "maintenance.workOrderAssign": "maintenance.workorder.assign",
