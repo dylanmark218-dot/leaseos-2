@@ -6,17 +6,17 @@ here can be added rather than read.
 
 | Measure | Value | Read from |
 |---|---|---|
-| Release | **v23.30** | `LEASEOS_RELEASE` (or explicit argument 1) |
-| Tables | **429** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **186** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **703** | `roleProcedure(` call sites across all routers |
-| Externally-gated procedures (portal) | **36** | `externalProcedure(` call sites in `server/portalRouter.ts` |
+| Release | **v23.31** | `LEASEOS_RELEASE` (or explicit argument 1) |
+| Tables | **461** | `mysqlTable(` declarations in `drizzle/schema.ts` |
+| Migrations | **200** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Role-authorized procedures | **814** | `roleProcedure(` call sites across all routers |
+| Externally-gated procedures (portal) | **40** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
-| Permissions | **371** | the `Permission` union |
-| Sensitive (fail-closed) permissions | **139** | `SENSITIVE_PERMISSIONS` |
-| Universal (self-scoped) permissions | **13** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **441 / 6118** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Permissions | **411** | the `Permission` union |
+| Sensitive (fail-closed) permissions | **162** | `SENSITIVE_PERMISSIONS` |
+| Universal (self-scoped) permissions | **16** | `UNIVERSAL_PERMISSIONS` |
+| Test files / cases | **481 / 6535** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **7 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -50,6 +50,11 @@ surfaces (exceptions, inbox, my day, search, timeline) · dispatch gate with
 enforcement setting · IFTA · GST/HST · period close · bank reconciliation ·
 accounts receivable, credits, collections, write-offs · customer identity ·
 commercial core (terms, POs and AFEs, customer rate cards, billing check) ·
+customer, contract and rate management (the customer profile with its
+contacts and roles, contracts with a lifecycle and supersession, rate sheets
+as versioned groups of charge definitions approved as a unit, conditioned
+rate lines, the job's frozen commercial snapshot, the billable commercial
+context the next Billing checkpoint consumes) ·
 external identities and the customer / vendor / facility portal · the site
 sign-off chain (clocks, frozen revisions, signature authority, post-site
 supplement, delay and road-hazard evidence, three closes) · portal
@@ -62,7 +67,31 @@ existing queue, chain of custody, approval queue, timeline, completion
 package, vendor and facility shells) · fleet shop (parts ledger with cores
 and counts, tires by serial and axle position, warranty policies and
 two-person claims, serialized tools, recalls held unverified, work-order
-and unit cost that names what it cannot know) · capital assets (one
+and unit cost that names what it cannot know) · fleet maintenance,
+checkpoint 1 (a work order owned by a person holding a shop role, with
+every assignment kept as history; a cancelled work order that repairs
+nothing, releases nothing and leaves its defect open; a legacy update that
+can no longer move a status; a forward-only advance that stamps when work
+started and finished and keeps its note; telematics answering not-found
+across an organization) · fleet maintenance, checkpoint 2 (a defect from
+the reporter's words to an independent return to service: the proposal
+kept apart from the triage decision, a reported critical holding the unit
+at once, the work order and its first task opened together, tasks that
+only move forward, one release door that waits for every task, and a
+return to service refused to the technician who signed the release that
+resolves the defect, lifts its hold, closes its roadside event and the
+work order in one act, every step an event) · Fleet & Equipment Portfolio foundation (typed
+holds whose effect is a warning, a block releasable only under an approved
+policy, or — for a safety hold — out of service with no override, placed
+and released by different people with the hold's type deciding who, never
+edited and never deleted, read into dispatch readiness and its
+fingerprint; a unit's meters read where each figure already lives —
+telemetry, work orders, fuel, trips, tire service — beside a ledger for
+readings with no other home, nothing copied, a reading that went below an
+accepted one kept as evidence while any service count from before it
+answers METER_REGRESSION rather than a due figure; the unit's operational
+state derived on every read, indeterminate when a source cannot be read,
+and naming what it does not evaluate) · capital assets (one
 identity per unit, two-person capital review, CCA class as a verified
 candidate, pool arithmetic with the claim UNKNOWN until the rate is
 verified, year-end schedule reviewed by a second person, the asset twin) ·
@@ -201,8 +230,7 @@ readiness — every step the server's answer.
 
 Native shell (Capacitor), encrypted SQLite, hardware keystore, native file
 vault, camera, GPS, biometric signing, local notifications. Browser/mobile
-end-to-end tests. LoadSense authenticated gateway ingestion/native BLE service and hardware deployment (the recovered protocol, calibration/stability/material-movement engines and persistence model are present; the production machine-authenticated device edge is not yet wired). Routing services (a native graph built from imported Alberta road data routes within built areas; no provincial routing source — P0 outside them; PostGIS/Valhalla/Martin/MapLibre not deployed; ATS v4.1 importable per township and imported where a person has run it — coordinates are verified one at a time with evidence). Radio and coverage data as imports (the ISED, BC and CRTC adapters are not written — channels are seeded or recorded by hand, road assignments are recorded or confirmed from a field observation, and coverage is whatever somebody has recorded; no cellular or spectrum layer has been ingested). Fluids as measured inventory (parts ledger only). Contracts and MSAs as
-records; WBS below cost code; earned-value schedules. AI extraction of rate sheets from
+end-to-end tests. LoadSense authenticated gateway ingestion/native BLE service and hardware deployment (the recovered protocol, calibration/stability/material-movement engines and persistence model are present; the production machine-authenticated device edge is not yet wired). Routing services (a native graph built from imported Alberta road data routes within built areas; no provincial routing source — P0 outside them; PostGIS/Valhalla/Martin/MapLibre not deployed; ATS v4.1 importable per township and imported where a person has run it — coordinates are verified one at a time with evidence). Radio and coverage data as imports (the ISED, BC and CRTC adapters are not written — channels are seeded or recorded by hand, road assignments are recorded or confirmed from a field observation, and coverage is whatever somebody has recorded; no cellular or spectrum layer has been ingested). Fluids as measured inventory (parts ledger only). WBS below cost code; earned-value schedules. AI extraction of rate sheets from
 uploaded documents (a proposal path exists; the document reader that fills
 it does not); formula pricing is recorded, not evaluated. inbound
 vendor bills and facility tickets by machine (portal only). GPS on the

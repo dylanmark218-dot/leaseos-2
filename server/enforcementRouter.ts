@@ -23,6 +23,7 @@ import { z } from "zod";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
+import { requireCallerUnits } from "./unitScope";
 import {
   deviceSafetyLatches, enforcementDocumentExtractions, enforcementEvents, enforcementViolations,
   oosReleaseFindings, oosReleasePolicies, outOfServiceOrders, roadsidePanelGrants, scanAudits, workOrderReleases,
@@ -169,6 +170,10 @@ export const enforcementRouter = router({
       })).max(100),
     }))
     .mutation(async ({ ctx, input }) => {
+      // CP1.5 — the event carries the caller's tenant, but the defect and work order it files are keyed
+      // to the unit, and a critical one grounds that truck in readiness. The unit and the trailer must be
+      // the caller's organization's, checked before the transaction opens, so a refusal writes nothing.
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId, trailerId: input.trailerId });
       const d = await db();
       const acting = await resolveActingScope(d, ctx.user.id);
       const confirm: ConfirmInput = {
@@ -358,6 +363,7 @@ export const enforcementRouter = router({
       at: z.coerce.date().default(() => new Date()),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       const d = await db();
       const grantRef = ref("PGRANT");
       const expiresAt = new Date(input.at.getTime() + input.minutesValid * 60_000);

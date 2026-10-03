@@ -24,6 +24,9 @@ import RouteSafetyWorkspace from "./showcase/RouteSafetyWorkspace";
 import DisposalDirectory from "./pages/DisposalDirectory";
 import DisposalFinder from "./pages/DisposalFinder";
 import CommercialOffice from "./pages/CommercialOffice";
+import Customers from "./pages/Customers";
+import Contract from "./pages/Contract";
+import RateSheet from "./pages/RateSheet";
 import CommunicationsPackage from "./pages/CommunicationsPackage";
 import TransmitCheck from "./pages/TransmitCheck";
 import CommunicationsPackageStatus from "./pages/CommunicationsPackageStatus";
@@ -33,6 +36,7 @@ import AssistantCalibration from "./pages/AssistantCalibration";
 import TripOperationsWorkspace from "./showcase/TripOperationsWorkspace";
 import TrainingAcademy from "./pages/TrainingAcademy";
 import DispatchJobDetail from "./dispatch/DispatchJobDetail";
+import FileManager from "./records/FileManager";
 
 function DashboardRoute({ children }: { children: ReactNode }) {
   return <DashboardLayout>{children}</DashboardLayout>;
@@ -61,6 +65,10 @@ function Router() {
       <Route path="/map" component={() => <MapSurface />} />
       <Route path="/jobs" component={() => <JobsSurface />} />
       <Route path="/evidence" component={() => <EvidenceSurface />} />
+      {/* The Records & File Manager: browse, inspect and download records the
+          server has already decided this caller may see. */}
+      <Route path="/records" component={() => <FileManager />} />
+      <Route path="/files" component={() => <Redirect to="/records" />} />
       <Route path="/safety" component={() => <SafetySurface />} />
       {/* v22.20 — communications, on real procedures. Not showcase routes:
           these read sealed packages and the transmit engine, so demonstration
@@ -112,6 +120,10 @@ function Router() {
           </DashboardRoute>
         )}
       />
+      <Route path="/customers" component={() => <DashboardRoute><Customers /></DashboardRoute>} />
+      <Route path="/customers/:accountRef">{(p: { accountRef: string }) => <DashboardRoute><Customers accountRef={p.accountRef} /></DashboardRoute>}</Route>
+      <Route path="/contracts/:contractRef">{(p: { contractRef: string }) => <DashboardRoute><Contract contractRef={p.contractRef} /></DashboardRoute>}</Route>
+      <Route path="/rate-sheets/:rateSheetRef">{(p: { rateSheetRef: string }) => <DashboardRoute><RateSheet rateSheetRef={p.rateSheetRef} /></DashboardRoute>}</Route>
       <Route path="/trip-operations" component={() => <Redirect to="/showcase/trips" />} />
       <Route path="/training-academy" component={() => <DashboardRoute><TrainingAcademy /></DashboardRoute>} />
       <Route path="/404" component={NotFound} />

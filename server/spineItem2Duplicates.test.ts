@@ -152,3 +152,113 @@ describe("SPINE item 2 — the open-shift router enforces the one rule and holds
     expect(strings.filter(x => CODES.includes(x))).toEqual([]);
   });
 });
+
+/**
+ * Field-ticket signature: whether a ticket carries the signature it needs is decided once, by
+ * `fieldTicketSignatureVerdict` (_core/fieldTicketSignature.ts), from every signature row, every
+ * revision and the ticket's record. Before it, invoicing asked "does any row say accepted?", closeout
+ * "does the newest row exist?", and the portal read the denormalized column — three answers that
+ * diverged on a stale or disagreeing record. This fails if a file that reads signatures compares a
+ * signature's `result` or a ticket's `signatureStatus` to a signature outcome again, or if a consumer
+ * stops asking the verdict. A row-existence check that locks the workflow (no second signature, no
+ * edit after signing) is a lock, not a verdict, and is not what this counts.
+ */
+describe("SPINE item 2 — a field ticket's signature has one verdict", () => {
+  const RULE = "server/_core/fieldTicketSignature.ts";
+  const OUTCOMES = new Set(["unsigned", "accepted", "partially_accepted", "refused", "no_representative"]);
+  const readers = files.filter(f => f !== RULE && !/\.test\.tsx?$/.test(f) && /fieldTicketSignatures|signatureStatus/.test(readFileSync(f, "utf8")));
+
+  /** `a.result === "accepted"`, `t.signatureStatus !== "unsigned"` and the like: a signature outcome judged in place. */
+  const judgedInPlace = (file: string, text: string): string[] => {
+    const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+    const found: string[] = [];
+    const isField = (e: ts.Expression) => ts.isPropertyAccessExpression(e) && (e.name.text === "result" || e.name.text === "signatureStatus");
+    const isOutcome = (e: ts.Expression) => ts.isStringLiteralLike(e) && OUTCOMES.has(e.text);
+    const visit = (n: ts.Node): void => {
+      if (ts.isBinaryExpression(n) && [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken].includes(n.operatorToken.kind)
+        && ((isField(n.left) && isOutcome(n.right)) || (isField(n.right) && isOutcome(n.left)))) {
+        found.push(`${file}:${sf.getLineAndCharacterOfPosition(n.getStart()).line + 1}: ${n.getText()}`);
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+    return found;
+  };
+
+  it("finds an in-place judgement, and not a mention", () => {
+    expect(judgedInPlace("x.ts", `const a = s.result === "accepted"; const b = "x.signatureStatus === 'refused'"; const c = s.kind === "accepted";`)).toHaveLength(1);
+  });
+
+  it("no file that reads signatures judges a signature outcome itself", () => {
+    expect(readers.flatMap(f => judgedInPlace(f, readFileSync(f, "utf8"))), `Ask fieldTicketSignatureVerdict (${RULE}); a signature row is evidence, not the verdict`).toEqual([]);
+  });
+
+  it("invoicing, closeout and the portal's daily count ask the verdict; the draft and the closeout state take it", () => {
+    for (const f of ["server/invoicingRouter.ts", "server/closeoutRouter.ts", "server/portalRouter.ts"]) {
+      expect(readFileSync(f, "utf8"), `${f} no longer asks fieldTicketSignatureVerdict`).toMatch(/fieldTicketSignatureVerdict\(/);
+    }
+    expect(readFileSync("server/_core/invoiceDraft.ts", "utf8")).toMatch(/signature: SignatureVerdict/);
+    expect(readFileSync("server/_core/siteCloseout.ts", "utf8")).toMatch(/signature: SignatureVerdict/);
+    expect([...declared].filter(([, names]) => names.has("fieldTicketSignatureVerdict")).map(([f]) => f)).toEqual([RULE]);
+  });
+});
+
+/*
+ * "Is this resource already booked over this window?" — one rule, in _core/bookingConflict.ts.
+ *
+ * Removing `detectBookingConflicts` left two live copies of the rule (the award's SQL and the
+ * open-shift router's SQL) and an in-memory `overlaps` in the open-shift engine, which agreed by
+ * coincidence. The names guard above could not see them: they were new, not re-declared. So this one
+ * protects the rule itself: only bookingConflict.ts may read a booking's window or state columns,
+ * both production readers must ask it, and the open-shift engine judges overlap only through it.
+ * The award's re-check stays — it is the final revalidation inside the transaction — but it may
+ * not carry its own definition.
+ */
+describe("SPINE item 2 — a booking conflict has one definition", () => {
+  const RULE = "server/_core/bookingConflict.ts";
+  const sources = files.filter(f => !/\.test\.tsx?$/.test(f)).map(f => ({ f, sf: ts.createSourceFile(f, readFileSync(f, "utf8"), ts.ScriptTarget.Latest, true) }));
+  const visitAll = (n: ts.Node, fn: (n: ts.Node) => void): void => { fn(n); n.forEachChild(c => visitAll(c, fn)); };
+
+  it("only the rule reads resourceBookings' window or state columns", () => {
+    const readers: string[] = [];
+    for (const { f, sf } of sources) {
+      visitAll(sf, n => {
+        if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "resourceBookings"
+          && ["startsAt", "endsAt", "bookingState"].includes(n.name.text)) readers.push(`${f}: resourceBookings.${n.name.text}`);
+      });
+    }
+    expect([...new Set(readers.map(r => r.split(":")[0]))]).toEqual([RULE]);
+  });
+
+  it("names the holding states in one place", () => {
+    const lists: string[] = [];
+    for (const { f, sf } of sources) {
+      visitAll(sf, n => {
+        if (ts.isArrayLiteralExpression(n)) {
+          const words = n.elements.filter(ts.isStringLiteral).map(e => e.text);
+          if (words.includes("tentative") && words.includes("confirmed")) lists.push(f);
+        }
+        if ((ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n)) && /'tentative'\s*,\s*'confirmed'/.test(n.getText())) lists.push(f);
+      });
+    }
+    expect([...new Set(lists)]).toEqual([RULE]);
+  });
+
+  it("the award's final revalidation and open-shift eligibility both ask conflictingBookingsWhere", () => {
+    for (const f of ["server/_core/dispatchTransaction.ts", "server/openShiftsService.ts"]) {
+      expect(readFileSync(f, "utf8"), f).toMatch(/\bconflictingBookingsWhere\(/);
+    }
+  });
+
+  it("the open-shift engine judges overlap only through windowsOverlap, and declares no overlap helper", () => {
+    const sf = sources.find(s => s.f === "server/_core/openShifts.ts")!.sf;
+    const compares: string[] = [];
+    visitAll(sf, n => {
+      if (ts.isBinaryExpression(n) && [ts.SyntaxKind.LessThanToken, ts.SyntaxKind.GreaterThanToken, ts.SyntaxKind.LessThanEqualsToken, ts.SyntaxKind.GreaterThanEqualsToken].includes(n.operatorToken.kind)
+        && /\b(startsAt|endsAt)\b/.test(n.left.getText()) && /\b(startsAt|endsAt)\b/.test(n.right.getText())) compares.push(n.getText());
+    });
+    expect(compares, "a window compared with a window outside bookingConflict.ts is a second overlap rule").toEqual([]);
+    expect(declared.get("server/_core/openShifts.ts")?.has("overlaps")).toBe(false);
+    expect(readFileSync("server/_core/openShifts.ts", "utf8")).toMatch(/\bwindowsOverlap\(/);
+  });
+});

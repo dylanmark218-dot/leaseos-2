@@ -54,7 +54,18 @@ describe("the real tree", () => {
     expect(files).toContain("0208_organization_invitations.sql");   // renumbered from 0175 on merging main, which took 0175
     // Main has since taken 0209 (0209_operating_zone_scope, P0-A2.1), above this checkpoint's two; the
     // ledger applies by name, so 0207/0208 still run on a database that already has 0209.
-    expect(headSlot(files)).toBe("0209");
+    // SA1 (Sign & Attest) holds 0214–0216 on this branch, below v23.31's 0217–0219, which were renumbered
+    // around them; both lineages apply by name.
+    // v23.31 took 0217–0219 (Customer, Contract and Rate Management): 0210–0216 are claimed by open
+    // branches, so head+1 would have collided; the register records the scan.
+    expect(files).toContain("0219_job_commercial_context.sql");
+    // Mechanic Portal CP2 took 0221–0222 (defect lifecycle and its guards): 0220 is claimed by
+    // `claude/eld-compliance-intelligence-ramlrd`, so head+1 would have collided; the register records the scan.
+    expect(files).toContain("0222_defect_lifecycle_guards.sql");
+    // Payroll P1 took 0226 (compensation agreements): 0220–0225 are claimed by open branches (ELD, integration
+    // hub, CI stabilization), so head+1 would have collided twice; drafted as 0224 and moved before it was applied.
+    expect(files).toContain("0226_payroll_compensation_agreements.sql");
+    expect(headSlot(files)).toBe("0226");
   });
 
   it("keeps the reserved slots empty", () => {
@@ -105,8 +116,10 @@ describe("the guard catches what it exists to catch", () => {
   });
 
   it("accepts a correctly allocated next migration", () => {
-    expect(auditMigrationSlots([...files, "0210_the_next_one.sql"])).toEqual([]);
-    expect(headSlot([...files, "0210_the_next_one.sql"])).toBe("0210");
+    // The slot after the real head, whatever it is today — so this case does not need moving each checkpoint.
+    const next = String(Number(headSlot(files)) + 1).padStart(4, "0");
+    expect(auditMigrationSlots([...files, `${next}_the_next_one.sql`])).toEqual([]);
+    expect(headSlot([...files, `${next}_the_next_one.sql`])).toBe(next);
   });
 
   it("gives every tolerated duplicate a reason that says something", () => {

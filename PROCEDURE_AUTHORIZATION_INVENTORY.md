@@ -24,16 +24,18 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | Surface | Class | Count |
 |---|---|---|
 | `server/routers.ts` | `ROLE_AUTHORIZED` | **85** |
-| `server/recordsRouter.ts` | `ROLE_AUTHORIZED` | **17** |
-| `server/payrollRouter.ts` | `ROLE_AUTHORIZED` | **40** |
+| `server/recordsRouter.ts` | `ROLE_AUTHORIZED` | **23** |
+| `server/payrollRouter.ts` | `ROLE_AUTHORIZED` | **43** |
+| `server/payrollCompensationRouter.ts` | `ROLE_AUTHORIZED` | **11** |
 | `server/portalFundingRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/purchasingRouter.ts` | `ROLE_AUTHORIZED` | **9** |
-| `server/deviceRouter.ts` | `ROLE_AUTHORIZED` | **6** |
-| `server/complianceRouter.ts` | `ROLE_AUTHORIZED` | **9** |
-| `server/requirementRouter.ts` | `ROLE_AUTHORIZED` | **6** |
+| `server/deviceRouter.ts` | `ROLE_AUTHORIZED` | **7** |
+| `server/complianceRouter.ts` | `ROLE_AUTHORIZED` | **18** |
+| `server/requirementRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/insuranceRouter.ts` | `ROLE_AUTHORIZED` | **12** |
-| `server/surfacesRouter.ts` | `ROLE_AUTHORIZED` | **5** |
-| `server/dispatchRouter.ts` | `ROLE_AUTHORIZED` | **8** |
+| `server/surfacesRouter.ts` | `ROLE_AUTHORIZED` | **6** |
+| `server/dispatchRouter.ts` | `ROLE_AUTHORIZED` | **13** |
+| `server/customerCommercialRouter.ts` | `ROLE_AUTHORIZED` | **40** |
 | `server/iftaRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/fuelOpsRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/periodRouter.ts` | `ROLE_AUTHORIZED` | **3** |
@@ -41,21 +43,27 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/cashRouter.ts` | `ROLE_AUTHORIZED` | **11** |
 | `server/commercialRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/closeoutRouter.ts` | `ROLE_AUTHORIZED` | **20** |
-| `server/shopRouter.ts` | `ROLE_AUTHORIZED` | **23** |
+| `server/shopRouter.ts` | `ROLE_AUTHORIZED` | **25** |
+| `server/maintenanceRouter.ts` | `ROLE_AUTHORIZED` | **10** |
+| `server/fleetPortfolioRouter.ts` | `ROLE_AUTHORIZED` | **9** |
 | `server/assetRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/projectRouter.ts` | `ROLE_AUTHORIZED` | **9** |
-| `server/integrationRouter.ts` | `ROLE_AUTHORIZED` (`integrationRouter`) / `INTEGRATION_CLIENT` (`inboundRouter`, `integrationProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md`) | **7** |
+| `server/integrationRouter.ts` | `ROLE_AUTHORIZED` (`integrationRouter`) / `INTEGRATION_CLIENT` (`inboundRouter`, `integrationProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md`) | **11** |
 | `server/telematicsRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/workforceRouter.ts` | `ROLE_AUTHORIZED` | **16** |
 | `server/auditRouter.ts` | `ROLE_AUTHORIZED` | **6** |
-| `server/spatialRouter.ts` | `ROLE_AUTHORIZED` | **11** |
+| `server/spatialRouter.ts` | `ROLE_AUTHORIZED` | **15** |
 | `server/liveAssistRouter.ts` | `ROLE_AUTHORIZED` — LA-1a session spine only; every permission sensitive; no universal grant (`docs/live-assist/LA1A_OWNER_RULING.md`) | **8** |
 | `server/documentControlRouter.ts` | `ROLE_AUTHORIZED` | **23** (DC-A: definitions list/get, catalog seed, overlay/create/retire, source artifacts; DC-B: intake, register rendered, confirm, issue, void, supersede, withdraw, amend, get, list; DC-C: series list, gap report, blocks, allocate/retire device block, void number) |
+| `server/attestRouter.ts` | `ROLE_AUTHORIZED` — SA1 Sign & Attest (`docs/sign-attest/SA1_OWNER_RULING.md`); `attest.sign` and `attest.decline` are universal and self-scoped (the signer row must name `ctx.user.id`); every other write is sensitive | **14** |
 | `server/portalRouter.ts` | `EXTERNAL_IDENTITY` (`externalProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md` and never written here) | **0** |
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
 | Anywhere | bare `protectedProcedure` | **0** |
 
-**387 role-authorized procedures. Zero on bare `protectedProcedure`.**
+**507 role-authorized procedures across the surfaces listed above.** Zero on bare `protectedProcedure`.
+The table lists the surfaces reviewed here, not every router; the system-wide count is generated into
+`LEASEOS_CURRENT_STATE.md`. The numbers in this table are written by `node scripts/procedure-inventory.mjs`,
+which reads them from the routers (CP1.5: nine rows had drifted below their routers and the total said 356).
 
 Baseline in `procedureAuthorization.test.ts` is 0 and must never rise.
 
@@ -403,6 +411,36 @@ missed them.
   the closing UCC are UNKNOWN until a person verifies the class rate, and an
   unknown schedule cannot be reviewed as a tax fact or carry balances
   forward. The schedule is prepared by one person and reviewed by another.
+- **A hold is typed, its release is a second person's, and a meter is read where it lives.** (0200,
+  Fleet & Equipment Portfolio foundation) Placing and releasing a hold are sensitive
+  (`fleet.hold.place`, `fleet.hold.release`); below the permission, the hold's TYPE decides who may
+  act — a mechanic places and releases maintenance holds only, a safety hold is placed and released
+  by safety or management, and the placer never releases their own. A safety hold is out of service
+  and blocks dispatch with no override. Recording a ledger meter reading is an observation
+  (`fleet.meter.record`, mechanic, shop lead, office — not the driver yet); verifying or rejecting
+  one is a second person's and sensitive (`fleet.meter.verify`). Every read is `fleet.read`, and
+  another organization's unit, hold or reading answers NOT_FOUND worded as for one that does not exist.
+- **A defect is returned to service by a second person.** (0221, fleet maintenance
+  checkpoint 2) Reporting keeps the reporter's words and proposed severity apart from
+  the decision (`maintenance.write_defect`); triage decides it (`maintenance.defect.triage`:
+  mechanic, shop lead, safety — sensitive), and lowering a critical defect frees its
+  safety hold, which only safety or management may release, never its placer. Sending
+  to the shop (`maintenance.defect.send_to_shop`) opens the work order and its first
+  task together; tasks are `maintenance.task.write`. `shop.workOrderRelease` is the one
+  door a release comes through (`records.maintenance.recordRelease` is closed) and waits
+  for every task. `maintenance.returnToService` (sensitive) is refused to the technician
+  who signed the release and applies the portfolio's hold rule to every hold it lifts;
+  both it and triage are human-authorization permissions an agent never exercises.
+- **A work order is owned by a person, and cancelling it repairs nothing.** (0199, fleet
+  maintenance checkpoint 1) Assigning, reassigning and unassigning a work order is
+  history, not an edit: the assignee is a user holding a shop role in the unit's
+  organization, and the assigner is the caller. Assigning is the shop lead's and
+  management's. Cancelling is theirs too and sensitive: a cancelled work order
+  never evidences a release, and the defect it was opened for stays open. Reading
+  who owns a work order uses `maintenance.read_defect`. The legacy
+  `workOrders.update` no longer sets a status at all; `shop.workOrderAdvance`
+  moves a work order and `maintenance.workOrderCancel` ends one. Telematics
+  procedures now answer NOT_FOUND for another organization's unit.
 - **Stock is a derivation; a count is a movement.** (v21.15) On-hand is the
   signed sum of an append-only movement ledger; a physical count adjusts the
   record and keeps the variance; an issue beyond on-hand is refused by the
@@ -532,3 +570,26 @@ A permission belongs in `UNIVERSAL_PERMISSIONS` only when it is self-scoped **in
 code**, not merely self-scoped by intention. The list is deliberately one entry
 long and a test holds it there. Denials still override universals, and a user
 holding no recognized role still gets nothing.
+
+## 0205/0206 — Company Board + Open Work (design: `docs/product/COMPANY_BOARD_OPEN_WORK_DESIGN.md`)
+
+Twenty-one procedures added, all `ROLE_AUTHORIZED`; the live counts are generated into
+`LEASEOS_CURRENT_STATE.md` and pinned in `procedureAuthorization.test.ts`.
+
+| Procedure | Permission | Note |
+|---|---|---|
+| `board.direct` | `board.post` | the one direct channel two people share |
+| `board.members` | `board.read` | members of an explicit channel |
+| `board.memberAdd`, `board.memberRemove` | `board.post` | refused inside unless the caller holds `board.manage` or is a moderator/manager of that channel; a person may remove themselves |
+| `board.mine` | `board.read` | the caller's inbox |
+| `board.moderateRead`, `board.moderateWithdraw` | `board.moderate` (**sensitive**, new) | the one way into a conversation the caller is not in; every use writes a `messageChannelEvents` row |
+| `board.post` (existing) | `board.post`, and **`board.publish`** (sensitive, new) for an `emergency` priority or an `announcement`/`emergency` channel | decided inside from the derived rule `requiresPublishAuthority` |
+| `shifts.get`, `shifts.candidates` | `shifts.read` | |
+| `shifts.respond`, `shifts.offerRespond` | `shifts.interest` | a person's own answer |
+| `shifts.publish`, `shifts.close`, `shifts.cancel`, `shifts.offer`, `shifts.offerWithdraw` | `shifts.post` (sensitive) | the poster's acts |
+| `shifts.link` | `dispatch.assign` | naming the slot a post fills is an assignment act |
+| `shifts.award` (Checkpoint 3) | `dispatch.assign` | binds the slot through the canonical binding behind the dispatcher's stored check; not `dispatch.award` |
+| `shifts.availabilitySet`, `shifts.availabilityMine` | `shifts.availability_own` (universal, new) | reads and writes `ctx.user.id` only |
+| `shifts.availabilityFor` | `shifts.read` | another person's declarations, in the caller's organization only |
+
+Grants: `board.publish` to dispatcher, safety, management; `board.moderate` to safety, management.

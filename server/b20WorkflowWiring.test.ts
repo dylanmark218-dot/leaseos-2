@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import mysql from "mysql2/promise";
 import {
   applyEventConsequences,
@@ -42,10 +42,14 @@ let pool: mysql.Pool & PoolLike;
 const uid = (p: string) =>
   `${p}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 
+/** Every event this file emits carries this correlation id, so a drain can wait for exactly these. */
+const RUN = `b20-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
 const ctx = (): EmitContext => ({
   tenantId: "T1",
   branchId: "GP",
   actor: { source: "human", userId: "u1", role: "driver" },
+  correlationId: RUN,
 });
 
 beforeAll(async () => {
@@ -66,15 +70,14 @@ const tasksFor = async (subjectType: string, subjectId: string) => {
 };
 
 /**
- * Drain until every event that existed when the drain started has been processed (or dead-lettered,
- * or deferred to a later retry), not for a fixed 300 ms. The worker claims the whole outbox in id
- * order, and other suites running at the same time enqueue their own events ahead of this one — so
- * under CI load a fixed window sometimes ended before this test's event was reached. A ceiling keeps
- * a genuinely stuck worker from hanging the suite; the assertions after it still decide the test.
+ * Drain until this file's own events are processed (or dead-lettered, or deferred to a later retry),
+ * not for a fixed window. The outbox is shared by every database suite: other suites enqueue ahead of
+ * this file's events, run drain workers that may take them, and leave some of their own deliberately
+ * pending (outboxLease holds a fresh claim on purpose). So the wait is for exactly this file's events,
+ * not for everything queued. A ceiling keeps a genuinely stuck worker from hanging the suite; the
+ * assertions after it still decide the test.
  */
 async function drainAll(workerId = "b20-worker") {
-  const [maxRows] = await pool.execute<mysql.RowDataPacket[]>("SELECT COALESCE(MAX(id), 0) AS maxId FROM domainEventOutbox");
-  const maxId = Number(maxRows[0].maxId);
   const ports = createWorkerPorts(pool);
   const w = startDrainWorker(ports, {
     workerId,
@@ -87,9 +90,9 @@ async function drainAll(workerId = "b20-worker") {
   for (;;) {
     const [pending] = await pool.execute<mysql.RowDataPacket[]>(
       `SELECT COUNT(*) AS n FROM domainEventOutbox
-       WHERE id <= ? AND processedAt IS NULL AND deadLetteredAt IS NULL
+       WHERE correlationId = ? AND processedAt IS NULL AND deadLetteredAt IS NULL
          AND (retryAvailableAt IS NULL OR retryAvailableAt <= NOW())`,
-      [maxId]
+      [RUN]
     );
     if (Number(pending[0].n) === 0 || Date.now() > deadline) break;
     await new Promise(r => setTimeout(r, 50));
@@ -97,6 +100,9 @@ async function drainAll(workerId = "b20-worker") {
   w.stop();
   return w.done;
 }
+
+// A drain may wait up to 15 s for another suite's worker to finish this file's event.
+vi.setConfig({ testTimeout: 30_000 });
 
 d("B20 rule seeds are published", () => {
   it("adds the records and safety rules without disturbing released ones", async () => {

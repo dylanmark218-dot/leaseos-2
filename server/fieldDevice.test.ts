@@ -7,9 +7,15 @@ import { createHash } from "node:crypto";
 // v21.6 — the server now computes an evidence hash from the bytes in storage,
 // never from the device's word for it. The object store is remote, so these
 // scenarios keep bytes in memory and the pushes below refer to real uploads.
+//
+// The double appends a unique suffix to every key, as the real storagePut does (appendHashSuffix in
+// server/storage.ts). Without it, two same-named uploads in one millisecond shared a key here, the
+// second overwrote the first, and this suite failed whenever the clock was coarse — a defect of the
+// double, not of production, which CI-0.2 first misreported as one (corrected in CI-0.2a).
 const objects = new Map<string, Buffer>();
+let putSeq = 0;
 vi.mock("./storage", () => ({
-  storagePut: async (relKey: string, data: Buffer | Uint8Array | string) => { objects.set(relKey, Buffer.from(data as never)); return { key: relKey, url: `mem://${relKey}` }; },
+  storagePut: async (relKey: string, data: Buffer | Uint8Array | string) => { const key = `${relKey}_${(++putSeq).toString(16).padStart(8, "0")}`; objects.set(key, Buffer.from(data as never)); return { key, url: `mem://${key}` }; },
   storageGet: async (relKey: string) => ({ key: relKey, url: `mem://${relKey}` }),
   storageGetSignedUrl: async (relKey: string) => `mem://${relKey}`,
   storageRead: async (relKey: string) => { const b = objects.get(relKey); if (!b) throw new Error(`no object ${relKey}`); return b; },
