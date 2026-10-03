@@ -865,7 +865,7 @@ export async function approveEarning(args: { earningRef: string; approvedByUserI
   if (!db) return "not_pending";
   const r = await db
     .update(payrollEarningEvents)
-    // P3 (0228): the approver and the time are recorded on the row, not only on the trail.
+    // P3 (0234): the approver and the time are recorded on the row, not only on the trail.
     .set({ status: "approved", approvedByUserId: args.approvedByUserId, approvedAt: new Date() })
     .where(and(eq(payrollEarningEvents.earningRef, args.earningRef), eq(payrollEarningEvents.status, "pending")));
   return (r[0]?.affectedRows ?? 0) === 1 ? "approved" : "not_pending";

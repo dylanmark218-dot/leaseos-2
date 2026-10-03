@@ -125,7 +125,7 @@ export const payrollScheduleRouter = router({
       return { ...view(p), runStates: await sch.runStatesForPeriod(p.id), earningCount: await sch.earningCountForPeriod(p.id) };
     }),
 
-  /* ---------------- Pay groups → schedules (P3, 0228) ---------------- */
+  /* ---------------- Pay groups → schedules (P3, 0234) ---------------- */
 
   /** The book's pay groups and the schedule each is paid on. */
   payGroupsList: moneyScoped(roleProcedure("payrollSchedule.payGroupsList")).query(async ({ ctx }) => sch.listPayGroups(ctx.money.entityIds)),

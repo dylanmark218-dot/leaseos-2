@@ -168,7 +168,7 @@ export type Permission =
   | "payroll.schedule.manage"
   | "payroll.finalize"
   | "payroll.void"
-  // Payroll P3 (0228) — payroll time and exceptions. Approving and rejecting time need the permission AND the D10
+  // Payroll P3 (0234) — payroll time and exceptions. Approving and rejecting time need the permission AND the D10
   // relationship (crew supervisor, else the book's payroll admin); earning approval leaves `payroll.review`.
   | "payroll.time.read_own"
   | "payroll.time.read_team"
@@ -401,7 +401,12 @@ export type Permission =
   // are evidence acts. All but the reads are SENSITIVE.
   | "attest.read" | "attest.document.open" | "attest.field.place" | "attest.signer.assign"
   | "attest.sign_own" | "attest.decline_own" | "attest.witness"
-  | "attest.finalize" | "attest.void" | "attest.supersede" | "attest.export";
+  | "attest.finalize" | "attest.void" | "attest.supersede" | "attest.export"
+  // 0228 — Safety & Compliance Program Builder. read_own / acknowledge_own are universal and self-scoped
+  // in the router (the caller's own policies, the caller's own signature); manage, approve and verify are
+  // the acts that change what the company is taken to require, make a version binding, or close a loop.
+  | "safety_program.read" | "safety_program.write" | "safety_program.manage" | "safety_program.approve" | "safety_program.verify"
+  | "safety_program.read_own" | "safety_program.acknowledge_own";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -488,7 +493,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "assistant.use",
     "transfer.acknowledge",
     "payroll.time.submit_own",
-    // P3 (0228) — one's own payroll time and candidates; and, gated again by the D10 crew-supervisor relationship,
+    // P3 (0234) — one's own payroll time and candidates; and, gated again by the D10 crew-supervisor relationship,
     // the team view, approval and rejection. The role alone approves nothing.
     "payroll.time.read_own",
     "payroll.time.read_team",
@@ -693,7 +698,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "assistant.use",
     "evidence.upload",
     "payroll.time.submit_own",
-    // P3 (0228) — one's own payroll time and candidates; and, gated again by the D10 crew-supervisor relationship,
+    // P3 (0234) — one's own payroll time and candidates; and, gated again by the D10 crew-supervisor relationship,
     // the team view, approval and rejection. The role alone approves nothing.
     "payroll.time.read_own",
     "payroll.time.read_team",
@@ -787,7 +792,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "assistant.use",
     "evidence.upload",
     "payroll.time.submit_own",
-    // P3 (0228) — one's own payroll time and candidates; and, gated again by the D10 crew-supervisor relationship,
+    // P3 (0234) — one's own payroll time and candidates; and, gated again by the D10 crew-supervisor relationship,
     // the team view, approval and rejection. The role alone approves nothing.
     "payroll.time.read_own",
     "payroll.time.read_team",
@@ -845,7 +850,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "fleet.meter.verify",
   ],
   safety: [
-    // P3 (0228) — the team view, approval and rejection of payroll time, gated again by the D10 crew-supervisor relationship.
+    // P3 (0234) — the team view, approval and rejection of payroll time, gated again by the D10 crew-supervisor relationship.
     "payroll.time.read_team",
     "payroll.time.approve",
     "payroll.time.reject",
@@ -868,6 +873,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     /* C1b-2b — requirement verification */
     "compliance.requirement.propose",
     "compliance.requirement.verify",
+    "safety_program.read",
+    "safety_program.write",
+    "safety_program.manage",
+    "safety_program.approve",
+    "safety_program.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -1014,6 +1024,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "document.issue",
     "document.void",
     "document.template.manage",
+    "safety_program.read",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -1189,7 +1200,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "maintenance.defect.send_to_shop",
   ],
   management: [
-    // P3 (0228) — the team view, approval and rejection of payroll time, gated again by the D10 crew-supervisor relationship.
+    // P3 (0234) — the team view, approval and rejection of payroll time, gated again by the D10 crew-supervisor relationship.
     "payroll.time.read_team",
     "payroll.time.approve",
     "payroll.time.reject",
@@ -1223,6 +1234,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "compliance.requirement.second_approve",
     "compliance.requirement.retire",
     "compliance.verification.govern",
+    "safety_program.read",
+    "safety_program.write",
+    "safety_program.manage",
+    "safety_program.approve",
+    "safety_program.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1498,6 +1514,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   hr: [
     "portfolio.read",
     "document.read",
+    "safety_program.read",
+    "safety_program.write",
     "academy.assign",
     "academy.manage",
     "academy.evaluate",
@@ -1510,7 +1528,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.read_own",
     "payroll.read_employee",
     "payroll.review",
-    // P3 (0228) — reads payroll exceptions; keeps the earning approval it held through payroll.review.
+    // P3 (0234) — reads payroll exceptions; keeps the earning approval it held through payroll.review.
     "payroll.exception.read",
     "payroll.earning.approve",
     "payroll.compensation.read",
@@ -1551,6 +1569,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "compliance.requirement.verify",
     "compliance.requirement.second_approve",
     "compliance.verification.govern",
+    "safety_program.read",
     "evidence.read_legal",
     "evidence.browse",
     "evidence.read_safety_summary",
@@ -1583,6 +1602,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "attest.read",
     "attest.export",
     "document.read",
+    "safety_program.read",
     "facility.directory.read",
     "evidence.read_job_operational",
     "evidence.browse",
@@ -1724,7 +1744,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.read_employee",
     "payroll.read_all",
     "payroll.review",
-    // P3 (0228) — payroll time under D10 (the fallback approver), exceptions, and earning approval.
+    // P3 (0234) — payroll time under D10 (the fallback approver), exceptions, and earning approval.
     "payroll.time.read_team",
     "payroll.time.approve",
     "payroll.time.reject",
@@ -1794,6 +1814,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "compliance.requirement.verify",
     "compliance.requirement.second_approve",
     "compliance.requirement.retire",
+    "safety_program.read",
     "facility.directory.read",
     "enforcement.read",
     "oos.policy.manage",
@@ -1835,7 +1856,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "payroll.schedule.manage",
     "payroll.finalize",
     "payroll.void",
-    // P3 (0228) — payroll exceptions. Earning approval stays with payroll_admin and hr, the holders P0 gave it.
+    // P3 (0234) — payroll exceptions. Earning approval stays with payroll_admin and hr, the holders P0 gave it.
     "payroll.exception.read",
     "payroll.exception.resolve",
     "evidence.read_commercial",
@@ -2047,6 +2068,9 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "attest.decline_own",
   // 0206 — a person's own availability reads and writes `ctx.user.id` and nothing the request could name.
   "shifts.availability_own",
+  // 0228 — your own policies to acknowledge, your own signature. The router resolves the person from ctx.user.id.
+  "safety_program.read_own",
+  "safety_program.acknowledge_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -2128,6 +2152,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "document.catalog.manage",
   "document.series.manage",
   "document.template.manage",
+  "safety_program.manage",
+  "safety_program.approve",
+  "safety_program.verify",
+  "safety_program.acknowledge_own",
   "academy.source.review",
   "academy.certificate.issue",
   "academy.certificate.sign_own",
@@ -3073,7 +3101,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "payrollSchedule.payGroupsList": "payroll.schedule.read",
   "payrollSchedule.payGroupSave": "payroll.schedule.manage",
   "payrollSchedule.profileAssignPayGroup": "payroll.schedule.manage",
-  // Payroll P3 (0228) — payroll time. Own procedures resolve the profile from the session; team ones add D10.
+  // Payroll P3 (0234) — payroll time. Own procedures resolve the profile from the session; team ones add D10.
   "payrollTime.myCandidates": "payroll.time.read_own",
   "payrollTime.myEntries": "payroll.time.read_own",
   "payrollTime.myEntryCreate": "payroll.time.submit_own",
@@ -3609,6 +3637,46 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "telematics.videoView": "safety.video.read",
 
   /* ---- v22.21/v22.22: Training Academy ---- */
+  // 0182 — Safety & Compliance Program Builder
+  "safetyProgram.catalog": "safety_program.read",
+  "safetyProgram.templateDetail": "safety_program.read",
+  "safetyProgram.syncCatalog": "safety_program.manage",
+  "safetyProgram.syncContent": "safety_program.manage",
+  "safetyProgram.obligations": "safety_program.read",
+  "safetyProgram.programGet": "safety_program.read",
+  "safetyProgram.programSet": "safety_program.manage",
+  "safetyProgram.assemble": "safety_program.read",
+  "safetyProgram.policyCreate": "safety_program.write",
+  "safetyProgram.policyList": "safety_program.read",
+  "safetyProgram.policyDetail": "safety_program.read",
+  "safetyProgram.versionDraft": "safety_program.write",
+  "safetyProgram.versionDraftFromTemplate": "safety_program.write",
+  "safetyProgram.versionEdit": "safety_program.write",
+  "safetyProgram.versionApprove": "safety_program.approve",
+  "safetyProgram.versionWithdraw": "safety_program.approve",
+  "safetyProgram.policyRetire": "safety_program.approve",
+  "safetyProgram.myPolicies": "safety_program.read_own",
+  "safetyProgram.acknowledge": "safety_program.acknowledge_own",
+  "safetyProgram.acknowledgementStatus": "safety_program.read",
+  "safetyProgram.overlaySet": "safety_program.write",
+  "safetyProgram.overlayList": "safety_program.read",
+  "safetyProgram.reviewSchedule": "safety_program.write",
+  "safetyProgram.reviewComplete": "safety_program.approve",
+  "safetyProgram.referenceList": "safety_program.read",
+  "safetyProgram.referenceUpsert": "safety_program.manage",
+  "safetyProgram.referenceVerify": "safety_program.verify",
+  "safetyProgram.trainingRequirementList": "safety_program.read",
+  "safetyProgram.trainingRequirementUpsert": "safety_program.manage",
+  "safetyProgram.trainingMatrixCompute": "safety_program.write",
+  "safetyProgram.trainingMatrix": "safety_program.read",
+  "safetyProgram.correctiveActionOpen": "safety_program.write",
+  "safetyProgram.correctiveActionProgress": "safety_program.write",
+  "safetyProgram.correctiveActionVerify": "safety_program.verify",
+  "safetyProgram.correctiveActionList": "safety_program.read",
+  "safetyProgram.corReadiness": "safety_program.read",
+  "safetyProgram.vendorPackageManifest": "safety_program.read",
+  "safetyProgram.events": "safety_program.read",
+
   "academy.catalog": "academy.read_own",
   "academy.myTraining": "academy.read_own",
   "academy.assignmentDetail": "academy.read_own",

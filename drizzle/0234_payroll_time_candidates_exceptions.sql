@@ -1,10 +1,11 @@
--- 0228 — Payroll P3: payroll time, operational candidates, earning approval and payroll exceptions.
--- docs/payroll/LEASEOS_PAYROLL_ARCHITECTURE_SURVEY.md §26.
+-- 0234 — Payroll P3: payroll time, operational candidates, earning approval and payroll exceptions.
+-- docs/payroll/LEASEOS_PAYROLL_ARCHITECTURE_SURVEY.md §26 (and §27 for the move).
 --
--- Slot: allocated immediately before this file was written. `main` = b36f43a (P2 merged as #131), migration head
--- 0227_payroll_pay_schedules.sql. The scan over origin/main and all 131 remote refs found the open claims 0220–0225
--- (ELD, integration hub, CI stabilization) and nothing at or above 0228. Claim recorded in
--- docs/architecture/MIGRATION_COLLISION_REGISTER.md.
+-- Slot: drafted and gated as 0228 (main b36f43a, head 0227, nothing at or above 0228 on any of 131 refs). Before P3
+-- merged, main took 0228 for the Safety & Compliance Program Builder (#99), the integration hub renumbered to
+-- 0229–0232 and three open branches claimed 0233; on merging main into P4 this file moved to 0234, the first slot
+-- above every slot in use in any lineage. No environment had applied it as 0228. The DDL is unchanged.
+-- Claim recorded in docs/architecture/MIGRATION_COLLISION_REGISTER.md.
 --
 -- D11: nothing here makes an operational record into pay. Candidates are never stored; a time entry exists only
 -- because a person submitted it, and an earning only because approved time met an approved compensation version.

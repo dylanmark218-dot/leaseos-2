@@ -129,7 +129,7 @@ export async function transitionPeriod(args: { id: number; from: PayPeriodState;
   return (r[0]?.affectedRows ?? 0) === 1;
 }
 
-/* ---------------- Pay groups → schedules (P3, 0228) ---------------- */
+/* ---------------- Pay groups → schedules (P3, 0234) ---------------- */
 
 export async function listPayGroups(entityIds: readonly number[]) {
   const db = await getDb();

@@ -108,6 +108,22 @@ Next free number at that time: `0191` (superseded above).
   `0189`, the first number no branch holds, rather than `0175` (named free on 2026-09-23 and claimed by
   four branches since). No other branch renumbered.
 
+## Move: payroll P3 0228 → 0234 (on merging main into payroll P4, 2026-10-03)
+
+P3 (`claude/payroll-p3-time-candidates`, head `507ec9a`) claimed `0228` and was gated there, but it had not merged when
+main took `0228` for the Safety & Compliance Program Builder (#99, `9ec123a`). The scan over `origin/main` and all 135
+remote refs at the P4 synchronization:
+
+| Number | Migration file | Branch | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|
+| 0228 | `0228_safety_program_builder.sql` | `main` | merged | with payroll P3's draft | keeps 0228 |
+| 0229–0232 | `0229_integration_hub_connectors.sql` … `0232_integration_hub_conflicts_and_links.sql` | `claude/integration-hub-subsystem-6nzrkw` | open | none | keeps them |
+| 0233 | `0233_external_source_registry.sql`, `0233_billing_invoicing_ar.sql`, `0233_safety_program_event_chain_unique.sql` | `claude/external-source-registry`, `claude/leaseos-billing-invoicing-ar`, `claude/safety-compliance-program-builder-2qnty0` | open | with each other | first to merge keeps it |
+| **0234** | **`0234_payroll_time_candidates_exceptions.sql`** (was `0228_…`) | **`claude/payroll-p4-expenses-reimbursements`** (carries P3) | **claiming** | **none** | **keeps 0234** |
+
+No environment had applied it as `0228`; the DDL is unchanged. The P3 branch itself still names `0228` and must not
+be merged on its own: P4 carries P3 with the corrected number. Next free: `0235` (P4 claims it below).
+
 ## Claim: 0228 (payroll P3 — payroll time, operational candidates, earning approval and exceptions, 2026-10-03)
 
 `main` = `b36f43a` (P2 merged as #131), migration head **`0227_payroll_pay_schedules.sql`**. Scan over `origin/main`
@@ -325,6 +341,9 @@ anywhere is `0193`, so `0194` is the first free everywhere.
 
 ## Change log
 
+* **2026-10-03**: the Safety & Compliance Program Builder (#99) moves `0182 → 0228` on merging main: document
+  control had claimed `0182`, and `0228` was the first slot above every slot in use in any lineage.
+
 * **2026-09-25 (S2-E Phase 1)**: claimed `0194` and recorded it **in the commit that creates the
   migration**, rather than afterwards. That ordering is the correction for the `0191`–`0193`
   omission recorded above: those numbers were each verified free before use, but the verification
@@ -387,6 +406,19 @@ colliding with nothing on main, applied by name. The earlier provisional claim o
 design document is withdrawn (those numbers were taken by other branches).
 
 **Next free number for new work after this merge: `0220`** (re-check with the scan before committing).
+
+## Claim: 0228 (Safety & Compliance Program Builder, 2026-10-03)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0228 | `0228_safety_program_builder.sql` | `claude/safety-compliance-program-builder-2qnty0` | #99 | `48a64e1` (main merged in) | gated | none | keeps 0228 |
+
+Drafted as `0182` on 2026-09-24, the first number no branch held then. At the merge of main on 2026-10-03,
+`claude/document-control-architecture-jlffzk` held `0182_document_control_intake.sql` and main's head was `0227`.
+A scan of main and all 131 remote branches found every slot from `0180` to `0227` in use somewhere except
+`0184` and `0204`, and none above `0227`; under the rule of thumb the checkpoint takes the first slot above
+every slot in use, so it moved to `0228`. The migration creates only new tables and depends on nothing after
+`0174`, so the move changes no DDL order. `server/migrationSlots.test.ts` records it and pins the head at `0228`.
 
 ## Change log (continued)
 

@@ -68,10 +68,16 @@ describe("the real tree", () => {
     expect(files).toContain("0226_payroll_compensation_agreements.sql");
     // Payroll P2 took 0227 (pay schedules): 0223–0225 are still claimed by open branches, below main's 0226.
     expect(files).toContain("0227_payroll_pay_schedules.sql");
-    // Payroll P3 took 0228 (payroll time, candidates, exceptions): scanned immediately before it was written; nothing
-    // in any lineage held 0228 or above.
-    expect(files).toContain("0228_payroll_time_candidates_exceptions.sql");
-    expect(headSlot(files)).toBe("0228");
+    // The Safety & Compliance Program Builder took 0228. It was drafted as 0182 when that was free everywhere;
+    // on merging main, document control had claimed 0182 and main's head was 0227, so it moved to 0228,
+    // the first slot free on main and on all 131 remote branches at the scan.
+    expect(files).toContain("0228_safety_program_builder.sql");
+    expect(files.filter(f => f.startsWith("0182_"))).toEqual([]);
+    // Payroll P3 was drafted as 0228 and moved to 0234 on merging main: the Safety Program Builder took 0228 on main,
+    // integration hub holds 0229–0232 and three open branches hold 0233. No environment had applied it.
+    expect(files).toContain("0234_payroll_time_candidates_exceptions.sql");
+    expect(files.filter(f => f.startsWith("0228_payroll"))).toEqual([]);
+    expect(headSlot(files)).toBe("0234");
   });
 
   it("keeps the reserved slots empty", () => {

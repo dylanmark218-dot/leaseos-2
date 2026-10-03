@@ -212,7 +212,7 @@ export type TimeEntryStatus = "open" | "submitted" | "verified" | "disputed" | "
 
 /**
  * The time-entry machine over the existing enum (0022). A rejection is `void` with rejection provenance recorded
- * beside it (0228), so a rejected row stays visible and no enum value was added for it.
+ * beside it (0234), so a rejected row stays visible and no enum value was added for it.
  */
 const TIME_TRANSITIONS: Readonly<Record<TimeEntryStatus, readonly TimeEntryStatus[]>> = {
   open: ["submitted", "void"],

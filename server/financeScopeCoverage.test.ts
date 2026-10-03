@@ -118,8 +118,8 @@ describe("F1 / F1.1 — every money procedure is money-scoped, structurally", ()
     expect(money.filter(([k]) => k.startsWith("payroll.")).length).toBe(25);   // payroll P0: 22 + runCollect, runSubmit, earningApprove
     expect(money.filter(([k]) => k.startsWith("contractors.")).length).toBe(3);
     expect(money.filter(([k]) => k.startsWith("payrollCompensation.")).length).toBe(11);   // payroll P1 (0226)
-    expect(money.filter(([k]) => k.startsWith("payrollSchedule.")).length).toBe(15);   // payroll P2 (0227) 12 + P3 (0228) 3 pay-group procedures
-    expect(money.filter(([k]) => k.startsWith("payrollTime.")).length).toBe(15);   // payroll P3 (0228)
+    expect(money.filter(([k]) => k.startsWith("payrollSchedule.")).length).toBe(15);   // payroll P2 (0227) 12 + P3 (0234) 3 pay-group procedures
+    expect(money.filter(([k]) => k.startsWith("payrollTime.")).length).toBe(15);   // payroll P3 (0234)
     expect(money.length).toBe(162);
   });
 

@@ -8,7 +8,7 @@
  *
  * Every write that depends on the pay period re-reads it `FOR UPDATE` inside its own transaction (the P2 rule), and
  * every submission locks the payroll profile row first, so two submissions for one person serialize: duplicate
- * capture refs, duplicate sources and overlaps are decided on a consistent view, and the unique indexes of 0228 stand
+ * capture refs, duplicate sources and overlaps are decided on a consistent view, and the unique indexes of 0234 stand
  * behind that if anything slips past.
  */
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
