@@ -54,6 +54,7 @@ describe("the real tree", () => {
     expect(files).toContain("0208_organization_invitations.sql");   // renumbered from 0175 on merging main, which took 0175
     // Main has since taken 0209 (0209_operating_zone_scope, P0-A2.1), above this checkpoint's two; the
     // ledger applies by name, so 0207/0208 still run on a database that already has 0209.
+    // The driver portfolio (#16) then took 0210–0212, yielding 0202–0204 to Live Assist, which merged first.
     // SA1 (Sign & Attest) holds 0214–0216 on this branch, below v23.31's 0217–0219, which were renumbered
     // around them; both lineages apply by name.
     // v23.31 took 0217–0219 (Customer, Contract and Rate Management): 0210–0216 are claimed by open
@@ -70,8 +71,8 @@ describe("the real tree", () => {
     expect(headSlot(files)).toBe("0227");
     // S2-FLEET-A: 0213 (0213_runtime_instances), claimed when main's head was 0209 and 0210–0212 were held
     // by the driver-portfolio branch; 0214–0227 landed on main afterwards, so 0213 sits below the head and
-    // applies by name like 0207/0208 and 0214–0216 do. Nothing here asserts 0210–0212 are empty: they are
-    // that branch's claim, and it may land at any time.
+    // applies by name like 0207/0208 and 0214–0216 do. It asserts only what it owns — never that a neighbouring
+    // slot is empty: 0210–0212 were the driver portfolio's claim and landed with #16.
     expect(files).toContain("0213_runtime_instances.sql");
     expect(files.filter(f => f.startsWith("0213_"))).toEqual(["0213_runtime_instances.sql"]);
   });
