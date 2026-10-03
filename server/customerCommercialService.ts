@@ -18,7 +18,7 @@ import {
   chargeDefinitions, commercialAuditEvents, commercialDocumentLinks, commercialDocuments, customerAccounts, customerContactRoles, customerContacts, customerContractTerms, customerContracts,
   customerPurchaseOrders, dispatchPostings, dispatchRoles, domainEventOutbox, jobCommercialContexts, jobCommercialParties, jobCommercialReferences, jobCommercialSnapshots, jobs, operators, rateSheetVersions, rateSheets,
 } from "../drizzle/schema";
-import { getDb, jobInScope } from "./db";
+import { getDb, jobInScope, operatorForUserInScope, type TenantScope } from "./db";
 import { financeScopeFor, notFound, type MoneyScope } from "./_core/entityScope";
 import type { Db, DbOrTx, Tx } from "./_core/dbTypes";
 import { buildOutboxRow } from "./_core/eventEmitter";
@@ -949,9 +949,15 @@ export async function jobCommercialFieldSummary(s: CommercialScope, jobId: numbe
   if (!snap) return { jobId: job.id, jobCode: job.jobCode, snapshotRef: null, note: "No commercial basis has been frozen for this job yet" };
   return fieldSubsetOf({ snapshotRef: snap.snapshotRef, payloadHash: snap.payloadHash, payload: JSON.parse(snap.payloadJson) as SnapshotPayload });
 }
-/** Is this user's operator assigned to the job (a dispatch role or the legacy driver string)? For field-role callers. */
-export async function callerAssignedToJob(d: DbOrTx, userId: number, jobId: number): Promise<boolean> {
-  const me = (await d.select({ id: operators.id, name: operators.name }).from(operators).where(eq(operators.userId, userId)).limit(1))[0];
+/**
+ * Is this user's operator assigned to the job (a dispatch role or the legacy driver string)? For
+ * field-role callers. The operator is the caller's own record in the acting organization; another
+ * organization's record, or one of two, is not assigned to anything here.
+ */
+export async function callerAssignedToJob(d: DbOrTx, userId: number, jobId: number, scope: TenantScope): Promise<boolean> {
+  const mine = await operatorForUserInScope(userId, scope);
+  if (mine.kind !== "resolved") return false;
+  const me = (await d.select({ id: operators.id, name: operators.name }).from(operators).where(eq(operators.id, mine.operatorId)).limit(1))[0];
   if (!me) return false;
   const postings = await d.select({ id: dispatchPostings.id }).from(dispatchPostings).where(eq(dispatchPostings.jobId, jobId));
   if (postings.length) { const r = (await d.select({ id: dispatchRoles.id }).from(dispatchRoles).where(and(inArray(dispatchRoles.postingId, postings.map(p => p.id)), eq(dispatchRoles.assignedOperatorId, me.id))).limit(1))[0]; if (r) return true; }

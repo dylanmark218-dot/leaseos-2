@@ -12,12 +12,12 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, eq, isNull, desc } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, evidenceInScope, getDb } from "./db";
 import { sealIsTrustworthy, verifySealAgainstStored } from "./_core/evidenceSeal";
 import { deviceKeyEvents, deviceSyncNonces, evidenceRecords, evidenceSeals, fieldDevices, syncConflicts, syncPackages, syncPackageItems, syncReceipts } from "../drizzle/schema";
 import { createHash } from "node:crypto";
 import { handleSyncRefusal, type SyncRefusalCode, DEVICE_SIGNATURE_MAX_SKEW_MS, canonicalDevicePackage, fingerprintP256Spki, signatureFreshness, verifyP256PackageSignature } from "./_core/deviceSignature";
-import { resolveActingScope } from "./_core/actingScope";
+import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { storageRead } from "./storage";
 import {
   admitPackage, detectConflict, verifyPackageItems, type FieldDeviceRecord, type KeyEvent,
@@ -270,11 +270,19 @@ export const syncRouter = router({
       }
       if (d) await db.update(fieldDevices).set({ lastSeenAt: now }).where(eq(fieldDevices.id, d.id));
 
+      // SEC-1: the device is this organization's, and so must be every record its package names. An
+      // item naming another organization's evidence is treated exactly as one naming no record at
+      // all: its seal is not read, its stored bytes are not read, and it is rejected as an item with
+      // the same reason a nonexistent id gets — so the verdict cannot confirm the record exists.
+      const scope = await actingScopeFor(ctx.user.id);
+      const foreign = new Set<number>();
+      for (const it of items) if (!(await evidenceInScope(it.evidenceRecordId, scope))) foreign.add(it.evidenceRecordId);
       // Three-way: declared vs received vs sealed.
       const ids = items.map(i => i.evidenceRecordId);
-      const sealRows = ids.length ? await db.select().from(evidenceSeals).where(eq(evidenceSeals.evidenceRecordId, ids[0])) : [];
+      const sealRows = ids.length && !foreign.has(ids[0]) ? await db.select().from(evidenceSeals).where(eq(evidenceSeals.evidenceRecordId, ids[0])) : [];
       const seals = new Map<number, { evidenceRecordId: number; contentHash: string; manifestHash: string } | null>();
       for (const id of ids) {
+        if (foreign.has(id)) { seals.set(id, null); continue; }
         const rows = await db.select({ evidenceRecordId: evidenceSeals.evidenceRecordId, contentHash: evidenceSeals.contentHash, manifestHash: evidenceSeals.manifestHash })
           .from(evidenceSeals).where(eq(evidenceSeals.evidenceRecordId, id)).orderBy(desc(evidenceSeals.version)).limit(1);
         seals.set(id, rows[0] ?? null);
@@ -286,7 +294,7 @@ export const syncRouter = router({
       // device supplied, and a tampered upload would have passed. Where the
       // stored object cannot be read, the item is rejected rather than trusted.
       const recomputed = await Promise.all(items.map(async it => {
-        const rec = (await db.select({ storageKey: evidenceRecords.storageKey }).from(evidenceRecords).where(eq(evidenceRecords.id, it.evidenceRecordId)).limit(1))[0];
+        const rec = foreign.has(it.evidenceRecordId) ? undefined : (await db.select({ storageKey: evidenceRecords.storageKey }).from(evidenceRecords).where(eq(evidenceRecords.id, it.evidenceRecordId)).limit(1))[0];
         if (!rec?.storageKey) return { ...it, computedContentHash: "0".repeat(64), computedManifestHash: it.declaredManifestHash };
         try {
           const bytes = await storageRead(rec.storageKey);
@@ -361,9 +369,11 @@ export const syncRouter = router({
    */
   verifySeal: roleProcedure("device.verifySeal")
     .input(z.object({ evidenceRecordId: z.number().int().positive(), version: z.number().int().positive().nullish() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // SEC-1: verification writes its result onto the seal — only this organization's evidence.
+      if (!(await evidenceInScope(input.evidenceRecordId, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `No seal on record for evidence ${input.evidenceRecordId}` });
       const seal = (await db.select().from(evidenceSeals).where(and(
         eq(evidenceSeals.evidenceRecordId, input.evidenceRecordId),
         input.version ? eq(evidenceSeals.version, input.version) : undefined,
@@ -415,7 +425,11 @@ export const syncRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const rows = await db.select().from(syncConflicts).where(eq(syncConflicts.conflictRef, input.conflictRef)).limit(1);
       const c = rows[0];
-      if (!c) throw new TRPCError({ code: "NOT_FOUND", message: "Conflict not found" });
+      // SEC-1: a conflict is the device's that raised it, and the device is an organization's.
+      const dev = c ? (await db.select({ orgRef: fieldDevices.orgRef }).from(fieldDevices).where(eq(fieldDevices.id, c.fieldDeviceId)).limit(1))[0] : undefined;
+      const acting = (await actingScopeFor(ctx.user.id)).tenantId;
+      const ours = !!dev && (acting === SINGLE_TENANT_ID ? dev.orgRef == null || dev.orgRef === SINGLE_TENANT_ID : dev.orgRef === acting);
+      if (!c || !ours) throw new TRPCError({ code: "NOT_FOUND", message: "Conflict not found" });
       if (c.status !== "unresolved") throw new TRPCError({ code: "CONFLICT", message: `Conflict is already ${c.status}` });
       await db.update(syncConflicts).set({ status: input.resolution, resolvedByUserId: ctx.user.id, resolvedAt: new Date(), resolutionNote: input.note }).where(eq(syncConflicts.id, c.id));
       // Both versions remain on the row. Resolution is a decision recorded
