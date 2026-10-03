@@ -274,6 +274,34 @@ describe("RI-0.6: structured load classification is the only dangerous-goods aut
     expect(dangerousGoodsAuthority([refused(4)]).explanation).toMatch(/refused/);
   });
 
+  /*
+   * The owner's eight-case table, in one place (RI-0.6 on current main). `applies` is whether DG
+   * requirements apply; `state` is the answer readiness reports. The rule the table exists for: an
+   * authoritative TRUE is never downgraded by another load, and nothing short of every load verified
+   * not-DG reads as not-DG.
+   */
+  it("H. the full truth table: TRUE governs, FALSE needs every load verified, anything unresolved is UNKNOWN", () => {
+    const table: [string, Row[], { state: string; applies: boolean; unresolvedSurfaced: boolean }][] = [
+      ["TRUE", [dg(1)], { state: "dg", applies: true, unresolvedSurfaced: false }],
+      ["FALSE", [notDg(2)], { state: "not_dg", applies: false, unresolvedSurfaced: false }],
+      ["UNKNOWN", [unverified(3)], { state: "unknown", applies: false, unresolvedSurfaced: true }],
+      ["no structured load", [], { state: "unknown", applies: false, unresolvedSurfaced: true }],
+      ["TRUE + FALSE", [dg(1), notDg(2)], { state: "dg", applies: true, unresolvedSurfaced: false }],
+      ["TRUE + UNKNOWN", [dg(1), unverified(3)], { state: "dg", applies: true, unresolvedSurfaced: true }],
+      ["FALSE + UNKNOWN", [notDg(2), unverified(3)], { state: "unknown", applies: false, unresolvedSurfaced: true }],
+      ["UNKNOWN + UNKNOWN", [unverified(3), unverified(6)], { state: "unknown", applies: false, unresolvedSurfaced: true }],
+    ];
+    for (const [name, rows, want] of table) {
+      const a = dangerousGoodsAuthority(rows);
+      expect({ name, state: a.state, applies: a.dangerousGoods, unresolvedSurfaced: a.blockers.length > 0 }).toEqual({ name, ...want });
+      // Nothing unresolved is ever reported as not-DG, whatever else is on the job.
+      if (want.unresolvedSurfaced && !want.applies) expect(a.state).not.toBe("not_dg");
+    }
+    // UNKNOWN + UNKNOWN reports both loads, not a summary that could hide one.
+    expect(dangerousGoodsAuthority([unverified(3), unverified(6)]).loads).toEqual([{ loadId: 3, state: "unverified" }, { loadId: 6, state: "unverified" }]);
+    expect(dangerousGoodsAuthority([unverified(3), unverified(6)]).explanation).toMatch(/2 load classification\(s\) not verified/);
+  });
+
   it("a refused classification blocks, non-overridably", () => {
     const a = dangerousGoodsAuthority([refused()]);
     expect(f(a.blockers[0]!).overrideClass).toBe("NEVER_OVERRIDABLE");

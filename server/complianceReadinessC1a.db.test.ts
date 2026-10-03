@@ -422,6 +422,33 @@ d("RI-0.6: readiness reads dangerous goods from structured loads only, and says 
     expect(dgCodes(await caller(s.dispatcher).dispatch.readiness(s.subject))).toContain("operator_tdg_certificate_missing");
   });
 
+  it("FALSE + UNKNOWN and UNKNOWN + UNKNOWN: UNKNOWN, dispatch refused, and the shipping document and emergency plan are not taken as prepared", async () => {
+    // Established subject: one verified non-DG load. Add an unverified neighbour — the verified one cannot vouch for it.
+    const s = await establishedSubject();
+    await pool.execute("INSERT INTO loadProfiles (jobId, material, classificationStatus) VALUES (?, 'Unlabelled tote', 'needs_verification')", [s.jobId]);
+    const r = await caller(s.dispatcher).dispatch.readiness(s.subject);
+    expect(r.contributions.find(c => c.engine === "dangerous_goods")?.finding).toMatch(/^unknown \(classification_unverified\)/);
+    expect((r.blockers as Finding[]).map(b => b.code)).toContain("dg_classification_unverified");
+    expect((r.blockers as Finding[]).map(b => b.code)).not.toContain("operator_tdg_certificate_missing");
+    expect(r.verdict).not.toBe("eligible");
+    // Two unverified loads and no verified one: the same answer.
+    const t = await establishedSubject({ classifiedLoad: false });
+    await pool.execute("INSERT INTO loadProfiles (jobId, material, classificationStatus) VALUES (?, 'Drum A', 'needs_verification'), (?, 'Drum B', 'needs_verification')", [t.jobId, t.jobId]);
+    const u = await caller(t.dispatcher).dispatch.readiness(t.subject);
+    expect(u.contributions.find(c => c.engine === "dangerous_goods")?.finding).toMatch(/^unknown \(classification_unverified\): 2 load classification\(s\) not verified/);
+    expect(u.verdict).not.toBe("eligible");
+  });
+
+  it("legacy job: an old job with no structured load and an ordinary description is UNKNOWN — the missing keyword is not a not-DG answer", async () => {
+    const s = await establishedSubject({ classifiedLoad: false });
+    // The kind of free text historical jobs carry: plainly worded, no TDG vocabulary at all.
+    await pool.execute("UPDATE jobs SET type = 'Vacuum truck service - pad clean up', mode = 'service' WHERE id = ?", [s.jobId]);
+    const r = await caller(s.dispatcher).dispatch.readiness(s.subject);
+    expect(r.contributions.find(c => c.engine === "dangerous_goods")?.finding).toMatch(/^unknown \(no_load\)/);
+    expect((r.blockers as Finding[]).map(b => b.code)).toContain("dg_classification_missing");
+    expect(r.verdict).not.toBe("eligible");
+  });
+
   it("the dangerous-goods fact in the eligibility fingerprint moves with a load's classification, and not with the job's wording", async () => {
     const s = await establishedSubject();
     const read = async () => { const r = await composeReadiness(s.subject); return { fingerprint: r.fingerprint, material: r.facts.materialClassificationVersion }; };
