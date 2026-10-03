@@ -36,7 +36,7 @@ import {
   attestDocumentRevisions,
   attestMarks,
 } from "../drizzle/schema";
-import { signedSubjectCategory, type SigningLink } from "./recordFiles";
+import { integrityState, signedSubjectCategory, type IntegrityState, type SigningLink } from "./recordFiles";
 
 export type OperatorIdentity = {
   operatorId: number | null;
@@ -1097,4 +1097,29 @@ export async function signingLinksFor(evidenceIds: readonly number[]): Promise<M
     });
   }
   return out;
+}
+
+/**
+ * The office's integrity state for one record, from what the server itself
+ * recorded: the latest send's verdict, the current seal's server check, and the
+ * office receipt. Never from the request. See `integrityState` for the rule.
+ */
+export async function loadIntegrityState(evidenceId: number): Promise<IntegrityState> {
+  const db = await getDb();
+  if (!db) return "unknown";
+  const rec = (await db.select({ currentVersion: evidenceRecords.currentVersion }).from(evidenceRecords).where(eq(evidenceRecords.id, evidenceId)).limit(1))[0];
+  if (!rec) return "unknown";
+  const [latestItem, seal, retention] = await Promise.all([
+    db.select({ state: syncPackageItems.state }).from(syncPackageItems)
+      .where(eq(syncPackageItems.evidenceRecordId, evidenceId)).orderBy(desc(syncPackageItems.id)).limit(1),
+    db.select({ verificationResult: evidenceSeals.verificationResult }).from(evidenceSeals)
+      .where(and(eq(evidenceSeals.evidenceRecordId, evidenceId), eq(evidenceSeals.version, rec.currentVersion))).limit(1),
+    db.select({ officeIntegrityVerifiedAt: recordRetentionState.officeIntegrityVerifiedAt }).from(recordRetentionState)
+      .where(eq(recordRetentionState.evidenceRecordId, evidenceId)).limit(1),
+  ]);
+  return integrityState({
+    syncState: latestItem[0]?.state ?? null,
+    sealVerification: seal[0]?.verificationResult ?? null,
+    officeIntegrityVerifiedAt: retention[0]?.officeIntegrityVerifiedAt ?? null,
+  });
 }

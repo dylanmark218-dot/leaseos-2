@@ -48,7 +48,7 @@ const REFUSED = z.undefined({ message: "Trust-bearing value refused: this state 
 import { systemRouter } from "./_core/systemRouter";
 import { peopleRouter } from "./peopleRouter";
 import { recordsRouter } from "./recordsRouter";
-import { recordOfficeAcceptance } from "./recordsService";
+import { loadIntegrityState, recordOfficeAcceptance } from "./recordsService";
 import {
   contractorRouter,
   financeRouter,
@@ -622,6 +622,16 @@ export const appRouter = router({
         .mutation(async ({ ctx, input }) => {
         // P4.1: scope guard
         if (!(await evidenceInScope(input.id, await scopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Evidence ${input.id} not found` });
+        // A record whose bytes the office has seen fail integrity is not accepted by ordinary verification —
+        // there is no override here, and the refusal comes before anything is written. A record nobody has
+        // checked (an office upload that never travelled through a device package) keeps the existing
+        // behaviour: it may be verified, and device release still requires verified integrity of its own.
+        if ((await loadIntegrityState(input.id)) === "failed") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Evidence ${input.id} failed integrity verification at the office and cannot be accepted`,
+          });
+        }
         const verified = await verifyEvidenceRecord(input.id);
         // Verifying is the office's acceptance of the record — a person's decision, recorded as such.
         // It is not receipt and not integrity, and device release still requires both of those too.

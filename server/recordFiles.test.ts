@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  integrityState,
   signedSubjectCategory,
   CAPTURE_KIND_RECORD_TYPE,
   FORWARD_TYPE_READ_CATEGORY,
@@ -432,5 +433,25 @@ describe("signing: what Sign & Attest's tables say a record is", () => {
     expect(sees("dispatcher", { role: "rendered_mark", inheritedCategory: null }, "photo")).toBe(false);
     expect(sees("dispatcher", { role: "receipt", inheritedCategory: null }, "load_ticket")).toBe(false);
     expect(sees("legal", { role: "receipt", inheritedCategory: null }, "load_ticket")).toBe(true);
+  });
+});
+
+describe("integrity state — one rule for acceptance and the lifecycle", () => {
+  it("names a failure, and lets it win over an earlier success", () => {
+    expect(integrityState({ syncState: "mismatch", sealVerification: null })).toBe("failed");
+    expect(integrityState({ syncState: null, sealVerification: "hash_mismatch" })).toBe("failed");
+    expect(integrityState({ syncState: null, sealVerification: "manifest_mismatch" })).toBe("failed");
+    expect(integrityState({ syncState: "mismatch", sealVerification: "verified", officeIntegrityVerifiedAt: new Date() })).toBe("failed");
+    expect(integrityState({ syncState: "verified", sealVerification: "hash_mismatch" })).toBe("failed");
+  });
+  it("is verified by the latest send, the seal's server check, or the office's recorded receipt", () => {
+    expect(integrityState({ syncState: "verified", sealVerification: null })).toBe("verified");
+    expect(integrityState({ syncState: null, sealVerification: "verified" })).toBe("verified");
+    expect(integrityState({ syncState: null, sealVerification: null, officeIntegrityVerifiedAt: new Date() })).toBe("verified");
+  });
+  it("is unknown when nothing checked it — and an unreadable object is not a failure anybody observed", () => {
+    expect(integrityState({ syncState: null, sealVerification: null })).toBe("unknown");
+    expect(integrityState({ syncState: "pending", sealVerification: "pending" })).toBe("unknown");
+    expect(integrityState({ syncState: "received", sealVerification: "content_unavailable" })).toBe("unknown");
   });
 });

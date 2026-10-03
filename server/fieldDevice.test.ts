@@ -496,8 +496,15 @@ d("office receipt: a verified hash, not a 200, releases the device copy", () => 
     await callerFor(office).fieldRoute.evidence.verify({ id: ok });
     const accepted = await state(ok);
     expect(accepted.officeReviewedAt).not.toBeNull();
-    // Accepting the tampered record releases nothing: acceptance does not stand in for receipt or integrity.
-    await callerFor(office).fieldRoute.evidence.verify({ id: tampered });
+    // A record the office has seen fail integrity cannot be accepted by ordinary verification — and the
+    // refusal writes nothing: no acceptance, no status change, no release.
+    await expect(callerFor(office).fieldRoute.evidence.verify({ id: tampered })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    // Extra client input changes nothing: the procedure reads integrity from what the server recorded.
+    await expect(callerFor(office).fieldRoute.evidence.verify({ id: tampered, integrity: "verified", override: true, force: true } as never)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    const refused = await state(tampered);
+    expect(refused.officeReviewedAt).toBeNull();
+    const [statusRow] = await pool.execute<mysql.RowDataPacket[]>("SELECT status FROM evidenceRecords WHERE id = ?", [tampered]);
+    expect(statusRow[0]!.status).toBe("needs_review");
     expect(await codes(tampered)).toEqual(["office_not_received"]);
 
     // Received, verified, accepted, retention elapsed: the gate B20 built finally opens.

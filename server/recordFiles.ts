@@ -328,6 +328,31 @@ export const LIFECYCLE_LABELS: Readonly<Record<LifecycleStage, string>> = {
  * is the one outcome an operator must act on, and folding it into progress
  * would hide it. Waiting for coverage is `queued`, never a failure.
  */
+export type IntegrityState = "verified" | "failed" | "unknown";
+
+/**
+ * The office's integrity state for a record — one rule, shared by the lifecycle
+ * the File Manager shows and by acceptance, so the two can never disagree.
+ *
+ *   failed   the latest send was a hash mismatch, or the server's check of the
+ *            current seal found the content or manifest altered. A failure is
+ *            named, and wins over any earlier success.
+ *   verified the latest send, the current seal's server check, or the office's
+ *            recorded receipt (officeIntegrityVerifiedAt) verified it.
+ *   unknown  nothing has checked it — an office upload that never travelled
+ *            through a device package, or one whose stored object could not
+ *            be read (content_unavailable is not a mismatch anybody observed).
+ */
+export function integrityState(args: {
+  syncState: "pending" | "received" | "verified" | "mismatch" | null;
+  sealVerification: "pending" | "verified" | "hash_mismatch" | "manifest_mismatch" | "content_unavailable" | null;
+  officeIntegrityVerifiedAt?: Date | null;
+}): IntegrityState {
+  if (args.syncState === "mismatch" || args.sealVerification === "hash_mismatch" || args.sealVerification === "manifest_mismatch") return "failed";
+  if (args.syncState === "verified" || args.sealVerification === "verified" || args.officeIntegrityVerifiedAt) return "verified";
+  return "unknown";
+}
+
 export function lifecycleStage(args: {
   sealState: "draft" | "sealed" | "amended" | "superseded";
   syncState: "pending" | "received" | "verified" | "mismatch" | null;
@@ -338,16 +363,12 @@ export function lifecycleStage(args: {
   deviceCopyDeletedAt?: Date | null;
 }): LifecycleStage {
   if (args.sealState === "draft") return "draft";
-  if (
-    args.syncState === "mismatch" ||
-    args.sealVerification === "hash_mismatch" ||
-    args.sealVerification === "manifest_mismatch"
-  ) return "integrity_failed";
-  const verified = args.syncState === "verified" || args.sealVerification === "verified";
+  const integrity = integrityState({ syncState: args.syncState, sealVerification: args.sealVerification });
+  if (integrity === "failed") return "integrity_failed";
   // Acceptance is a person's decision and counts only on a verified record: an
   // accepted record whose bytes never verified is still shown where it really is.
-  if (verified && args.officeReviewedAt) return args.deviceCopyDeletedAt ? "device_released" : "office_accepted";
-  if (verified) return "hash_verified";
+  if (integrity === "verified" && args.officeReviewedAt) return args.deviceCopyDeletedAt ? "device_released" : "office_accepted";
+  if (integrity === "verified") return "hash_verified";
   if (args.syncState === "received") return "server_received";
   if (args.syncState === "pending") return "queued";
   return "sealed";
