@@ -315,6 +315,12 @@ export type Permission =
   | "live_assist.use" | "live_assist.administer" | "live_assist.review"
   // v22.20 — clearing a government data source for operational use.
   | "geo.source.review"
+  // 0233 — the approved external source registry (server/_core/sourceRegistry.ts). Reading, proposing,
+  // editing what may be contacted, binding a credential reference, and each decision (reject, approve,
+  // suspend, revoke) are separate, so no permission both proposes a source and authorises it.
+  | "source.directory.read" | "source.registry.submit" | "source.registry.review" | "source.registry.approve"
+  | "source.registry.suspend" | "source.registry.revoke" | "source.endpoint.edit" | "source.credential_ref.edit"
+  | "source.health.review"
   // v22.19 — the package a truck carries when nothing can be fetched.
   | "comms.package.build" | "comms.package.fetch"
   // v22.20 — hours of service as versioned rules. A verified figure is what a
@@ -831,6 +837,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   safety: [
     "portfolio.read",
     "portfolio.requirement.manage",
+    // 0233 — safety runs the facility directory's regulator imports: it proposes and configures a source,
+    // can stop one at once, and reads health. Approving, rejecting, revoking and binding credentials are not its.
+    "source.directory.read", "source.registry.submit", "source.endpoint.edit", "source.registry.suspend", "source.health.review",
     // SA1 — Sign & Attest
     "attest.read",
     "attest.document.open",
@@ -1283,6 +1292,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "oos.policy.manage",
     "oos.policy.approve",
     "geo.source.review",
+    // 0233 — the approved external source registry: the whole lifecycle, as for licence review.
+    "source.directory.read", "source.registry.submit", "source.registry.review", "source.registry.approve",
+    "source.registry.suspend", "source.registry.revoke", "source.endpoint.edit", "source.credential_ref.edit",
+    "source.health.review",
     "hos.read",
     "hos.rule.manage",
     "hos.rule.verify",
@@ -1573,6 +1586,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "closeout.terms.approve",
   ],
   auditor: [
+    // 0233 — the source registry, read-only: what is approved, by whom, and how it is answering.
+    "source.directory.read", "source.health.review",
     // SA1 — Sign & Attest
     "attest.read",
     "attest.export",
@@ -1789,6 +1804,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "oos.policy.manage",
     "oos.policy.approve",
     "geo.source.review",
+    // 0233 — the approved external source registry: the whole lifecycle, as for licence review.
+    "source.directory.read", "source.registry.submit", "source.registry.review", "source.registry.approve",
+    "source.registry.suspend", "source.registry.revoke", "source.endpoint.edit", "source.credential_ref.edit",
+    "source.health.review",
     "hos.read",
     "hos.rule.manage",
     "hos.rule.verify",
@@ -2167,6 +2186,15 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // Clearing a source decides whether the company may commercially use a
   // government dataset. That is a determination, not an edit.
   "geo.source.review",
+  // 0233 — reviewing, approving, suspending or revoking a source decides whether the server may contact
+  // it; editing an endpoint or the credential it presents changes where the server connects and what it
+  // sends. A registry decision with no audit row is refused.
+  "source.registry.review",
+  "source.registry.approve",
+  "source.registry.suspend",
+  "source.registry.revoke",
+  "source.endpoint.edit",
+  "source.credential_ref.edit",
   // v22.20 — a verified HOS figure becomes a legal determination about a person.
   "hos.rule.verify",
   // v22.1 — approved terms decide what a customer is billed.
@@ -3394,6 +3422,25 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "geo.routeCompute": "geo.read",
   "geo.sourceReview": "geo.source.review",
   "geo.transportFeeds": "geo.source.review",
+
+  /* ---- 0233: approved external source registry (server/sourceRegistryRouter.ts) ---- */
+  "sourceRegistry.list": "source.directory.read",
+  "sourceRegistry.get": "source.directory.read",
+  "sourceRegistry.health": "source.health.review",
+  "sourceRegistry.seed": "source.registry.submit",
+  "sourceRegistry.create": "source.registry.submit",
+  "sourceRegistry.update": "source.registry.submit",
+  "sourceRegistry.requestReview": "source.registry.submit",
+  "sourceRegistry.endpointAdd": "source.endpoint.edit",
+  "sourceRegistry.endpointUpdate": "source.endpoint.edit",
+  "sourceRegistry.credentialBind": "source.credential_ref.edit",
+  "sourceRegistry.reject": "source.registry.review",
+  "sourceRegistry.approve": "source.registry.approve",
+  // Resuming re-authorises contact, so it is an approver's act; anyone who may suspend may only stop.
+  "sourceRegistry.resume": "source.registry.approve",
+  "sourceRegistry.suspend": "source.registry.suspend",
+  "sourceRegistry.revoke": "source.registry.revoke",
+  "sourceRegistry.retire": "source.registry.revoke",
 
   /* ---- v22.17: communications on the route ---- */
   "comms.channelSeed": "comms.channel.manage",
