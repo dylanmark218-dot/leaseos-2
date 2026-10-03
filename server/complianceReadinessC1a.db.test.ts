@@ -442,7 +442,7 @@ d("RI-0.6: readiness reads dangerous goods from structured loads only, and says 
   it("legacy job: an old job with no structured load and an ordinary description is UNKNOWN — the missing keyword is not a not-DG answer", async () => {
     const s = await establishedSubject({ classifiedLoad: false });
     // The kind of free text historical jobs carry: plainly worded, no TDG vocabulary at all.
-    await pool.execute("UPDATE jobs SET type = 'Vacuum truck service - pad clean up', mode = 'service' WHERE id = ?", [s.jobId]);
+    await pool.execute("UPDATE jobs SET type = 'Vacuum truck service - pad clean up' WHERE id = ?", [s.jobId]);
     const r = await caller(s.dispatcher).dispatch.readiness(s.subject);
     expect(r.contributions.find(c => c.engine === "dangerous_goods")?.finding).toMatch(/^unknown \(no_load\)/);
     expect((r.blockers as Finding[]).map(b => b.code)).toContain("dg_classification_missing");
