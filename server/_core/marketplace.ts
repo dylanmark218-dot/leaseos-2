@@ -365,7 +365,7 @@ export function bidContentHash(c: BidContent): string {
 }
 
 /* ===================== bid readiness ===================== */
-// 0192 — the declared-only evaluator that lived here is retired. Readiness is now verified against
+// 0236 — the declared-only evaluator that lived here is retired. Readiness is now verified against
 // the canonical registries by `marketplaceReadiness.ts` (pure) over facts `marketplaceReadinessFacts.ts`
 // reads; the bid's declared qualifications stay in its content as what the bidder claims, and decide
 // nothing. Tender requirements are typed there as `TenderRequirements`.
@@ -381,7 +381,7 @@ export function makeRef(prefix: string, random: () => number = Math.random): str
   return `${prefix}-${out}`;
 }
 
-/* ===================== the social layer (0191) ===================== */
+/* ===================== the social layer (0235) ===================== */
 
 const norm = (s: string | null | undefined) => (s ?? "").trim().toUpperCase();
 

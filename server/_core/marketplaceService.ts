@@ -750,7 +750,7 @@ export async function listPostings(db: Db, actor: MarketplaceActor, args: { mine
 /** Everything but draft: a posting is visible to others only once published. */
 const POSTED_STATES: PostingState[] = ["published", "bidding", "bidding_closed", "awarded", "contracted", "dispatched", "active", "completed", "closed", "cancelled"];
 
-/** The picture as stored (0192 shape), or the checkpoint-1 declared picture on an older revision. */
+/** The picture as stored (0236 shape), or the checkpoint-1 declared picture on an older revision. */
 function storedReadiness(json: string): MarketplaceReadiness | { legacy: true; declaredOnly: unknown } {
   const v = JSON.parse(json) as Partial<MarketplaceReadiness> & { rows?: unknown };
   if (v && v.basis === "canonical_registries" && Array.isArray(v.checks)) return { ...(v as MarketplaceReadiness), evaluatedAt: new Date(v.evaluatedAt as unknown as string) };
@@ -855,7 +855,7 @@ export async function postingEvents(db: Db, actor: MarketplaceActor, args: { pos
   return events.filter(e => e.bidId == null || myBidIds.has(e.bidId)).map(e => (e.bidId == null && e.eventType === "invitation_sent" ? { ...e, detailJson: null } : e));
 }
 
-/* ===================== the award → dispatch bridge (0190) ===================== */
+/* ===================== the award → dispatch bridge (0234) ===================== */
 
 /** The legacy job's `mode`, read from the work type the client chose. Nothing downstream is decided by this alone. */
 export function jobModeForWorkType(workType: string): "general" | "hydrovac" | "recovery" | "transport" {
@@ -1002,7 +1002,7 @@ export async function contractsMine(db: Db, actor: MarketplaceActor) {
   return rows.map(c => presentContract(c, actor.orgRef));
 }
 
-/* ===================== the social layer (0191) ===================== */
+/* ===================== the social layer (0235) ===================== */
 
 /* ---- tender discussion ---- */
 

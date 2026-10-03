@@ -1,4 +1,4 @@
--- 0191 — Marketplace checkpoint 3: the social layer on the commercial core.
+-- 0235 — Marketplace checkpoint 3: the social layer on the commercial core.
 --
 --   marketplaceClarifications       the tender discussion: a bidder's question is private to the
 --                                   asker and the client until the client publishes it, at which

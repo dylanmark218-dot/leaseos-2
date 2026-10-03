@@ -1,5 +1,5 @@
 /**
- * The marketplace (0189) through the real router, against a real database.
+ * The marketplace (0233) through the real router, against a real database.
  *
  * Three organizations: a client that posts work and two contractors that bid.
  * The tender is sealed, so the client is shown no price until it closes the
@@ -67,7 +67,7 @@ const POSTING = {
 };
 
 const QUALIFIED = { certifications: ["TDG", "H2S"], permits: [], dangerousGoods: ["CLASS_3"], insuranceLiabilityCents: 500_000_000, equipmentTypes: ["TRI_DRIVE_VAC"] };
-/** What the POSTING above requires of a bidder, as the registries hold it (0192). */
+/** What the POSTING above requires of a bidder, as the registries hold it (0236). */
 const qualify = (orgRef: string, over: Parameters<typeof qualifyOrganization>[2] = {}) => qualifyOrganization(pool, orgRef, { workerCodes: ["TDG", "H2S", "TDG_ROAD"], unitClass: "TRI_DRIVE_VAC", liabilityLimit: 5_000_000, ...over });
 
 const fixedBid = (totalCents: number, units = 4) => ({

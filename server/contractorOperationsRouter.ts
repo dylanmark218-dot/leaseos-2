@@ -16,7 +16,7 @@ const workerType = z.enum(["OWNER_DRIVER","EMPLOYEE_DRIVER","CO_DRIVER","SWAMPER
 const compensationType = z.enum(["HOURLY","SALARY","DAY_RATE","LOAD_RATE","KM_RATE","PERCENTAGE","PIECE_RATE","CONTRACT_RATE"]);
 const quantityUnit = z.enum(["HOUR","DAY","LOAD","KM","PERCENT","PIECE","CONTRACT"]);
 const autoUnitFor: Record<string,string> = { HOURLY:"HOUR", DAY_RATE:"DAY", LOAD_RATE:"LOAD", KM_RATE:"KM", PIECE_RATE:"PIECE", CONTRACT_RATE:"CONTRACT" };
-// 0190 — the allocator moved to _core/commercialChainNumbers.ts so the marketplace bridge numbers its chains the same way.
+// 0234 — the allocator moved to _core/commercialChainNumbers.ts so the marketplace bridge numbers its chains the same way.
 
 
 export const contractorOperationsRouter = router({

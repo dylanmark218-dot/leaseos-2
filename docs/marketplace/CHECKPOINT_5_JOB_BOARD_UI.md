@@ -3,7 +3,7 @@
 **Release label:** v23.30
 **Migration:** none
 **Date:** 2026-10-02
-**Builds on:** checkpoints 1–4 (0189–0192)
+**Builds on:** checkpoints 1–4 (0233–0236)
 
 ## What this is
 

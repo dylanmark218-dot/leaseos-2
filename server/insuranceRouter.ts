@@ -25,7 +25,7 @@ import {
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const ENTITY = z.enum(["unit", "trailer", "equipment", "operator", "branch", "facility", "company"]);
 
-/** 0192 — the loader lives in _core/insuranceCoverage.ts so the marketplace reads cover through the same code. */
+/** 0236 — the loader lives in _core/insuranceCoverage.ts so the marketplace reads cover through the same code. */
 async function policiesFor(financialEntityId: number, entity: { type: string; id: number } | null, now: Date): Promise<PolicyRecord[]> {
   const db = await getDb();
   if (!db) return [];

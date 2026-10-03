@@ -1,4 +1,4 @@
--- 0192 — Marketplace checkpoint 4 (P10.3): verified bid readiness.
+-- 0236 — Marketplace checkpoint 4 (P10.3): verified bid readiness.
 --
 -- Bid readiness now reads LeaseOS's own registries — organizations, contractor profiles, the
 -- financial entity as carrier subject, complianceDocuments (carrier), the insurance engine's

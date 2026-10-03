@@ -1,6 +1,6 @@
 /**
  * Reads the facts the marketplace readiness evaluator consumes — from the canonical registries,
- * never from a marketplace copy of them (0192, P10.3).
+ * never from a marketplace copy of them (0236, P10.3).
  *
  *   organization            organizations
  *   contractor profile      contractorBusinessProfiles

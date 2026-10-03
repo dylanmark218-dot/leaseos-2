@@ -154,7 +154,7 @@ export type Permission =
   | "payroll.profile.write"
   // Contractor settlement is its own ledger, never employee payroll.
   | "contractor.read" | "contractor.write" | "contractor.approve"
-  // 0189 — the marketplace: a client organization posts work, contractor organizations bid,
+  // 0233 — the marketplace: a client organization posts work, contractor organizations bid,
   // the client AWARDS. Posting and bidding are two sides and two permissions, so a company
   // that only ever tenders work never holds the right to bid on its own postings by accident.
   | "marketplace.read" | "marketplace.posting.manage" | "marketplace.bid.manage" | "marketplace.award"
@@ -1933,7 +1933,7 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // self-service grant into the restricted sector with no row saying the glass was
   // broken is that category, and without this it proceeded when the audit insert failed.
   "restricted.read",
-  // 0189 — an award binds two organizations to a hashed bid; a submission freezes an immutable
+  // 0233 — an award binds two organizations to a hashed bid; a submission freezes an immutable
   // revision. Neither may happen with no record of who authorized it.
   "marketplace.award",
   "marketplace.bid.manage",
@@ -2604,7 +2604,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "contractorOperations.payableSubmitReview": "contractor.write",
   "contractorOperations.payableApprove": "contractor.approve",
 
-  /* ---- 0189: marketplace — posting + bid + award (checkpoint 1) ---- */
+  /* ---- 0233: marketplace — posting + bid + award (checkpoint 1) ---- */
   "marketplace.postingCreate": "marketplace.posting.manage",
   "marketplace.postingUpdate": "marketplace.posting.manage",
   "marketplace.postingPublish": "marketplace.posting.manage",
@@ -2623,13 +2623,13 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "marketplace.bidDraftSave": "marketplace.bid.manage",
   "marketplace.bidSubmit": "marketplace.bid.manage",
   "marketplace.bidWithdraw": "marketplace.bid.manage",
-  /* ---- 0190: the award → dispatch bridge. Issuing is the client's posting right; dispatching is the
+  /* ---- 0234: the award → dispatch bridge. Issuing is the client's posting right; dispatching is the
      contractor's DISPATCH right — the same permission its dispatcher's screen needs to create a posting. ---- */
   "marketplace.contractIssue": "marketplace.posting.manage",
   "marketplace.contractDispatch": "dispatch.assign",
   "marketplace.contractGet": "marketplace.read",
   "marketplace.contractsMine": "marketplace.read",
-  /* ---- 0191: the social layer — tender discussion, following, profiles, preferred contractors ---- */
+  /* ---- 0235: the social layer — tender discussion, following, profiles, preferred contractors ---- */
   "marketplace.questionAsk": "marketplace.bid.manage",
   "marketplace.questionAnswer": "marketplace.posting.manage",
   "marketplace.clarificationPublish": "marketplace.posting.manage",

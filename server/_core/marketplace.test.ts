@@ -265,7 +265,7 @@ describe("bid content", () => {
   });
 });
 
-// 0192 — the declared-only readiness tests that lived here moved with the evaluator: see marketplaceReadiness.test.ts.
+// 0236 — the declared-only readiness tests that lived here moved with the evaluator: see marketplaceReadiness.test.ts.
 
 describe("references", () => {
   it("are prefixed, ten characters of an unambiguous alphabet, and deterministic for a seeded source", () => {

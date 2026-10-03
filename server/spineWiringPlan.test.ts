@@ -105,7 +105,7 @@ describe("the reachability census is consistent with it", () => {
     const census = readFileSync(CENSUS, "utf8");
     // Every production source, _core included: the reachability census counts an engine reached
     // when any wired production module imports it, transitively — complianceDocumentValidity is
-    // reached through marketplaceReadiness (0192) and no router names it directly. Reading only the
+    // reached through marketplaceReadiness (0236) and no router names it directly. Reading only the
     // routers here called that "neither declared nor reached" while the census called it wired.
     const production = walk("server", n => /\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n))
       .map(p => readFileSync(p, "utf8"))

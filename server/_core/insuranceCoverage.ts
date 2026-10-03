@@ -1,6 +1,6 @@
 /**
  * The insurance engine's view of a financial entity's policies — lifted out of insuranceRouter at
- * 0192 so the marketplace reads a bidder's cover through the same loader the insurance surface
+ * 0236 so the marketplace reads a bidder's cover through the same loader the insurance surface
  * uses, rather than a second one that could drift. Body unchanged from the router's `policiesFor`.
  */
 import { and, desc, eq, gte, isNull, or } from "drizzle-orm";

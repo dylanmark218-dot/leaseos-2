@@ -1,4 +1,4 @@
--- 0190 — Marketplace checkpoint 2: the award → dispatch bridge.
+-- 0234 — Marketplace checkpoint 2: the award → dispatch bridge.
 --
 -- One contract per award. The client issues it (posting awarded → contracted), which creates the
 -- job — owned by the CONTRACTOR organization, with the client as its customer — and the commercial
