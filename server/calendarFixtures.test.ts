@@ -25,7 +25,7 @@ const FAIL_WITHIN_DAYS = 21;
 
 /** Reviewed files: the dates seen at review and why the clock never meets them. Re-review when the dates change. */
 const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; reason: string }> = {
-  "server/_core/calibrationEvidence.test.ts": { dates: ["2026-09-20", "2026-10-01"], verdict: "clock_independent", reason: "both are compared only against fixed dates — 2026-10-01 against a reading at a fixed AT, 2026-09-20 against the finding's own performedAt. The two tests in this file that DO read the real clock pass it to deriveExceptions and involve neither date" },
+  "server/_core/calibrationEvidence.test.ts": { dates: ["2026-09-20", "2026-10-01", "2026-12-01"], verdict: "clock_independent", reason: "both are compared only against fixed dates — 2026-10-01 against a reading at a fixed AT, 2026-09-20 against the finding's own performedAt. The two tests in this file that DO read the real clock pass it to deriveExceptions and involve neither date" },
   "server/_core/evidenceVault.test.ts": { dates: ["2026-09-20", "2026-09-21"], verdict: "clock_independent", reason: "every evaluation receives an explicit `now`; the only real read stamps amendedAt" },
   "server/communications.test.ts": { dates: ["2026-09-18", "2026-09-25"], verdict: "clock_independent", reason: "effectiveTo and planForPath `at` are both explicit; Date.now() only mints keys" },
   // Re-recorded 2026-09-21 with the file unchanged: 2026-11-20 (an invoice dueAt at line 123)
@@ -35,9 +35,7 @@ const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; 
   // role grant. 2026-09-20 is kept though it is now past: `dates` below is built from future
   // in-window dates only, so a departed date is already a non-event and dropping it from the
   // record would only lose the evidence that it was certified while it still mattered.
-  // Re-recorded 2026-10-02 with the file unchanged: 2026-12-01 came into range — the aging `asOf` at
-  // lines 121, 214 and 253, an explicit argument compared with fixed invoice dates, never with now.
-  "server/cash.test.ts": { dates: ["2026-09-25", "2026-09-28", "2026-09-30", "2026-10-02", "2026-10-10", "2026-10-20", "2026-11-20", "2026-12-01"], verdict: "clock_independent", reason: "statement periods and END are fixed ranges compared with each other, not with now; aging asOf is explicit" },
+  "server/cash.test.ts": { dates: ["2026-09-25", "2026-09-28", "2026-09-30", "2026-10-02", "2026-10-10", "2026-10-20", "2026-11-20", "2026-12-01"], verdict: "clock_independent", reason: "statement periods and END are fixed ranges compared with each other, not with now" },
   "server/auditPackage.test.ts": { dates: ["2026-09-30"], verdict: "clock_independent", reason: "periodFrom/periodTo bound the package; nothing compares them with now" },
   // Recorded 2026-10-01 with the file unchanged, as the 60-day window reached 2026-10-15. The three
   // dates are the schedule's explicit `asOf`, the disposal date and the fiscal year end that `asOf`
@@ -48,13 +46,43 @@ const REVIEWED: Record<string, { dates: string[]; verdict: "clock_independent"; 
   "server/capitalAssets.test.ts": { dates: ["2026-10-15", "2026-10-20", "2026-10-31"], verdict: "clock_independent", reason: "asOf is explicit and acquiredAt is fixed; every date comparison is between fixtures" },
   "server/bulkFuel.test.ts": { dates: ["2026-09-30"], verdict: "clock_independent", reason: "statement period and anomaly window are fixed ranges" },
   "server/purchasingAp.test.ts": { dates: ["2026-09-30", "2026-10-02", "2026-10-08"], verdict: "clock_independent", reason: "fourWayMatch compares dates with each other, not with now" },
-  "server/workforce.test.ts": { dates: ["2026-09-30", "2026-11-01"], verdict: "clock_independent", reason: "offboardingClose receives an explicit `now`; the hire start date is already clock-relative (the earlier break)" },
+  "server/workforce.test.ts": { dates: ["2026-09-30", "2026-11-01", "2026-12-01", "2029-08-31", "2029-09-14"], verdict: "clock_independent", reason: "offboardingClose receives an explicit `now`; 2026-11-01/12-01 are a pure probationDecision's explicit dates; 2029-08-31/09-14 are credential expiries derived from explicit completion dates. The hire start date is clock-relative (the earlier break) and, since CI-0.2, so is the probation extension (it was 2027-01-15, which START + 90 overtook on 2026-10-10)" },
   "server/commercialProjects.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "quoteAcceptanceDecision compares validUntil with an explicit `at: NOW`" },
   "server/commsDispatch.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "effectiveTo-before-effectiveFrom refusal; the dates are compared with each other" },
   "server/fieldroute.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "the document is created with expiresAt; only its creation is asserted" },
   "server/gst.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "period-bound arithmetic (2026-Q3 ends 1 October); no comparison with now" },
   "server/ifta.test.ts": { dates: ["2026-10-01"], verdict: "clock_independent", reason: "quarter-bound arithmetic; no comparison with now" },
   "server/qualificationStore.test.ts": { dates: ["2026-10-01", "2026-11-10"], verdict: "clock_independent", reason: "the expired holding is evaluated against the shift's explicit STARTS, not now" },
+  // capitalAssets — reviewed 2026-09-24 (c2d0005), when 2026-10-15 came into the window as the clock advanced.
+  // All three are explicit parameters: 2026-10-31 is the fiscalYearEnd handed to
+  // buildSchedule and asserted as a string, 2026-10-15 is an explicit `asOf`, and
+  // 2026-10-20 is an explicit `disposedAt`. Each is compared with the others and
+  // with the fixed fiscal year, never with now. The file's real clock reads mint a
+  // key and stamp grantedAt/acquiredAt, and take part in none of those comparisons.
+  // CI-0.1 (2026-09-24). The first review this list has been given with a proof rather than a reading:
+  // the file's own "CI-0.1" tests run the fixture year under five system clocks (2026-09-24 through
+  // 2030-09-24) and require identical answers, and were checked to fail on a planted clock dependency.
+  "server/capitalAssets.test.ts": { dates: ["2026-10-15", "2026-10-16", "2026-10-20", "2026-10-21", "2026-10-31", "2026-11-15", "2030-09-24"], verdict: "clock_independent", reason: "one fiscal year ending 2026-10-31: the schedule gets an explicit asOf (10-15), disposal is compared only with acquisition (10-20), periods lock by a recorded close not the calendar, the twin's real-clock asOf matters only with recorded distance (none here), and the CCA seed rates have no end date. 10-16, 10-21, 11-15 and 2030-09-24 are the proof's own system clocks. Real clock reads: keys, role grants, two refusal-path acquiredAt values" },
+  // CI-0.2 (2026-10-01). Five files, every future fixture date in each recorded (not only those inside the
+  // window today), so no entry goes stale as the window advances. Proved by a run, not a reading:
+  // scripts/clock-sweep.sh (FRESH=1) ran them under eight clocks (2026-09-24 … 2030-09-24, past every date
+  // below) with the JavaScript clock AND the database's NOW() moved together — 151/151 across these and the
+  // second group's files at every clock, compliancePassport separately 37/37 with workforce through 2030.
+  // The same sweep fails a planted JavaScript-clock and a planted database-clock dependency at 2026-11-11.
+  "server/commercialPortal.test.ts": { dates: ["2026-10-30", "2026-12-31", "2027-01-01"], verdict: "clock_independent", reason: "dueAt 2026-10-30 is the explicit `at` (2026-09-15) plus 45-day terms; PO validity (to 2026-12-31, from 2027-01-01) is judged at that explicit `at`. Real clock reads: keys, a role grant" },
+  "server/crewForecast.test.ts": { dates: ["2026-11-01", "2026-12-01", "2027-12-01"], verdict: "clock_independent", reason: "ticket expiries (2026-11-01, 2027-12-01) are compared with the forecast window's explicit FROM (2026-12-01), never with now. Real clock reads: role grants, verifiedAt stamps" },
+  "server/openShiftsApi.test.ts": { dates: ["2026-11-01", "2026-11-09", "2026-11-10", "2026-11-11", "2027-01-01"], verdict: "clock_independent", reason: "eligibility judges licence expiry (2026-11-01, 2027-01-01) and approved leave (11-09…11-11) against the posted shift's explicit STARTS 2026-11-10; nothing refuses a shift or leave for being in the past. Real clock reads: role grants" },
+  "server/qualificationReads.db.test.ts": { dates: ["2026-11-10", "2027-01-01", "2028-01-01"], verdict: "clock_independent", reason: "verdicts are taken at the explicit AT/T 2026-11-10; 2027-01-01 and 2028-01-01 are expiries compared with it. Test 21 is clock-relative (Date.now() + 5 days, calendar from now) and moves with the clock" },
+  "server/timeOffApi.test.ts": { dates: ["2026-11-02", "2026-11-04"], verdict: "clock_independent", reason: "FROM/TO bound both the request and the scheduling window the test reads back; neither is compared with now. Real clock reads: role grants" },
+  // CI-0.2, second group: the 2026-12-01 cohort. cash.test.ts would have failed the gate on 2026-10-02 (12-01 entering
+  // the window with 10-10 eight days out). Same sweep, every file run on a fresh database per clock (FRESH=1;
+  // compliancePassport is not idempotent against a reused one). The sweep found two fixtures that DID meet the clock,
+  // both now clock-relative: workforce's probation extension (would have broken 2026-10-10) and compliancePassport's
+  // two 2028-04-21 credential expiries (2028-03-22, before this tripwire could have warned).
+  "server/compliancePassport.test.ts": { dates: ["2026-12-01", "2027-06-04"], verdict: "clock_independent", reason: "nextReviewDueAt 2026-12-01 is the explicit profileObtainedAt 2026-09-01 plus a quarter; 2027-06-04 is nextRenewalDue's arithmetic on an explicit lastObtainedAt. The credential expiries the passport and medical eligibility judge against now are clock-relative since CI-0.2" },
+  "server/fieldDevice.test.ts": { dates: ["2026-12-01"], verdict: "clock_independent", reason: "a deviceRetainUntil compared by planStoragePressure with the explicit NOW 2026-09-10. Real clock reads sign and queue packages and take part in no date comparison" },
+  "server/portalHardening.test.ts": { dates: ["2026-12-01"], verdict: "clock_independent", reason: "tokenExpiresAt in the idRow fixture, judged by credentialCheck at the explicit NOW 2026-09-10. Real clock reads: TOTP codes, role grants" },
+  "server/commercialSetup.test.ts": { dates: ["2026-12-15", "2027-01-01", "2027-01-15", "2027-02-01"], verdict: "clock_independent", reason: "rate effectivity (2027-01-01) is resolved at explicit `at` values (2026-12-15, 2027-01-15, 2027-02-01), pure and through the router. Real clock reads: role grants" },
 };
 
 function testFiles(dir: string, out: string[] = []): string[] {

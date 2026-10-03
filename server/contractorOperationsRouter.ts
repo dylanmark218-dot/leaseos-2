@@ -1,11 +1,11 @@
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { and, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "./db";
 import type { Tx } from "./_core/dbTypes";
 import { roleProcedure, router } from "./_core/trpc";
 import { resolveActingScope } from "./_core/actingScope";
-import { recordBelongsToOrganization } from "./_core/coreRecordOwnership";
 import { nextSequence, pad2 } from "./_core/commercialChainNumbers";
 import { commercialJobChains, commercialLoadChainRefs, contractorBusinessProfiles, contractorPayableEvents, contractorPayables, jobCrewAssignments, jobs, loads, organizationRelationships, organizationWorkers, privateRateSchedules } from "../drizzle/schema";
 
@@ -34,8 +34,11 @@ export const contractorOperationsRouter = router({
     const db=await dbOrThrow(), orgRef=(await resolveActingScope(db,ctx.user.id)).tenantId, workerRef=ref("WRK"); await db.insert(organizationWorkers).values({workerRef,orgRef,...input,userId:input.userId??null,operatorId:input.operatorId??null,compensationType:input.compensationType??null,createdByUserId:ctx.user.id}); return {workerRef};
   }),
   crewAssign: roleProcedure("contractorOperations.crewAssign").input(z.object({chainRef:z.string().min(1).max(80),unitId:z.number().int().positive(),primaryDriverWorkerRef:z.string().min(1).max(64),coDriverWorkerRef:z.string().min(1).max(64).nullable().optional(),additionalCrew:z.array(z.object({workerRef:z.string().min(1).max(64),role:workerType})).default([]),startsAt:z.coerce.date()})).mutation(async({ctx,input})=>{
+    // CP1.5 — the canonical unit check, first: another organization's unit and a missing one are both not found
+    // (this was FORBIDDEN "not owned", and the historical tenant could name a unit that does not exist).
+    await requireCallerUnits(ctx.user.id,{unitId:input.unitId});
     const db=await dbOrThrow(), org=(await resolveActingScope(db,ctx.user.id)).tenantId; const [chain]=await db.select().from(commercialJobChains).where(eq(commercialJobChains.chainRef,input.chainRef)).limit(1); if(!chain || chain.performingOrgRef!==org) throw new TRPCError({code:"FORBIDDEN",message:"Only the performing organization may assign its crew."}); if(input.coDriverWorkerRef===input.primaryDriverWorkerRef) throw new TRPCError({code:"BAD_REQUEST",message:"Primary driver and co-driver must be different workers."});
-    if(!(await recordBelongsToOrganization(db,org,"unit",input.unitId))) throw new TRPCError({code:"FORBIDDEN",message:"Unit is not owned by the performing organization."}); const workerRefs=[input.primaryDriverWorkerRef,...(input.coDriverWorkerRef?[input.coDriverWorkerRef]:[]),...input.additionalCrew.map(x=>x.workerRef)]; const workers=await db.select().from(organizationWorkers).where(and(eq(organizationWorkers.orgRef,org),eq(organizationWorkers.status,"active"))); const owned=new Set(workers.map(w=>w.workerRef)); if(workerRefs.some(w=>!owned.has(w))) throw new TRPCError({code:"FORBIDDEN",message:"Every assigned crew member must be an active worker of the performing organization."});
+    const workerRefs=[input.primaryDriverWorkerRef,...(input.coDriverWorkerRef?[input.coDriverWorkerRef]:[]),...input.additionalCrew.map(x=>x.workerRef)]; const workers=await db.select().from(organizationWorkers).where(and(eq(organizationWorkers.orgRef,org),eq(organizationWorkers.status,"active"))); const owned=new Set(workers.map(w=>w.workerRef)); if(workerRefs.some(w=>!owned.has(w))) throw new TRPCError({code:"FORBIDDEN",message:"Every assigned crew member must be an active worker of the performing organization."});
     const assignmentRef=ref("CREW"); await db.insert(jobCrewAssignments).values({assignmentRef,chainRef:input.chainRef,unitId:input.unitId,primaryDriverWorkerRef:input.primaryDriverWorkerRef,coDriverWorkerRef:input.coDriverWorkerRef??null,additionalCrewJson:JSON.stringify(input.additionalCrew),startsAt:input.startsAt,createdByUserId:ctx.user.id}); return {assignmentRef,hosLedgerPolicy:"INDIVIDUAL_PER_DRIVER" as const};
   }),
   jobChainCreate: roleProcedure("contractorOperations.jobChainCreate").input(z.object({rootJobId:z.number().int().positive(),performingOrgRef:z.string().min(1).max(40),parentChainRef:z.string().max(80).nullable().optional(),customerOrgRef:z.string().max(40).nullable().optional(),operatingCarrierOrgRef:z.string().max(40).nullable().optional(),equipmentOwnerOrgRef:z.string().max(40).nullable().optional(),relationshipType:z.enum(["EMPLOYEE","LEASED_OWNER_OPERATOR","INDEPENDENT_CONTRACTOR","SUBCONTRACTOR","INDEPENDENT_CARRIER"])})).mutation(async({ctx,input})=>{

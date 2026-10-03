@@ -8,7 +8,8 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { applicableRestrictions, fingerprintHash, hashPart, inForce, loadFingerprint, stalenessAgainst, structureAttributes, type RouteDependencies } from "./_core/structures";
+import { applicableRestrictions, fingerprintHash, structureAttributes } from "./_core/structures";
+import { recheckRouteApproval, routeDependencies } from "./routeDependencies";
 import { actingScopeFor, getDb, jobInScope, unitInScope } from "./db";
 import { accessRoadSegments, roadGraphBuilds, roadGraphEdges, roadRadioAssignments, routeApprovals, structures, bridges, inboundEvents, integrationClients, locationIdentities, roadRestrictions, routeEvidenceEntries, routeRequests, units, vehicleProfiles } from "../drizzle/schema";
 import { resolveAssignment } from "./_core/commRoute";
@@ -21,38 +22,6 @@ const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math
 async function dbOrThrow() { const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return db; }
 const CHECK = z.enum(["road_weight_restriction", "axle_group_limit", "bridge_capacity", "bridge_axle_limit", "overhead_clearance", "bridge_clearance", "width_restriction", "length_restriction", "truck_route_designation", "dg_corridor", "dg_time_restriction", "seasonal_closure", "road_ban_level", "road_owner_permission", "oversize_corridor_designation", "escort_requirement"]);
 const AXLE_GROUP = z.object({ name: z.string().min(1).max(40), axles: z.number().int().positive().max(6), emptyKg: z.number().int().nonnegative(), loadedKg: z.number().int().nonnegative() });
-
-/** Everything a route decision stood on, each as a hash: change one and the approval is stale. */
-async function routeDependencies(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, args: { unitId: number; segmentIds: string[]; load: { grossWeightKg: number; dangerousGoods: boolean; unNumber?: string | null; heightM?: number | null; widthM?: number | null; lengthM?: number | null } | string; permitRefs: string[]; requiredChecks: string[]; at: Date; carryOver?: RouteDependencies }): Promise<RouteDependencies> {
-  const profile = (await db.select().from(vehicleProfiles).where(eq(vehicleProfiles.unitId, args.unitId)).orderBy(desc(vehicleProfiles.id)).limit(1))[0] ?? null;
-  const rs = args.segmentIds.length ? await db.select().from(roadRestrictions).where(inArray(roadRestrictions.segmentId, args.segmentIds)) : [];
-  const live = applicableRestrictions(rs, args.at);
-  const sts = args.segmentIds.length ? await db.select().from(structures).where(inArray(structures.segmentId, args.segmentIds)) : [];
-  const liveStructures = sts.filter(x => x.verificationStatus !== "superseded" && inForce(x, args.at));
-  const roads = args.segmentIds.length ? await db.select({ objectId: accessRoadSegments.objectId, importRunRef: accessRoadSegments.importRunRef }).from(accessRoadSegments).where(inArray(accessRoadSegments.objectId, args.segmentIds.map(id => Number(id.replace(/^AB-ACCESS-/, ""))).filter(n => Number.isInteger(n)))) : [];
-  // v22.17 — which channel governs each segment at this moment, resolved by
-  // authority exactly as the driver's screen resolves it. A temporary operator
-  // change, or a driver's photographed sign confirmed by the office, moves this
-  // hash and the approval says so in a dispatcher's words.
-  const radio = args.segmentIds.length ? await db.select().from(roadRadioAssignments).where(inArray(roadRadioAssignments.segmentId, args.segmentIds)) : [];
-  const governing = args.segmentIds.map(segmentId => {
-    const chosen = resolveAssignment(
-      radio.filter(r => r.segmentId === segmentId).map(r => ({ assignmentRef: r.assignmentRef, segmentId: r.segmentId, channelKey: r.channelKey, authorityTier: r.authorityTier, effectiveFrom: r.effectiveFrom, effectiveTo: r.effectiveTo, observedAt: r.observedAt, verificationStatus: r.verificationStatus })),
-      args.at
-    ).chosen;
-    return { segmentId, channel: chosen?.channelKey ?? null, tier: chosen?.authorityTier ?? null };
-  }).sort((a, b) => a.segmentId.localeCompare(b.segmentId));
-  return {
-    vehicleProfile: hashPart(profile ? { heightM: profile.heightM, widthM: profile.widthM, lengthM: profile.lengthM, emptyWeightKg: profile.emptyWeightKg, axleGroups: profile.axleGroupsJson, verificationStatus: profile.verificationStatus } : { absent: true }),
-    loadProfile: typeof args.load === "string" ? args.load : loadFingerprint(args.load),
-    permitSet: args.carryOver ? args.carryOver.permitSet : hashPart([...args.permitRefs].sort()),
-    restrictionSet: hashPart(live.applied.map(r => ({ ref: r.restrictionRef, check: r.checkKey, limit: r.limitValue, text: r.textValue, verified: r.verificationStatus })).sort((a, b) => a.ref.localeCompare(b.ref))),
-    structureSet: hashPart(liveStructures.map(x => ({ ref: x.structureRef, posted: x.postedWeightKg, axle: x.postedAxleGroupKg, clearance: x.clearanceM, width: x.widthM, seasonal: x.seasonalVariation, verified: x.verificationStatus })).sort((a, b) => a.ref.localeCompare(b.ref))),
-    roadFabric: hashPart(roads.map(r => ({ objectId: r.objectId, run: r.importRunRef })).sort((a, b) => a.objectId - b.objectId)),
-    requiredChecks: args.carryOver ? args.carryOver.requiredChecks : hashPart([...args.requiredChecks].sort()),
-    communicationsPlan: hashPart(governing),
-  };
-}
 
 export const spatialRouter = router({
   /** Register a lease or well. The LSD and UWI are validated; the coordinate, if none is given, is the THEORETICAL grid, and says so. */
@@ -298,7 +267,7 @@ export const spatialRouter = router({
         const absent = input.segmentIds.filter(id => !covered.has(id));
         if (absent.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Graph build ${input.buildRef} does not contain ${absent.length} of this route's segments (${absent.slice(0, 3).join(", ")}) — it is not the build this route was computed on` });
       }
-      const deps = await routeDependencies(db, { unitId: input.unitId, segmentIds: input.segmentIds, load: input.load, permitRefs: input.permitRefs, requiredChecks: input.requiredChecks, at: input.at });
+      const deps = await routeDependencies(db, { unitId: input.unitId, segmentIds: input.segmentIds, load: input.load, permitRefs: input.permitRefs, requiredChecks: input.requiredChecks, at: input.at, buildRef: input.buildRef ?? null });
       const approvalRef = `RA-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
       await db.insert(routeApprovals).values({ approvalRef, evaluationRef: input.evaluationRef ?? null, tripId: input.tripId ?? null, jobId: input.jobId ?? null, unitId: input.unitId, originRef: input.originRef, destinationRef: input.destinationRef, dispatchStatus: input.dispatchStatus, segmentIdsJson: JSON.stringify(input.segmentIds), buildRef: input.buildRef ?? null, fingerprintJson: JSON.stringify(deps), fingerprintHash: fingerprintHash(deps), explanation: input.explanation, approvedByUserId: ctx.user.id });
       return { approvalRef, status: "approved" as const, buildRef: input.buildRef ?? null, geographyRecorded: !!input.buildRef, fingerprintHash: fingerprintHash(deps), dependencies: Object.keys(deps) };
@@ -319,10 +288,8 @@ export const spatialRouter = router({
       const a = (await db.select().from(routeApprovals).where(eq(routeApprovals.approvalRef, input.approvalRef)).limit(1))[0];
       if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "No such approval" });
       if (a.status === "revoked" || a.status === "superseded") return { approvalRef: a.approvalRef, status: a.status, stale: true, changed: [], reasons: [`This approval is ${a.status}`] };
-      const approved = JSON.parse(a.fingerprintJson) as RouteDependencies;
-      const current = await routeDependencies(db, { unitId: a.unitId, segmentIds: JSON.parse(a.segmentIdsJson) as string[], load: approved.loadProfile, permitRefs: [], requiredChecks: [], at: input.at, carryOver: approved });
-      const s = stalenessAgainst(approved, current);
-      if (s.stale && a.status === "approved") await db.update(routeApprovals).set({ status: "stale", staleReasonsJson: JSON.stringify(s.reasons), stalenessDetectedAt: new Date() }).where(eq(routeApprovals.id, a.id));
+      // The one recheck, shared with the provincial feed runtime (server/routeDependencies.ts).
+      const s = await recheckRouteApproval(db, a, input.at);
       return { approvalRef: a.approvalRef, status: s.stale ? "stale" as const : "approved" as const, stale: s.stale, changed: s.changed, reasons: s.stale ? s.reasons : ["Nothing this route depended on has changed"], dispatchStatus: a.dispatchStatus, approvedAt: a.approvedAt };
     }),
 

@@ -14,7 +14,7 @@ const at = new Date("2026-09-11T12:00:00Z");
 const cleared = (over: Partial<FeedSource> = {}): FeedSource => ({
   sourceKey: "ab511", displayName: "511 Alberta Developer API", status: "verified",
   rateLimitCalls: 10, rateLimitWindowSeconds: 60, updateIntervalHours: 1,
-  advisoryOnly: true, credentialEnvVar: "ALBERTA_511_API_KEY", ...over,
+  commercialUsePermitted: "yes", advisoryOnly: true, credentialEnvVar: "ALBERTA_511_API_KEY", ...over,
 });
 const present = { present: true, envVar: "ALBERTA_511_API_KEY" };
 const due: FeedState = emptyFeedState();

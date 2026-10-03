@@ -86,6 +86,25 @@ describe("a session issued for another app is refused", () => {
     const renamed = await sdkWith({ appId: "leaseos-renamed" });
     await expect(renamed.verifySession(token)).resolves.toBeNull();
   });
+
+  it("does not enforce when this server does not know its own identity", async () => {
+    /*
+     * `verifySession` guards the comparison with `ENV.appId &&`, so a server that
+     * has no identity of its own accepts any app's token. That is deliberate:
+     * `appId` is unset in development and in this suite, and refusing there would
+     * turn a missing environment variable into an outage rather than the
+     * configuration gap it is.
+     *
+     * Deliberate and untested is still untested. Dropping that guard would refuse
+     * every session in every developer's checkout, and until this case nothing in
+     * the repository would have said so — the suite above only ever loads the sdk
+     * with an identity set, which is the one configuration where the guard makes
+     * no difference.
+     */
+    const sdk = await sdkWith({ appId: "" });
+    const foreign = await sdk.signSession({ openId: "user-1", appId: "some-other-app", name: "Dana" });
+    await expect(sdk.verifySession(foreign)).resolves.toMatchObject({ openId: "user-1" });
+  });
 });
 
 describe("the required claims are still enforced", () => {

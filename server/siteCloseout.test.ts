@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { classifyDelay, closeoutState, composeSiteSnapshot, lineDecision, postSiteSupplement, signatureDecision, whyTheseHours, type PostSiteAuthorization, type SignatoryAuthority, type TicketEvent, type TicketLine } from "./_core/siteCloseout";
+import { fieldTicketSignatureVerdict } from "./_core/fieldTicketSignature";
 import { appRouter } from "./routers";
 import { grantUserRole } from "./db";
 import type { DomainRole } from "./_core/recordsAuthorization";
@@ -98,15 +99,18 @@ describe("delays are classified by the contract, or held", () => {
   });
 });
 
+// The canonical verdict a ticket with no signature on file gets — what closeout reads, never a null row.
+const UNSIGNED = fieldTicketSignatureVerdict({ ticket: { status: "presented", signatureStatus: "unsigned" }, signatures: [], revisions: [] });
+
 describe("three closes, and why the hours are what they are", () => {
   it("walks OPEN → WORK_ACTIVE → SITE_CLOSE_PENDING → SITE_SIGNED/POST_SITE → BILLING_READY, naming each blocker", () => {
     const lines = [line({ id: 1, sourceTrackingNumber: "DT-1" })];
-    expect(closeoutState({ events: [], lines, siteWorkCompleteAt: null, signature: null, supplement: null, postSiteRequired: true, loadsWithDisposalEvidence: 1, loads: 1 }).state).toBe("OPEN");
-    expect(closeoutState({ events: [ev("site_work", "07:31", null)], lines, siteWorkCompleteAt: null, signature: null, supplement: null, postSiteRequired: true, loadsWithDisposalEvidence: 1, loads: 1 }).state).toBe("WORK_ACTIVE");
-    const pending = closeoutState({ events: [ev("site_work", "07:31", "17:06")], lines, siteWorkCompleteAt: at("17:06"), signature: null, supplement: null, postSiteRequired: true, loadsWithDisposalEvidence: 1, loads: 1 });
+    expect(closeoutState({ events: [], lines, siteWorkCompleteAt: null, signature: UNSIGNED, supplement: null, postSiteRequired: true, loadsWithDisposalEvidence: 1, loads: 1 }).state).toBe("OPEN");
+    expect(closeoutState({ events: [ev("site_work", "07:31", null)], lines, siteWorkCompleteAt: null, signature: UNSIGNED, supplement: null, postSiteRequired: true, loadsWithDisposalEvidence: 1, loads: 1 }).state).toBe("WORK_ACTIVE");
+    const pending = closeoutState({ events: [ev("site_work", "07:31", "17:06")], lines, siteWorkCompleteAt: at("17:06"), signature: UNSIGNED, supplement: null, postSiteRequired: true, loadsWithDisposalEvidence: 1, loads: 1 });
     expect(pending.state).toBe("SITE_CLOSE_PENDING");
     expect(pending.blockers).toEqual(["Site ticket not signed", "Post-site supplement not prepared"]);
-    const sig = { signedAt: at("17:14"), signerName: "M. Johnson", result: "accepted" };
+    const sig = fieldTicketSignatureVerdict({ ticket: { status: "closed", signatureStatus: "accepted" }, signatures: [{ revision: 1, result: "accepted", payloadHash: "h1", capturedAt: at("17:14"), signerName: "M. Johnson" }], revisions: [{ revision: 1, kind: "site_signed", snapshotHash: "h1" }] });
     const active = closeoutState({ events: [ev("site_work", "07:31", "17:06"), ev("travel_to_disposal", "17:18", null)], lines, siteWorkCompleteAt: at("17:06"), signature: sig, supplement: null, postSiteRequired: true, loadsWithDisposalEvidence: 1, loads: 1 });
     expect(active.state).toBe("POST_SITE_ACTIVE");
     expect(active.fieldClosed).toEqual({ at: "2026-09-10T17:14:00.000Z", by: "M. Johnson" });
@@ -144,7 +148,7 @@ d("a day on the lease, signed before the truck leaves", () => {
     const driver = await withRole("driver");
     const office = await withRole("office");
     const controller = await withRole("controller");
-    const entityId = 2_100_000 + Math.floor(Math.random() * 90_000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const acctRef = key("CUST").slice(0, 40);
     await pool.execute("INSERT INTO customerAccounts (accountRef, financialEntityId, name, delayBillingRulesJson, postSiteBillingRuleJson) VALUES (?, ?, 'ABC Energy', ?, ?)", [acctRef, entityId, JSON.stringify({ customer_hold: "billable" }), JSON.stringify({ returnTravel: "yes" })]);
     const [job] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress, createdAt) VALUES (?, 'hydrovac', 'hydrovac', 'ABC Energy', '10-22-045-06-W5', 'on_site', 0, NOW())", [key("JOB").slice(0, 40)]);
@@ -191,6 +195,18 @@ d("a day on the lease, signed before the truck leaves", () => {
     // actually proved who they were.
     expect(sig[0]).toMatchObject({ signatureMethod: "portal_link", payloadHash: prep.snapshotHash, capturedLatitude: 53.5 });
     expect(sig[0].externalIdentityId).not.toBeNull();
+    // SA1 — the signature row points at the Sign & Attest session that holds its binding and chain: the
+    // closeout became the first producer. The method stays portal_link on both rows; the mark is an
+    // acknowledgement (no drawing exists in SA1), bound to the R1 snapshot hash.
+    const [sa] = await pool.execute<mysql.RowDataPacket[]>("SELECT s.attestSessionRef, a.authMethod, a.state, r.revisionHash, r.state AS revisionState, r.subjectRef FROM fieldTicketSignatures s JOIN attestSigningSessions a ON a.sessionRef = s.attestSessionRef JOIN attestDocumentRevisions r ON r.id = a.revisionId WHERE s.fieldTicketId = (SELECT id FROM fieldTickets WHERE ticketNumber = ?)", [t.ticketNumber]);
+    expect(sa[0]).toMatchObject({ authMethod: "portal_link", state: "completed", revisionHash: prep.snapshotHash, revisionState: "completed", subjectRef: `${t.ticketNumber}-R1` });
+    expect(signed.attest).toMatchObject({ sessionRef: sa[0].attestSessionRef });
+    // SPINE item 2 — this is the one signed-scope statement (fieldTicket.buildSignedScopeStatement was an
+    // unwired second one and is gone). It records the authority actually exercised and what was refused.
+    const [stmt] = await pool.execute<mysql.RowDataPacket[]>("SELECT signedScopeStatement FROM fieldTicketSignatures WHERE fieldTicketId = (SELECT id FROM fieldTickets WHERE ticketNumber = ?)", [t.ticketNumber]);
+    expect(String(stmt[0].signedScopeStatement)).toBe(
+      "Work performed confirmed: 9.58 h site billable, 1 load(s), standby 1.25 h (yes). Exercised: work_confirmation, time_confirmation, standby_approval. Not within authority: invoice_approval. Post-site: billing basis signed; final time pending.",
+    );
 
     // Frozen: no second signature, no new site event, no edit to lines.
     await expect(c.eventRecord({ ticketNumber: t.ticketNumber, eventType: "site_work", occurredAt: at("17:10"), endedAt: at("17:30") })).rejects.toThrow(/frozen in the signed revision/);

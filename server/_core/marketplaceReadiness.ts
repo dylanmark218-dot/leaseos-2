@@ -18,12 +18,12 @@
  *
  * Rules the rows obey:
  *   - A hard requirement that cannot be verified is UNKNOWN and BLOCKS. Unknown is not satisfied.
- *     (`countsAsHeld`'s rule for a credential with no establishable expiry, applied to the tender.)
+ *     (the qualification rule for a credential with no establishable expiry, applied to the tender.)
  *   - Counts, never names. The client reads the picture; the rows carry how many workers hold a
  *     qualification, never which workers. Private credential detail stays in the registry.
  *   - The insurance rule is the insurance engine's (`matchCustomerRequirements`): MATCH / GAP /
  *     UNKNOWN, with the tender as the "customer".
- *   - The qualification rule is the Academy's (`countsAsHeld`): verified, unexpired, with an
+ *   - The qualification rule is the canonical one (`qualificationValidity` + `heldFromValidity`): verified, unexpired, with an
  *     establishable expiry.
  *   - The document rule is the document engine's (`complianceDocumentValidity`).
  */
@@ -31,7 +31,17 @@
 import { canonicalJson, sha256 } from "./auditPackage";
 import { complianceDocumentValidity, type ComplianceDocumentRow } from "./complianceDocumentValidity";
 import { matchCustomerRequirements, type PolicyRecord } from "./insuranceRisk";
-import { countsAsHeld, type QualificationHolding } from "./qualificationValidity";
+import { heldFromValidity, qualificationValidity, type HeldVerdict, type QualificationHolding } from "./qualificationValidity";
+
+/**
+ * Whether a worker holds `code` at `at`, by the one qualification rule: the canonical verdict
+ * (`qualificationValidity`) read the operational way (`heldFromValidity`). This is what the retired
+ * `countsAsHeld` did (C1b-3 folded it into those two), including naming an "extracted" record as such.
+ */
+function holdsQualification(holdings: readonly QualificationHolding[], code: string, at: Date): HeldVerdict {
+  const newest = holdings.filter(h => h.code === code).sort((x, y) => y.recordedAt.getTime() - x.recordedAt.getTime())[0];
+  return heldFromValidity(qualificationValidity(holdings, code, at), code, newest?.verificationState === "extracted" ? "extracted" : "unverified");
+}
 import type { BiddingWindow, PostingDistribution } from "./marketplace";
 
 /* ===================== tender requirements ===================== */
@@ -205,7 +215,7 @@ export function readinessFingerprint(f: MarketplaceReadinessFacts, now: Date): s
     requirements: f.requirements,
     financialEntityIds: [...f.financialEntityIds].sort(),
     carrierDocuments: f.carrierDocuments.map(d => [d.id, d.docType, d.verificationStatus, d.expiresAt?.toISOString() ?? null, lapsed(d.expiresAt)]).sort(),
-    policies: f.policies.map(p => [p.policyRef, p.status, p.coverageVerificationStatus, p.expiresAt.toISOString(), lapsed(p.expiresAt), p.coverages.map(c => [c.coverageType, c.limitAmount, c.additionalInsuredEndorsement]).sort(), p.document ? [p.document.verificationStatus, p.document.expiresAt?.toISOString() ?? null, lapsed(p.document.expiresAt)] : null]).sort(),
+    policies: f.policies.map(p => [p.policyRef, p.status, p.coverageVerificationStatus, p.expiresAt.toISOString(), lapsed(p.expiresAt), p.coverages.map(c => [c.coverageType, c.limitAmount, c.additionalInsuredEndorsement]).sort(), p.document ? (p.document.source === "compliance_document" ? [p.document.source, p.document.verdict.state, p.document.verdict.docType, p.document.verdict.documentId, p.document.verdict.expiresAt?.toISOString() ?? null, p.document.verdict.claimedExpiresAt?.toISOString() ?? null, p.document.verdict.claimLapsed] : [p.document.source]) : null]).sort(),
     units: f.units.map(u => [u.unitId, u.vehicleType, u.inspectionStatus, u.maintenanceStatus]).sort(),
     workers: f.workers.map(w => [w.userId, w.holdings.map(h => [h.holdingRef, h.code, h.verificationState, h.expiresAt?.toISOString() ?? null, lapsed(h.expiresAt)]).sort()]).sort(),
     unlinkedWorkers: f.unlinkedWorkers,
@@ -302,8 +312,8 @@ export function evaluateMarketplaceReadiness(f: MarketplaceReadinessFacts, now: 
     if (f.workers.length === 0) {
       row("worker_qualifications", "UNKNOWN", `${codes.join(", ")} required of workers, but the organization has no worker linked to a user, so no holding can be read${f.unlinkedWorkers ? ` (${f.unlinkedWorkers} unlinked worker(s))` : ""}.`);
     } else {
-      const perCode = codes.map(code => ({ code, holders: f.workers.filter(w => countsAsHeld(w.holdings, code, now).held).length }));
-      const holdAll = f.workers.filter(w => codes.every(code => countsAsHeld(w.holdings, code, now).held)).length;
+      const perCode = codes.map(code => ({ code, holders: f.workers.filter(w => holdsQualification(w.holdings, code, now).held).length }));
+      const holdAll = f.workers.filter(w => codes.every(code => holdsQualification(w.holdings, code, now).held)).length;
       const summary = perCode.map(p => `${p.code}: ${p.holders}/${f.workers.length}`).join(", ");
       if (holdAll === 0) row("worker_qualifications", "BLOCK", `No worker holds every required qualification (${summary}); held means verified, unexpired, with an establishable expiry.`);
       else if (holdAll < needed) row("worker_qualifications", "WARN", `${holdAll} of ${needed} required worker(s) hold every required qualification (${summary}).`);
@@ -311,7 +321,7 @@ export function evaluateMarketplaceReadiness(f: MarketplaceReadinessFacts, now: 
       if (f.unlinkedWorkers) row("worker_qualifications:unlinked", "WARN", `${f.unlinkedWorkers} worker(s) are not linked to a user; their holdings were not read.`, false);
     }
     if (req.tdgRequired) {
-      const tdgHolders = f.workers.filter(w => countsAsHeld(w.holdings, TDG_QUALIFICATION_CODE, now).held).length;
+      const tdgHolders = f.workers.filter(w => holdsQualification(w.holdings, TDG_QUALIFICATION_CODE, now).held).length;
       row("dangerous_goods", tdgHolders > 0 ? "PASS" : f.workers.length === 0 ? "UNKNOWN" : "BLOCK", tdgHolders > 0 ? `${tdgHolders} worker(s) hold ${TDG_QUALIFICATION_CODE}.` : `Dangerous goods on this haul and no worker holds ${TDG_QUALIFICATION_CODE}.`);
     }
   } else row("worker_qualifications", "PASS", "No worker qualification required.");

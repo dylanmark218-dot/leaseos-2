@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import {
+import { Building2,
   Activity,
   BriefcaseBusiness,
   Camera,
@@ -59,6 +59,7 @@ const menuItems = [
   { icon: FileCheck2, label: "Compliance engine", path: "/compliance-engine" },
   { icon: CloudOff, label: "Offline vault", path: "/offline-vault" },
   { icon: DollarSign, label: "Billing & unit safety", path: "/billing-safety" },
+  { icon: Building2, label: "Customers", path: "/customers" },
   { icon: Navigation, label: "Route safety", path: "/route-safety" },
   { icon: Factory, label: "Disposal directory", path: "/disposal-directory" },
   { icon: Timer, label: "Trip operations", path: "/trip-operations" },

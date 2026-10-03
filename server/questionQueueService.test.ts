@@ -5,7 +5,7 @@ import { answerQuestion, pendingQuestionsFor, persistQuestions } from "./questio
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let nextId = 910000 + Math.floor(Math.random() * 50000);
+let nextId = 409_000_000 + Math.floor(Math.random() * 50000);
 const user = () => nextId++;
 
 beforeAll(async () => {

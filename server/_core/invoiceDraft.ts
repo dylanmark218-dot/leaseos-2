@@ -7,18 +7,26 @@
  * the rate is a P9 rule, not a figure typed here.
  */
 import { createHash } from "node:crypto";
+import type { SignatureVerdict } from "./fieldTicketSignature";
 
 export type TicketLineForInvoice = { id: number; description: string; serviceCode: string | null; disposition: "not_presented" | "accepted" | "disputed"; quantity: number | null; quantityUnit: string | null; decision: { decisionRef: string; outcome: string; amountCents: number | null; billableQuantityMillis: number | null; rateMillis: number | null; unit: string; quantityMillis: number; scopeLevel: string | null; reasons: string[] } | null };
 export type DraftLine = { lineNo: number; fieldTicketLineId: number; pricingDecisionRef: string; serviceCode: string | null; description: string; quantityMillis: number; billableQuantityMillis: number; unit: string; rateMillis: number | null; amountCents: number; basis: string };
 export type Draft = { lines: DraftLine[]; excluded: { fieldTicketLineId: number; description: string; reason: string }[]; blockers: string[]; subtotalCents: number };
 
 /** Which lines enter the invoice, which are excluded and why, and what blocks the draft. */
-export function draftFromTicket(args: { signed: boolean; ticketStatus: string; lines: readonly TicketLineForInvoice[]; partialAcceptanceAllowed: boolean; alreadyInvoiced?: ReadonlyMap<number, string> }): Draft {
+export function draftFromTicket(args: { signature: SignatureVerdict; lines: readonly TicketLineForInvoice[]; partialAcceptanceAllowed: boolean; alreadyInvoiced?: ReadonlyMap<number, string> }): Draft {
   const blockers: string[] = [];
   const lines: DraftLine[] = [];
   const excluded: Draft["excluded"] = [];
-  if (!args.signed) blockers.push("Ticket is not signed — an invoice is drawn from a signed ticket");
-  if (args.ticketStatus === "amended_after_signature") blockers.push("Ticket was amended after signature — the amendment goes to review before invoicing");
+  // SPINE item 2 — billing consumes the site sign-off's verdict; it never decides "signed" itself.
+  // Only a satisfied verdict lets the draft proceed: no signature found is not "not required", and
+  // records that disagree are not "signed".
+  const sig = args.signature;
+  if (sig.state === "unsigned") blockers.push("Ticket is not signed — an invoice is drawn from a signed ticket");
+  else if (sig.state === "refused") blockers.push("Customer refused the site ticket — an invoice is drawn from a signed ticket");
+  else if (sig.state === "no_representative") blockers.push("No customer representative signed — an invoice is drawn from a signed ticket");
+  else if (sig.state === "stale") blockers.push(`Signature does not cover the current revision — ${sig.reason}`);
+  else if (!sig.satisfied) blockers.push(`Signature not established — ${sig.reason}`);
   let lineNo = 0;
   for (const l of args.lines) {
     const on = args.alreadyInvoiced?.get(l.id);

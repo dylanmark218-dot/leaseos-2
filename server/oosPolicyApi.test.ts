@@ -2,6 +2,7 @@
  * v22.20 — the release policy API, and the two refusals that make it worth having.
  */
 import { beforeAll, describe, expect, it } from "vitest";
+import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import mysql from "mysql2/promise";
 import { appRouter } from "./routers";
 import { grantUserRole } from "./db";
@@ -120,7 +121,7 @@ d("1A — the caller cannot choose the organization", () => {
 
   it("refuses a branch policy for a branch the caller holds no grant in", async () => {
     const id = seq++;
-    await grantUserRole({ userId: id, role: "management", scopeType: "branch", scopeRef: "B-MINE", grantedByUserId: 1, grantedAt: new Date() });
+    await grantUserRole({ userId: id, role: "management", scopeType: "branch", orgRef: SINGLE_TENANT_ID, scopeRef: "B-MINE", grantedByUserId: 1, grantedAt: new Date() });
     await expect(caller(id).comms.oosPolicyPropose({ label: "theirs", scopeType: "branch", scopeRef: "B-THEIRS", allowedFindingRoles: ROLES, effectiveFrom: new Date("2026-01-01") }))
       .rejects.toThrow();   // refused — the role layer confines branch grants before the scope check is even reached
     // A branch-confined caller is refused at the role layer for policy writes at
@@ -132,7 +133,7 @@ d("1A — the caller cannot choose the organization", () => {
 
   it("refuses a company-wide policy from a branch-confined caller", async () => {
     const id = seq++;
-    await grantUserRole({ userId: id, role: "management", scopeType: "branch", scopeRef: "B-ONLY", grantedByUserId: 1, grantedAt: new Date() });
+    await grantUserRole({ userId: id, role: "management", scopeType: "branch", orgRef: SINGLE_TENANT_ID, scopeRef: "B-ONLY", grantedByUserId: 1, grantedAt: new Date() });
     await expect(caller(id).comms.oosPolicyPropose({ label: "company", allowedFindingRoles: ROLES, effectiveFrom: new Date("2026-01-01") }))
       .rejects.toThrow();
   });

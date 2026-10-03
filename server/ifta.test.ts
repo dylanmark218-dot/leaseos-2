@@ -174,7 +174,7 @@ describe("who records, who verifies, who finalizes", () => {
 const URL = process.env.DATABASE_URL;
 const d = URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let userSeq = 830000 + Math.floor(Math.random() * 50000);
+let userSeq = 407_000_000 + Math.floor(Math.random() * 50000);
 const nextUser = () => userSeq++;
 const key = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
 beforeAll(async () => { if (!URL) return; pool = mysql.createPool({ uri: URL, connectionLimit: 6 }); });
@@ -187,7 +187,7 @@ d("one unit's quarter, through the ledger", () => {
     const office = await withRole("office");
     const bookkeeper = await withRole("bookkeeper");
     const preparer = await withRole("tax_preparer");
-    const entityId = 900000 + Math.floor(Math.random() * 90000);
+    const entityId = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction) VALUES (?, 'Fixture Books Ltd.', 'corporation', 'CA-AB')", [`FE-${Math.random().toString(36).slice(2, 12)}`]))[0].insertId);   // F1 — a real book: a made-up entity id is "not found"
     const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, company, maintenanceStatus) VALUES (?, 'truck', 'ABC', 'clear')", [key("142").slice(0, 30)]);
     const unitId = Number(u.insertId);
     const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress) VALUES (?, 'haul', 'transport', 'Acme', 'x', 'dispatched', 0)", [key("JOB").slice(0, 40)]);

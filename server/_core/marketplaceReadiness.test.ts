@@ -17,7 +17,7 @@ import {
   readinessFingerprint,
   type MarketplaceReadinessFacts,
 } from "./marketplaceReadiness";
-import type { PolicyRecord } from "./insuranceRisk";
+import { proofFromDocuments, type PolicyRecord } from "./insuranceRisk";
 import type { QualificationHolding } from "./qualificationValidity";
 
 const NOW = new Date("2026-10-02T12:00:00Z");
@@ -26,9 +26,11 @@ const d = (days: number) => new Date(NOW.getTime() + days * 86_400_000);
 const holding = (code: string, over: Partial<QualificationHolding> = {}): QualificationHolding => ({
   holdingRef: `HLD-${code}-${Math.random().toString(36).slice(2, 6)}`, code, verificationState: "verified", issuedAt: d(-100), expiresAt: d(300), recordedAt: d(-100), ...over,
 });
+/** Proof of cover as production builds it: the canonical verdict on a verified, in-force insurance_proof row. */
+const verifiedProof = proofFromDocuments([{ id: 1, docType: "insurance_proof", title: "insurance_proof", issuedAt: d(-30), expiresAt: d(300), verificationStatus: "verified", capturedAt: d(-30) }], NOW);
 const policy = (limit: number | null, over: Partial<PolicyRecord> = {}): PolicyRecord => ({
   policyRef: "POL-1", policyType: "general_liability", effectiveAt: d(-60), expiresAt: d(300), status: "active", coverageVerificationStatus: "coverage_verified",
-  coverages: [{ coverageType: "general_liability", limitAmount: limit, additionalInsuredEndorsement: false }], document: { expiresAt: d(300), verificationStatus: "verified" }, ...over,
+  coverages: [{ coverageType: "general_liability", limitAmount: limit, additionalInsuredEndorsement: false }], document: verifiedProof, ...over,
 });
 const doc = (docType: string, over: Partial<MarketplaceReadinessFacts["carrierDocuments"][number]> = {}) => ({
   id: Math.floor(Math.random() * 1e6), docType, title: docType, issuedAt: d(-30), expiresAt: d(365), verificationStatus: "verified" as const, capturedAt: d(-30), ...over,

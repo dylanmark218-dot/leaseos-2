@@ -11,11 +11,28 @@ import { queueCustomerAlert } from "./customerAlertService";
 import { MEASUREMENT_BASIS, normaliseUnit, priceLineAndRecord } from "./_core/linePricing";
 import { approvalDecision, decideBillable, termsInEffect, type Terms } from "./_core/contractTerms";
 import { storagePut } from "./storage";
-import { actingScopeFor, fieldTicketInScope, getDb, jobInScope, unitInScope } from "./db";
+import { fieldTicketInScope, getDb, jobInScope, tripInScope, unitInScope } from "./db";
+import { assertProfileInScope, financeScopeFor } from "./_core/entityScope";
+import { clientAdjustmentInScope, contractTermsInScope, customerAccountInScope, requireTicket, ticketRevisionInScope } from "./financeScope";
+
+/**
+ * P0-A3 — the closeout router's one scope: the strict money boundary (F1 + P0-A1). A ticket is in
+ * scope through its job (P4.1); a customer account, its terms and its client adjustments through
+ * the account's book. An ended membership is refused; a foreign record is not found.
+ */
+async function actingScopeFor(userId: number) {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  return financeScopeFor(db, userId);
+}
 import { nextTrackingNumber } from "./_core/trackingNumbers";
 import { fieldDevices } from "../drizzle/schema";
 import { canonicalSignaturePayload, checkSignatureAttestation } from "./_core/deviceSignature";
+import { produceFieldTicketSignature } from "./_core/attest/attestProducers";
+import { AttestRefusal } from "./_core/attest/attestService";
+import { coreRecordOwnership } from "../drizzle/schema";
 import { clientAdjustments, customerAccounts, customerContractTerms, delayEvents, disposalTickets, fieldTicketDocuments, fieldTicketEvents, fieldTicketLines, fieldTicketRevisions, fieldTicketSignatures, fieldTickets, jobs, loads, payrollAdjustments, roadHazardObservations, signatoryAuthorities, tripStops, weatherObservations } from "../drizzle/schema";
+import { fieldTicketSignatureVerdict, type SignatureVerdict } from "./_core/fieldTicketSignature";
 import { EVENT_CLOCK, canonicalJson, classifyDelay, closeoutState, composeSiteSnapshot, lineDecision, postSiteSupplement, sha256, signatureDecision, whyTheseHours, type Authority, type DelayRules, type EventType, type PostSiteAuthorization, type SiteSnapshot, type Supplement, type TicketEvent, type TicketLine } from "./_core/siteCloseout";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -40,7 +57,16 @@ export async function loadTicket(ticketNumber: string) {
   const ln: TicketLine[] = lines.map(l => ({ id: l.id, lineKind: l.lineKind, description: l.description, quantity: l.quantity, quantityUnit: l.quantityUnit, measurementMethod: l.measurementMethod, sourceTrackingNumber: l.sourceTrackingNumber, disposition: l.disposition, operatorStatement: l.operatorStatement, customerStatement: l.customerStatement }));
   // v22.2 — the account's approved contract terms in effect on the ticket's date, or null.
   const terms = await termsFor(account?.id ?? null, t.completedAt ?? t.createdAt);
-  return { db, t, terms, events: ev, lines: ln, signature: sigs[0] ?? null, revisions, job, account };
+  // SPINE item 2 — whether the signature this ticket needs is established is decided once, from every
+  // signature row, every revision and the ticket's own record. `signature` stays the evidence the
+  // workflow locks and the documents read; `signatureVerdict` is the answer the decisions read.
+  const signatureVerdict = fieldTicketSignatureVerdict({ ticket: t, signatures: sigs, revisions });
+  return { db, t, terms, events: ev, lines: ln, signature: sigs[0] ?? null, signatureVerdict, revisions, job, account };
+}
+
+/** The workflow's own refusal, unchanged for a ticket with no signature; any other unsatisfied verdict names why. */
+export function unsignedMessage(message: string, verdict: SignatureVerdict): string {
+  return verdict.state === "unsigned" ? message : `${message} — ${verdict.reason}`;
 }
 
 export function snapshotFor(x: Awaited<ReturnType<typeof loadTicket>>) {
@@ -88,18 +114,39 @@ deviceAttestation?: { deviceRef: string; keyFingerprint: string; signatureP1363B
     });
     if (!verdict.ok) throw new TRPCError({ code: "FORBIDDEN", message: `${verdict.code}: ${verdict.reason}` });
   }
-  await x.db.insert(fieldTicketSignatures).values({ fieldTicketId: x.t.id, revision: 1, result: d.refused.length ? "partially_accepted" : "accepted", signerName: args.signer.name, signerCompany: args.signer.company, signerRole: args.signer.role, signerPhone: args.signer.phone ?? null, authoritiesExercised: JSON.stringify(d.exercised), withinAuthority: d.withinAuthority, signedScopeStatement: scope, postSiteAuthorizationJson: args.postSiteAuthorization ? JSON.stringify(args.postSiteAuthorization) : null, signatureStorageKey: args.paperScanEvidenceRecordId ? `evidence:${args.paperScanEvidenceRecordId}` : null, signatureMethod: args.method, payloadHash: hash, capturedAt: now, capturedLatitude: args.gps?.latitude ?? null, capturedLongitude: args.gps?.longitude ?? null, capturedOffline: args.offline, witnessedByOperatorId: args.witnessedByOperatorId, deviceRef: args.deviceAttestation?.deviceRef ?? null, deviceKeyFingerprint: args.deviceAttestation?.keyFingerprint ?? null, deviceSignatureBase64: args.deviceAttestation?.signatureP1363Base64 ?? null, deviceSignedAt: args.deviceAttestation?.signedAt ?? null, externalIdentityId: args.externalIdentityId });
   const documentRef = `${x.t.ticketNumber}-R1`;
-  await x.db.insert(fieldTicketRevisions).values({ documentRef, fieldTicketId: x.t.id, revision: 1, kind: "site_signed", snapshotJson: canonicalJson(snapshot), snapshotHash: hash, billableHoursSite: snapshot.siteBillableHours, billableHoursPostSite: null, generatedByUserId: args.generatedByUserId, generatedAt: now });
-  await x.db.update(fieldTickets).set({ status: "closed", signatureStatus: d.refused.length ? "partially_accepted" : "accepted" }).where(eq(fieldTickets.id, x.t.id));
+  /*
+   * SA1 — the on-spine producer (docs/sign-attest/SIGN_ATTEST_DESIGN.md §11.1). The R1 revision is
+   * written first because it is the document the signature is OF; Sign & Attest opens a signing
+   * revision on its hash, assigns the consultant, runs the one session and hands back the refs the
+   * signature row keeps. All of it commits with the signature and the ticket's state, or none does.
+   * The ticket's organization is its job's (else its unit's owner, else the single tenant) — the same
+   * answer fieldTicketInScope gives — never taken from the request.
+   */
+  const orgRef = x.job?.orgRef ?? (x.t.unitId != null
+    ? ((await x.db.select({ orgRef: coreRecordOwnership.orgRef }).from(coreRecordOwnership).where(and(eq(coreRecordOwnership.recordType, "unit"), eq(coreRecordOwnership.recordId, x.t.unitId))).limit(1))[0]?.orgRef ?? null)
+    : null);
+  let produced: Awaited<ReturnType<typeof produceFieldTicketSignature>>;
+  try {
+    produced = await x.db.transaction(async tx => {
+      await tx.insert(fieldTicketRevisions).values({ documentRef, fieldTicketId: x.t.id, revision: 1, kind: "site_signed", snapshotJson: canonicalJson(snapshot), snapshotHash: hash, billableHoursSite: snapshot.siteBillableHours, billableHoursPostSite: null, generatedByUserId: args.generatedByUserId, generatedAt: now });
+      const p = await produceFieldTicketSignature(tx, { orgRef, documentRef, signer: { name: args.signer.name, company: args.signer.company, role: args.signer.role }, method: args.method, externalIdentityId: args.externalIdentityId, witnessUserId: args.generatedByUserId, deviceAttestation: args.deviceAttestation ?? null, paperScanEvidenceRecordId: args.paperScanEvidenceRecordId, offline: args.offline, gps: args.gps, now });
+      await tx.insert(fieldTicketSignatures).values({ ...{ fieldTicketId: x.t.id, revision: 1, result: d.refused.length ? "partially_accepted" : "accepted", signerName: args.signer.name, signerCompany: args.signer.company, signerRole: args.signer.role, signerPhone: args.signer.phone ?? null, authoritiesExercised: JSON.stringify(d.exercised), withinAuthority: d.withinAuthority, signedScopeStatement: scope, postSiteAuthorizationJson: args.postSiteAuthorization ? JSON.stringify(args.postSiteAuthorization) : null, signatureStorageKey: args.paperScanEvidenceRecordId ? `evidence:${args.paperScanEvidenceRecordId}` : null, signatureMethod: args.method, payloadHash: hash, capturedAt: now, capturedLatitude: args.gps?.latitude ?? null, capturedLongitude: args.gps?.longitude ?? null, capturedOffline: args.offline, witnessedByOperatorId: args.witnessedByOperatorId, deviceRef: args.deviceAttestation?.deviceRef ?? null, deviceKeyFingerprint: args.deviceAttestation?.keyFingerprint ?? null, deviceSignatureBase64: args.deviceAttestation?.signatureP1363Base64 ?? null, deviceSignedAt: args.deviceAttestation?.signedAt ?? null, externalIdentityId: args.externalIdentityId }, attestSessionRef: p.sessionRef });
+      await tx.update(fieldTickets).set({ status: "closed", signatureStatus: d.refused.length ? "partially_accepted" : "accepted" }).where(eq(fieldTickets.id, x.t.id));
+      return p;
+    });
+  } catch (e) {
+    if (e instanceof AttestRefusal) throw new TRPCError({ code: e.code === "not_found" ? "NOT_FOUND" : e.code === "forbidden" ? "FORBIDDEN" : e.code === "conflict" ? "CONFLICT" : e.code === "bad_request" ? "BAD_REQUEST" : "PRECONDITION_FAILED", message: e.message });
+    throw e;
+  }
   await queueCustomerAlert({ customerAccountId: x.t.customerAccountId, kind: "r1_available", ticketNumber: x.t.ticketNumber, subjectRef: documentRef });
-  return { documentRef, revision: 1, snapshotHash: hash, exercised: d.exercised, refused: d.refused, withinAuthority: d.withinAuthority, signedAt: now };
+  return { documentRef, revision: 1, snapshotHash: hash, exercised: d.exercised, refused: d.refused, withinAuthority: d.withinAuthority, signedAt: now, attest: { revisionRef: produced.revisionRef, sessionRef: produced.sessionRef, payloadHash: produced.payloadHash } };
 }
 
 export async function decideLine(args: { ticketNumber: string; lineId: number; disposition: "accepted" | "disputed"; customerQuantity: number | null; customerStatement: string | null; customerAccountIdMustMatch: number | null }) {
   const x = await loadTicket(args.ticketNumber);
   if (args.customerAccountIdMustMatch != null && x.t.customerAccountId !== args.customerAccountIdMustMatch) throw new TRPCError({ code: "NOT_FOUND", message: "No such ticket on this account" });
-  if (!x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Lines are decided against a signed ticket" });
+  if (!x.signatureVerdict.satisfied) throw new TRPCError({ code: "PRECONDITION_FAILED", message: unsignedMessage("Lines are decided against a signed ticket", x.signatureVerdict) });
   const line = x.lines.find(l => l.id === args.lineId);
   if (!line) throw new TRPCError({ code: "NOT_FOUND", message: "Line not found" });
   const d = lineDecision(line, { disposition: args.disposition, customerQuantity: args.customerQuantity, customerStatement: args.customerStatement });
@@ -134,8 +181,9 @@ export const closeoutRouter = router({
       }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const acct = input.customerAccountRef ? (await db.select({ id: customerAccounts.id }).from(customerAccounts).where(eq(customerAccounts.accountRef, input.customerAccountRef)).limit(1))[0] : undefined;
-      if (input.customerAccountRef && !acct) throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" });
+      // P0-A3: the account a ticket bills to must be in a book the caller's organization owns — the portal shows a
+      // customer identity every ticket on its account, so a foreign account here would hand this ticket to another company's customer.
+      const acct = input.customerAccountRef ? await customerAccountInScope(db, await actingScopeFor(ctx.user.id), input.customerAccountRef) : undefined;
       // Configured, transactional sequence (rule §18): FT-<year>-<000001>, format from trackingSequences.
       const ticketNumber = (await nextTrackingNumber(db, { sequenceType: "FT" })).trackingNumber;
       const job = (await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.id, input.jobId)).limit(1))[0];
@@ -214,9 +262,15 @@ export const closeoutRouter = router({
   /** Observed weather, a road hazard, a hold: contemporaneous evidence, classified by the contract or held at REVIEW. */
   delayRecord: roleProcedure("closeout.delayRecord")
     .input(z.object({ ticketNumber: z.string().max(64).nullable().optional(), jobId: z.number().int().positive().nullable().optional(), tripId: z.number().int().positive().nullable().optional(), unitId: z.number().int().positive().nullable().optional(), kind: z.enum(["customer_hold", "disposal_queue", "weather", "road_hazard", "collision", "driver_break", "breakdown", "other"]), hazardType: z.string().max(60).nullable().optional(), severity: z.enum(["low", "medium", "high"]).default("medium"), observedAt: z.coerce.date(), endedAt: z.coerce.date().nullable().optional(), observedByOperatorId: z.number().int().positive().nullable().optional(), observation: z.string().min(3).max(600), latitude: z.number().nullable().optional(), longitude: z.number().nullable().optional(), externalSourceStatus: z.enum(["available", "unavailable", "not_checked"]).default("not_checked"), externalSourceNote: z.string().max(300).nullable().optional(), evidenceRecordId: z.number().int().positive().nullable().optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      // P0-A3: whatever the delay is attached to — ticket, job, trip, unit — must be the caller's organization's.
+      const scope = await actingScopeFor(ctx.user.id);
+      if (input.ticketNumber) await requireTicket(scope, input.ticketNumber);
+      if (input.jobId != null && !(await jobInScope(input.jobId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Job ${input.jobId} not found` });
+      if (input.tripId != null && !(await tripInScope(input.tripId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Trip ${input.tripId} not found` });
+      if (input.unitId != null && !(await unitInScope(input.unitId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Unit ${input.unitId} not found` });
       const x = input.ticketNumber ? await loadTicket(input.ticketNumber) : null;
       const rules = x?.account?.delayBillingRulesJson ? (JSON.parse(x.account.delayBillingRulesJson) as DelayRules) : null;
       const c = classifyDelay(input.kind, rules);
@@ -230,8 +284,8 @@ export const closeoutRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const acct = (await db.select({ id: customerAccounts.id }).from(customerAccounts).where(eq(customerAccounts.accountRef, input.customerAccountRef)).limit(1))[0];
-      if (!acct) throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" });
+      // P0-A3: the account must be in a book the caller's organization owns; a foreign one is "Customer account not found".
+      const acct = await customerAccountInScope(db, await actingScopeFor(ctx.user.id), input.customerAccountRef);
       let externalIdentityId: number | null = null;
       if (input.externalIdentityRef) { const { externalIdentities } = await import("../drizzle/schema"); const ei = (await db.select({ id: externalIdentities.id, customerAccountId: externalIdentities.customerAccountId }).from(externalIdentities).where(eq(externalIdentities.identityRef, input.externalIdentityRef)).limit(1))[0]; if (!ei || ei.customerAccountId !== acct.id) throw new TRPCError({ code: "BAD_REQUEST", message: "External identity is not this account's" }); externalIdentityId = ei.id; }
       const authorityRef = (await nextTrackingNumber(db, { sequenceType: "SIG" })).trackingNumber;
@@ -268,7 +322,11 @@ export const closeoutRouter = router({
   /** The office records the customer's per-line position from a paper ticket. Both sides stay. */
   lineDecide: roleProcedure("closeout.lineDecide")
     .input(z.object({ ticketNumber: z.string().min(1).max(64), lineId: z.number().int().positive(), disposition: z.enum(["accepted", "disputed"]), customerQuantity: z.number().nullable().optional(), customerStatement: z.string().max(220).nullable().optional() }))
-    .mutation(async ({ input }) => decideLine({ ticketNumber: input.ticketNumber, lineId: input.lineId, disposition: input.disposition, customerQuantity: input.customerQuantity ?? null, customerStatement: input.customerStatement ?? null, customerAccountIdMustMatch: null })),
+    .mutation(async ({ ctx, input }) => {
+      // P0-A3: the ticket must be the caller's organization's before a line on it is decided.
+      await requireTicket(await actingScopeFor(ctx.user.id), input.ticketNumber);
+      return decideLine({ ticketNumber: input.ticketNumber, lineId: input.lineId, disposition: input.disposition, customerQuantity: input.customerQuantity ?? null, customerStatement: input.customerStatement ?? null, customerAccountIdMustMatch: null });
+    }),
 
   /** Stage 2: what happened after the lease, under what was signed, with the disposal ticket and GPS beside each other. */
   supplementPrepare: roleProcedure("closeout.supplementPrepare")
@@ -279,7 +337,7 @@ export const closeoutRouter = router({
       // P4.1: the ticket must be in the caller's scope (through its job, else its unit); otherwise it does not exist here.
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
       const x = await loadTicket(input.ticketNumber);
-      if (!x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A supplement follows a signed site ticket" });
+      if (!x.signature || !x.signatureVerdict.satisfied) throw new TRPCError({ code: "PRECONDITION_FAILED", message: unsignedMessage("A supplement follows a signed site ticket", x.signatureVerdict) });
       if (!x.t.completedAt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Site work completion is not recorded" });
       const authorization = x.signature.postSiteAuthorizationJson ? (JSON.parse(x.signature.postSiteAuthorizationJson) as PostSiteAuthorization) : null;
       const dt = input.disposalTicketNumber ? (await x.db.select().from(disposalTickets).where(eq(disposalTickets.ticketNumber, input.disposalTicketNumber)).limit(1))[0] : undefined;
@@ -305,7 +363,7 @@ export const closeoutRouter = router({
       const supplement = await latestSupplement(x);
       const loads = x.lines.filter(l => l.lineKind === "load").length;
       const withEvidence = x.lines.filter(l => l.lineKind === "load" && l.sourceTrackingNumber).length;
-      return { ticketNumber: x.t.ticketNumber, ...closeoutState({ events: x.events, lines: x.lines, siteWorkCompleteAt: x.t.completedAt, signature: x.signature ? { signedAt: x.signature.capturedAt, signerName: x.signature.signerName ?? "unknown signer", result: x.signature.result } : null, supplement, postSiteRequired: x.t.postSiteRequired, loadsWithDisposalEvidence: withEvidence, loads }), revisions: x.revisions.map(r => ({ documentRef: r.documentRef, revision: r.revision, kind: r.kind, snapshotHash: r.snapshotHash, generatedAt: r.generatedAt })) };
+      return { ticketNumber: x.t.ticketNumber, ...closeoutState({ events: x.events, lines: x.lines, siteWorkCompleteAt: x.t.completedAt, signature: x.signatureVerdict, supplement, postSiteRequired: x.t.postSiteRequired, loadsWithDisposalEvidence: withEvidence, loads }), revisions: x.revisions.map(r => ({ documentRef: r.documentRef, revision: r.revision, kind: r.kind, snapshotHash: r.snapshotHash, generatedAt: r.generatedAt })) };
     }),
 
   whyTheseHours: roleProcedure("closeout.whyTheseHours")
@@ -330,8 +388,8 @@ export const closeoutRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const rev = (await db.select().from(fieldTicketRevisions).where(eq(fieldTicketRevisions.documentRef, input.documentRef)).limit(1))[0];
-      if (!rev) throw new TRPCError({ code: "NOT_FOUND", message: "Revision not found" });
+      // P0-A3: a revision is its ticket's, and the ticket must be the caller's organization's.
+      const { rev } = await ticketRevisionInScope(db, await actingScopeFor(ctx.user.id), input.documentRef);
       const kind = rev.kind === "site_signed" ? "site_ticket_r1" as const : "post_site_ticket" as const;
       const existing = (await db.select().from(fieldTicketDocuments).where(and(eq(fieldTicketDocuments.revisionId, rev.id), eq(fieldTicketDocuments.kind, kind))).limit(1))[0];
       if (existing) return { documentRef: existing.documentRef, contentHash: existing.contentHash, byteLength: existing.byteLength, alreadyRendered: true as const };
@@ -366,8 +424,10 @@ export const closeoutRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const a = (await db.select().from(clientAdjustments).where(eq(clientAdjustments.adjustmentRef, input.adjustmentRef)).limit(1))[0];
-      if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "Adjustment not found" });
+      // P0-A3: the client adjustment is its account's (book), and the payroll profile it is proposed for is a book's too.
+      const scope = await actingScopeFor(ctx.user.id);
+      const a = await clientAdjustmentInScope(db, scope, input.adjustmentRef);
+      await assertProfileInScope(db, input.employeePayrollProfileId, scope);
       if (a.payrollTreatment !== "proposed" && a.payrollTreatment !== "awaiting_recipient") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Adjustment is ${a.payrollTreatment} for payroll — it was not intended for workers` });
       if (input.amountCents > a.amountCents) throw new TRPCError({ code: "BAD_REQUEST", message: `Proposal ${input.amountCents} exceeds the client's ${a.amountCents}` });
       const adjustmentRef = `PADJ-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -424,8 +484,8 @@ export const closeoutRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const acct = (await db.select({ id: customerAccounts.id }).from(customerAccounts).where(eq(customerAccounts.accountRef, input.customerAccountRef)).limit(1))[0];
-      if (!acct) throw new TRPCError({ code: "NOT_FOUND", message: "Customer account not found" });
+      // P0-A3: terms are recorded against an account in a book the caller's organization owns.
+      const acct = await customerAccountInScope(db, await actingScopeFor(ctx.user.id), input.customerAccountRef);
       const prior = (await db.select({ id: customerContractTerms.id, version: customerContractTerms.version }).from(customerContractTerms).where(eq(customerContractTerms.customerAccountId, acct.id)).orderBy(desc(customerContractTerms.version)).limit(1))[0];
       const termsRef = `TERMS-${input.customerAccountRef.slice(0, 20)}`;
       const version = (prior?.version ?? 0) + 1;
@@ -438,8 +498,8 @@ export const closeoutRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const t = (await db.select().from(customerContractTerms).where(eq(customerContractTerms.termsRef, input.termsRef)).limit(1))[0];
-      if (!t) throw new TRPCError({ code: "NOT_FOUND", message: "Terms not found" });
+      // P0-A3: the terms are their account's, and the account's book must be the caller's.
+      const t = await contractTermsInScope(db, await actingScopeFor(ctx.user.id), input.termsRef);
       const d = approvalDecision({ recordedByUserId: t.recordedByUserId, approverUserId: ctx.user.id, status: t.status, sourceDocumentEvidenceId: t.sourceDocumentEvidenceId });
       if (!d.permitted) throw new TRPCError({ code: d.refusals.some(r => r.includes("may not approve")) ? "FORBIDDEN" : "PRECONDITION_FAILED", message: d.refusals.join("; ") });
       await db.update(customerContractTerms).set({ status: "approved", approvedByUserId: ctx.user.id, approvedAt: new Date() }).where(eq(customerContractTerms.id, t.id));
@@ -480,7 +540,7 @@ export const closeoutRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const x = await loadTicket(input.ticketNumber);
-      if (!x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A completion package needs a signed ticket" });
+      if (!x.signature || !x.signatureVerdict.satisfied) throw new TRPCError({ code: "PRECONDITION_FAILED", message: unsignedMessage("A completion package needs a signed ticket", x.signatureVerdict) });
       const latest = [...x.revisions].sort((a, b) => b.revision - a.revision)[0]!;
       const [docs, adj, jobLoads] = await Promise.all([
         db.select().from(fieldTicketDocuments).where(eq(fieldTicketDocuments.fieldTicketId, x.t.id)),

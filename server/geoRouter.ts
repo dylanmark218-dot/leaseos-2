@@ -8,6 +8,7 @@
  */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { requireCallerUnits } from "./unitScope";
 import { and, between, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import { accessRoadSegments, atsLegalSubdivisions, communicationCoverage, companyRadioAuthorizations, externalDataSources, geoImportRuns, locationIdentities, radioChannels, roadGraphBuilds, roadGraphEdges, roadGraphNodes, roadRadioAssignments, siteAccessConfirmations, siteAccessPoints, unitRadioCapabilities } from "../drizzle/schema";
 import { planCommunications, type CoverageObservation, type GeoCondition, type PathSegment } from "./_core/commRoute";
@@ -20,6 +21,7 @@ import { UNREGISTERED_SOURCE, accessConfidence, corridorSegments, reverseLookup,
 import { evaluateRoute, type RoadSegmentInput } from "./_core/routeEvaluation";
 import { NOT_ROUTABLE, buildGraph, shortestPath, snapToGraph, type Graph, type GraphSegment } from "./_core/roadGraph";
 import type { RequiredCheck } from "./_core/routingCompiler";
+import { transportFeedStatus } from "./transportFeedRuntime";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
@@ -137,6 +139,20 @@ export const geoRouter = router({
     }),
 
   /** Import ATS legal subdivisions for one township. Alberta serves 1,000 features per page; the run records what came back. */
+  /**
+   * The provincial road-information feeds: where each stands (rights, key, enabled, database) and
+   * how its collection is going, plus the attribution each publisher requires shown. Read-only, and
+   * held to the same permission as clearing a source, because it is the screen that decision is
+   * made from.
+   *
+   * The environment is read here only to learn whether a key is configured and which feeds are
+   * enabled; the projection carries "present" or "missing", never a value and never the variable's
+   * name, and no request URL, response body or recorded error text.
+   */
+  transportFeeds: roleProcedure("geo.transportFeeds").query(async () => {
+    return transportFeedStatus(await getDb(), process.env, new Date());
+  }),
+
   atsImportTownship: roleProcedure("geo.atsImportTownship")
     .input(z.object({ meridian: z.number().int().min(1).max(6), rangeNumber: z.number().int().min(1).max(30), township: z.number().int().min(1).max(126), sections: z.array(z.number().int().min(1).max(36)).max(36).optional() }))
     .mutation(async ({ ctx, input }) => {
@@ -285,6 +301,7 @@ export const geoRouter = router({
   accessConfirmPassage: roleProcedure("geo.accessConfirmPassage")
     .input(z.object({ accessRef: z.string().min(1).max(64), outcome: z.enum(["reached", "could_not_reach", "reached_with_difficulty"]), tripId: z.number().int().positive().optional(), unitId: z.number().int().positive().optional(), operatorId: z.number().int().positive().optional(), configurationFingerprint: z.string().max(120).optional(), detail: z.string().max(400).optional(), observedAt: z.coerce.date().default(() => new Date()) }))
     .mutation(async ({ ctx, input }) => {
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       const d = await db();
       const a = (await d.select().from(siteAccessPoints).where(eq(siteAccessPoints.accessRef, input.accessRef)).limit(1))[0];
       if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "No such access point" });

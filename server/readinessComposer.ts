@@ -26,15 +26,17 @@ import { and, desc, eq, inArray, isNull, or as sqlOr } from "drizzle-orm";
 import { hosAttestations } from "../drizzle/schema";
 import { faultDispatchEffect } from "./_core/telematics";
 import { getDb } from "./db";
+import type { DbOrTx } from "./_core/dbTypes";
 import {
   complianceDocuments, dispatchPostings, fieldDevices, insuranceCoveredEntities, insurancePolicies, insurancePolicyCoverages,
   jobs, maintenanceDefects, measurementDeviceAssignments, measurementDevices, calibrationEvents, operators, roadsideServiceEvents,
-  units, workOrderReleases,
+  units, workOrderReleases, unitHolds,
   coreRecordOwnership, enforcementEvents, outOfServiceOrders,
   faultCodes,
   communicationCoverage, communicationPolicies, companyRadioAuthorizations, radioChannels,
   roadGraphEdges, roadRadioAssignments, routeApprovals, unitRadioCapabilities,
   academyQualifications, academyRequirements, academyRequirementBindings, academyDirectSupervisionRecords,
+  driverRequirementBindings, operatorEquipmentAuthorizations,
   loadProfiles,
 } from "../drizzle/schema";
 import { APPROVED_OVERRIDE_POLICIES, CLASSIFICATION_VERSION, classifyBlocker, mergeFindings, type ComplianceFinding } from "./_core/complianceFinding";
@@ -43,15 +45,18 @@ import {
   evaluateDispatchReadiness, type CredentialState, type DispatchBlocker, type DispatchEligibility, type EligibilityVerdict, type ReadinessInput,
 } from "./_core/dispatchReadiness";
 import { computeEligibilityFingerprint, type EligibilityFacts } from "./_core/dispatchAward";
-import { assessCoverage, type PolicyRecord } from "./_core/insuranceRisk";
+import { assessCoverage, INSURANCE_PROOF_DOC_TYPES, proofFromDocuments, type PolicyRecord, type ProofOfCoverage } from "./_core/insuranceRisk";
 import { calibrationEffectOnUse, calibrationStatus, type CalibrationEvent } from "./_core/requirementEngine";
-import { medicalFitnessForDispatch } from "./_core/compliancePassport";
+import { MEDICAL_FITNESS_DOC_TYPES, medicalFitnessForDispatch } from "./_core/compliancePassport";
+import { complianceRequirementValidity, driverLicenceVerdict } from "./_core/complianceDocumentValidity";
 import { trainingDispatchDecision } from "./_core/trainingAcademy";
+import { bindingApplies, evaluateDriverReadiness, requirementFromBinding, type BindingFacts, type DriverReadiness, type DriverRequirement } from "./_core/driverPortfolio";
 import { listRoleNamesAnyScope } from "./db";
 import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
 import { enforcementReadiness, type OosOrder, type OosScope } from "./_core/enforcement";
 import { currentReleaseEvidenceFor, type StoredRelease } from "./_core/mechanicRelease";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
+import { commercialReadinessForJob } from "./customerCommercialService";
 import {
   ADVISORY_POLICY, communicationBlockers, planCommunications,
   type CommunicationPolicy, type CoverageObservation, type GeoCondition, type PathSegment,
@@ -67,6 +72,12 @@ export type ReadinessSubject = {
   routeApprovalRef?: string | null;
   /** Working alone, for the policy rule that only applies then. */
   loneWorker?: boolean;
+  /**
+   * 0202 — when the work ends, when the caller knows. A mandatory ticket that
+   * lapses before then does not cover the job. Absent, credentials are judged
+   * at `now` only, which is what every existing caller already got.
+   */
+  workEndsAt?: Date | null;
   /**
    * v22.20 — active out-of-service orders and unresolved inspections covering
    * this operator, unit or trailer.
@@ -101,6 +112,25 @@ export async function currentCommunicationPolicy(db: NonNullable<Awaited<ReturnT
 }
 
 /* ------------------------------------------------------------------ */
+/* Fleet portfolio holds (0200)                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One active `unitHolds` row as a blocker, by its effect (docs/fleet/FLEET_PORTFOLIO_FOUNDATION_RECONCILIATION.md R-1):
+ *   out_of_service (a safety hold) — blocking, overridable by no one;
+ *   block — blocking, releasable only under an approved override policy (classification), of which none exist;
+ *   warn — review, a manager may acknowledge it.
+ * The way to move a held unit is to release the hold, which a second person does.
+ */
+function holdBlocker(subject: "unit" | "trailer", unitNumber: string, h: { holdRef: string; holdType: string; dispatchEffect: "warn" | "block" | "out_of_service"; reason: string }): DispatchBlocker {
+  const who = subject === "unit" ? "truck" : "trailer";
+  const label = `${subject === "unit" ? "Unit" : "Trailer"} ${unitNumber} — ${h.holdType} hold ${h.holdRef}: ${h.reason}`;
+  if (h.dispatchEffect === "out_of_service") return { code: `${subject}_hold_${h.holdType}`, label, severity: "blocking", subject: who, overridable: false };
+  if (h.dispatchEffect === "block") return { code: `${subject}_hold_${h.holdType}`, label, severity: "blocking", subject: who, overridable: true, overrideAuthority: "manager" };
+  return { code: `${subject}_hold_${h.holdType}_warning`, label, severity: "review", subject: who, overridable: true, overrideAuthority: "manager" };
+}
+
+/* ------------------------------------------------------------------ */
 /* Enforcement state, read from the canonical table                    */
 /* ------------------------------------------------------------------ */
 
@@ -126,14 +156,16 @@ const subjectRefForOperator = (id: number) => `operator:${id}`;
  *
  * One query for the events, one for their orders. No per-subject round trip.
  */
-async function loadEnforcementState(
-  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
-  ids: { unitId: number | null; trailerId: number | null; operatorId: number },
+export async function loadEnforcementState(
+  db: DbOrTx,
+  // The operator is optional so the portfolio's unit state (fleetPortfolioService) reads orders through
+  // this one loader rather than a copy of it. Readiness always passes one.
+  ids: { unitId: number | null; trailerId: number | null; operatorId: number | null },
 ): Promise<NonNullable<ReadinessSubject["enforcement"]> & { version: string }> {
   const subjects: { subjectRef: string; scope: OosScope }[] = [];
   if (ids.unitId != null) subjects.push({ subjectRef: subjectRefForUnit(ids.unitId), scope: "vehicle" });
   if (ids.trailerId != null) subjects.push({ subjectRef: subjectRefForTrailer(ids.trailerId), scope: "trailer" });
-  subjects.push({ subjectRef: subjectRefForOperator(ids.operatorId), scope: "driver" });
+  if (ids.operatorId != null) subjects.push({ subjectRef: subjectRefForOperator(ids.operatorId), scope: "driver" });
 
   // The organization this readiness belongs to, from the unit when there is one.
   let orgRef: string | null = null;
@@ -148,8 +180,9 @@ async function loadEnforcementState(
   const eventFilters = [
     ids.unitId != null ? eq(enforcementEvents.unitId, ids.unitId) : null,
     ids.trailerId != null ? eq(enforcementEvents.trailerId, ids.trailerId) : null,
-    eq(enforcementEvents.operatorId, ids.operatorId),
+    ids.operatorId != null ? eq(enforcementEvents.operatorId, ids.operatorId) : null,
   ].filter((f): f is NonNullable<typeof f> => f != null);
+  if (!eventFilters.length) return { subjects, orders: [], unresolvedInspections: [], version: "none" };
 
   const events = (await db.select().from(enforcementEvents).where(sqlOr(...eventFilters)))
     .filter(e => e.status !== "rescinded" && tenantOf(e.tenantId) === ourTenant);
@@ -159,7 +192,7 @@ async function loadEnforcementState(
   const refFor = (e: typeof events[number]): string | null =>
     ids.unitId != null && e.unitId === ids.unitId ? subjectRefForUnit(ids.unitId)
       : ids.trailerId != null && e.trailerId === ids.trailerId ? subjectRefForTrailer(ids.trailerId)
-        : e.operatorId === ids.operatorId ? subjectRefForOperator(ids.operatorId)
+        : ids.operatorId != null && e.operatorId === ids.operatorId ? subjectRefForOperator(ids.operatorId)
           : null;
 
   const byRef = new Map(events.map(e => [e.eventRef, e] as const));
@@ -232,6 +265,12 @@ export type ComposedReadiness = {
    * configuration for yesterday's dispatch.
    */
   automationPolicy: PolicySnapshot[];
+  /**
+   * 0202 — the driver's requirement-by-requirement answer, for the dispatch
+   * view and the wallet. Its blockers are already inside `eligibility`; this is
+   * the explanation, not a second verdict.
+   */
+  driverReadiness: DriverReadiness;
   /** C1a-6 — hash of the rules the findings were decided under; also inside `facts`. */
   ruleSetHash: string;
 };
@@ -241,6 +280,12 @@ export type ComposedReadiness = {
 /* ------------------------------------------------------------------ */
 
 const versionOf = (parts: (string | number | null | undefined)[]) => parts.map(p => (p == null ? "∅" : String(p))).join("/");
+
+/** What the fingerprint records of a proof: the verdict and the row it names, never a re-read of a row. */
+const proofVersion = (d: ProofOfCoverage | null) =>
+  !d ? "∅" : d.source === "policy_record" ? "policy_record"
+    : versionOf([d.verdict.state, d.verdict.documentId, d.verdict.expiresAt?.toISOString(), d.verdict.claimedExpiresAt?.toISOString()]);
+const proofExpiry = (d: ProofOfCoverage | null) => (d?.source === "compliance_document" ? d.verdict.claimedExpiresAt : null);
 
 async function credentialsFor(ownerType: "operator" | "unit" | "trailer", ownerId: number) {
   const db = await getDb();
@@ -341,13 +386,25 @@ function bindingHasUnevaluatedConditions(conditionsJson: string | null): boolean
   }
 }
 
-/** Best credential of a type: verified before needs_review; latest expiry; rejected never counts as present. */
-function credentialState(rows: readonly CredRow[], docTypes: readonly string[], label: string): CredentialState {
-  const c = rows
-    .filter(r => docTypes.includes(r.docType) && r.verificationStatus !== "rejected")
-    .sort((a, b) => (b.verificationStatus === "verified" ? 1 : 0) - (a.verificationStatus === "verified" ? 1 : 0) || (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0))[0];
-  if (!c) return { label, present: false, expiresAt: null };
-  return { label, present: true, expiresAt: c.expiresAt ?? undefined };
+/**
+ * SPINE item 2 — the credential's standing is the canonical verdict (`complianceDocumentValidity`,
+ * over `documentValidity`), not a choice made here. This used to pick a row itself — verified
+ * before needs_review, then the latest expiry — which let an unverified licence clear dispatch,
+ * let an older verified row outrank a newer correction, and let a not-yet-effective document
+ * count. The gate now maps the verdict (see `credentialBlocker`); nothing here decides validity.
+ *
+ * With several accepted types (an inspection may be a CVIP certificate or an annual inspection),
+ * each is judged on its own rows and the most favourable verdict stands, because any one of them
+ * satisfies the requirement.
+ */
+function credentialState(rows: readonly CredRow[], docTypes: readonly string[], label: string, at: Date): CredentialState {
+  const v = complianceRequirementValidity(rows, docTypes, at);
+  // An unverified verdict carries the date its newest row claims — evidence the gate may use to
+  // block on, never to clear on. The canonical verdict names it; nothing here re-derives it.
+  return {
+    label, present: v.state !== "none" && v.state !== "rejected", expiresAt: v.claimedExpiresAt,
+    validity: { state: v.state, reason: v.reason },
+  };
 }
 
 async function policiesCovering(entityType: "unit" | "trailer", entityId: number, now: Date): Promise<PolicyRecord[]> {
@@ -361,14 +418,16 @@ async function policiesCovering(entityType: "unit" | "trailer", entityId: number
   const [pols, covs, docs] = await Promise.all([
     db.select().from(insurancePolicies).where(inArray(insurancePolicies.id, policyIds)),
     db.select().from(insurancePolicyCoverages).where(inArray(insurancePolicyCoverages.insurancePolicyId, policyIds)),
-    db.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, entityType), eq(complianceDocuments.ownerId, entityId), inArray(complianceDocuments.docType, ["insurance_proof", "insurance_card"]))),
+    db.select().from(complianceDocuments).where(and(eq(complianceDocuments.ownerType, entityType), eq(complianceDocuments.ownerId, entityId), inArray(complianceDocuments.docType, [...INSURANCE_PROOF_DOC_TYPES]))),
   ]);
-  const proof = docs.sort((a, b) => (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0))[0];
+  // SPINE item 2: the proof is the canonical verdict over every proof row this entity owns — not
+  // the row with the latest date, which let an unverified or rejected upload stand as the proof.
+  const proof = proofFromDocuments(docs, now);
   return pols.map(p => ({
     policyRef: p.policyRef, policyType: p.policyType, effectiveAt: p.effectiveAt, expiresAt: p.expiresAt, status: p.status,
     coverageVerificationStatus: p.coverageVerificationStatus,
     coverages: covs.filter(c => c.insurancePolicyId === p.id).map(c => ({ coverageType: c.coverageType, limitAmount: c.limitAmount, additionalInsuredEndorsement: c.additionalInsuredEndorsement })),
-    document: proof ? { expiresAt: proof.expiresAt, verificationStatus: proof.verificationStatus } : null,
+    document: proof,
   }));
 }
 
@@ -401,12 +460,16 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   const opCreds = await credentialsFor("operator", op.id);
   for (const c of opCreds) governingExpiries.push({ what: `operatorDoc:${c.id}`, at: c.expiresAt });
   governingExpiries.push({ what: "legacyLicence", at: op.licenseExpiresAt });
-  let licence = credentialState(opCreds, ["driver_licence"], "Driver licence");
-  if (!licence.present && op.licenseExpiresAt) {
-    // The flat legacy field is a weak signal: present, unverified. It keeps an
-    // unmigrated operator from reading as "no licence" while the structured
-    // record is still to be entered.
-    licence = { label: "Driver licence (legacy record)", present: true, expiresAt: op.licenseExpiresAt };
+  // The one licence verdict (complianceDocumentValidity.driverLicenceVerdict): documents first, the
+  // legacy date only as an unverified claim (owner's ruling, 2026-09-25). A past date still blocks.
+  const licenceVerdict = driverLicenceVerdict(opCreds, op.licenseExpiresAt, now);
+  const licence: CredentialState = {
+    label: licenceVerdict.source === "legacy_record" ? "Driver licence (legacy record)" : "Driver licence",
+    present: licenceVerdict.state !== "none" && licenceVerdict.state !== "rejected",
+    expiresAt: licenceVerdict.claimedExpiresAt,
+    validity: { state: licenceVerdict.state, reason: licenceVerdict.reason },
+  };
+  if (licenceVerdict.source === "legacy_record") {
     contributions.push({ engine: "compliance", finding: "Licence read from the legacy operator record — no structured credential yet" });
   }
   const job = subject.jobId ? (await db.select().from(jobs).where(eq(jobs.id, subject.jobId)).limit(1))[0] ?? null : null;
@@ -420,6 +483,14 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   }).from(loadProfiles).where(eq(loadProfiles.jobId, job.id)) : [];
   const dgAuthority = dangerousGoodsAuthority(jobLoads, job ? /tdg|dangerous|hazard/i.test(`${job.type ?? ""} ${job.mode ?? ""}`) : false);
   const dangerousGoods = dgAuthority.state === "dg";
+  /*
+   * v23.31 — the job's commercial basis: customer on hold, contract not usable, a required PO/AFE
+   * absent, no governing rate sheet version, no snapshot yet. Company policy, never safety; an
+   * emergency posting turns a missing paper reference into a review item and nothing else.
+   */
+  const commercial = job ? await commercialReadinessForJob(db, job.id, now) : { blockers: [] as DispatchBlocker[], version: "none" };
+  extra.push(...commercial.blockers);
+  if (job) contributions.push({ engine: "commercial", finding: commercial.blockers.length ? commercial.blockers.map(b => b.code).join(", ") : "commercial basis in order" });
   /** For rules that only tighten (communications): a load that may be DG is treated as DG there. */
   const possiblyDangerousGoods = dgAuthority.state === "dg" || dgAuthority.state === "unknown";
   extra.push(...dgAuthority.blockers);
@@ -497,14 +568,86 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       }
     }
   }
-  if (dangerousGoods) required.push(credentialState(opCreds, ["tdg_certificate"], "TDG certificate"));
+  /* ---- 0202: the driver portfolio's requirement set ----
+   * What the company, the customer, the site, the job type and the unit demand
+   * of this operator, evaluated against the credentials above and the
+   * operator's equipment authorizations. The findings enter as blockers in
+   * B12's vocabulary, through the same `extra` list as every other engine:
+   * one gate, not two. Informational requirements produce no blocker at all.
+   */
+  const unitForDriver = subject.unitId ? (await db.select({ vehicleType: units.vehicleType }).from(units).where(eq(units.id, subject.unitId)).limit(1))[0] ?? null : null;
+  // The organization whose work this is: the job's; without a job, the organization that owns the
+  // operator (coreRecordOwnership), so a company's own requirements reach its own driver's check.
+  // Neither: the historical single tenant.
+  const operatorOwner = (await db.select({ orgRef: coreRecordOwnership.orgRef }).from(coreRecordOwnership)
+    .where(and(eq(coreRecordOwnership.recordType, "operator"), eq(coreRecordOwnership.recordId, op.id))).limit(1))[0]?.orgRef ?? null;
+  const driverFacts: BindingFacts = {
+    orgRef: job ? ((job as { orgRef?: string | null }).orgRef ?? null) : operatorOwner,
+    customer: job ? [job.customer] : [],
+    site: job ? [job.location] : [],
+    job_type: job ? [job.type, job.mode] : [],
+    equipment: unitForDriver ? [unitForDriver.vehicleType] : [],
+    job: job ? [job.jobCode, String(job.id)] : [],
+  };
+  // Tenant first, in SQL: only this organization's bindings are read (the (orgRef, active) index), and
+  // bindingApplies then matches the subject. NULL is the historical single tenant.
+  const driverBindingRows = await db.select().from(driverRequirementBindings).where(and(
+    eq(driverRequirementBindings.active, true),
+    driverFacts.orgRef == null ? isNull(driverRequirementBindings.orgRef) : eq(driverRequirementBindings.orgRef, driverFacts.orgRef),
+  ));
+  const appliedDriverBindings = driverBindingRows.filter(b => bindingApplies(b, driverFacts, now));
+  let driverRequirements: DriverRequirement[] = appliedDriverBindings.map(requirementFromBinding);
+  // The base gate already evaluates the licence (with its legacy fallback) and, on a dangerous-goods
+  // job, TDG. A binding for either would be the same fact under a second code.
+  const coveredByBase = (r: DriverRequirement) => r.kind === "credential" && (r.code === "driver_licence" || (dangerousGoods && r.code === "tdg_certificate"));
+  if (driverRequirements.some(coveredByBase)) contributions.push({ engine: "portfolio", finding: "Licence/TDG bindings are evaluated by the base gate, not twice" });
+  driverRequirements = driverRequirements.filter(r => !coveredByBase(r));
+  const equipmentRows = op.userId && driverRequirements.some(r => r.kind === "equipment")
+    ? await db.select().from(operatorEquipmentAuthorizations).where(eq(operatorEquipmentAuthorizations.userId, op.userId))
+    : [];
+  if (!op.userId && driverRequirements.some(r => r.kind === "equipment" && r.enforcement === "mandatory")) {
+    // Authorizations are held by the user; without the link there is nothing to read. Unknown, not "not authorized".
+    extra.push({ code: "portfolio_operator_unlinked", label: "Equipment qualifications apply to this job, but the operator is not linked to a user record", severity: "unknown", subject: "operator", overridable: true, overrideAuthority: "dispatcher" });
+    driverRequirements = driverRequirements.filter(r => r.kind !== "equipment");
+  }
+  const driverReadiness = evaluateDriverReadiness({
+    portfolio: {
+      operatorId: op.id, name: op.name, licenceClass: op.licenseClass ?? null,
+      credentials: opCreds.map(c => ({ id: c.id, docType: c.docType, title: c.title, issuedAt: c.issuedAt, expiresAt: c.expiresAt, verificationStatus: c.verificationStatus, capturedAt: c.capturedAt, identifier: c.identifier, verifiedAt: c.verifiedAt, privateDetail: c.privateDetail })),
+      equipment: equipmentRows.map(e => ({ equipmentType: e.equipmentType, status: e.status, expiresAt: e.expiresAt, authorizedAt: e.authorizedAt })),
+    },
+    requirements: driverRequirements,
+    at: now,
+    validThrough: subject.workEndsAt ?? null,
+  });
+  for (const b of driverReadiness.blockers) extra.push(b);
+  // Time moves these without any row changing: an authorization lapsing, a binding starting or ending.
+  for (const e of equipmentRows) governingExpiries.push({ what: `equipmentAuth:${e.id}`, at: e.expiresAt });
+  for (const b of driverBindingRows) governingExpiries.push({ what: `driverBindingStart:${b.id}`, at: b.effectiveAt }, { what: `driverBindingEnd:${b.id}`, at: b.expiresAt });
+  if (driverRequirements.length) {
+    contributions.push({ engine: "portfolio", finding: `${driverReadiness.items.length} driver requirement(s): ${driverReadiness.verdict}; ${driverReadiness.items.filter(i => i.satisfied).length} satisfied${driverReadiness.notices.length ? `; ${driverReadiness.notices.length} informational not met (not blocking)` : ""}` });
+  }
+  const portfolioVersion = versionOf([
+    ...appliedDriverBindings.map(b => `${b.id}:${b.requirementKind}:${b.requirementCode}:${b.enforcement}`),
+    ...equipmentRows.map(e => `${e.id}:${e.equipmentType}:${e.status}:${e.expiresAt?.toISOString() ?? "∅"}`),
+    `class:${op.licenseClass ?? "∅"}`,
+    // Linked or not decides UNKNOWN (portfolio_operator_unlinked) against not_authorized for the same
+    // empty equipment rows, so the link is a decision-bearing fact.
+    `user:${op.userId ?? "∅"}`,
+    // The work end is not here: it is a parameter of the question, not a fact of the world. A check
+    // made without one still describes the same world at award, and the award refuses directly on a
+    // mandatory credential that lapses before the work it is awarding ends (dispatchRouter.award).
+  ]);
+
+  if (dangerousGoods) required.push(credentialState(opCreds, ["tdg_certificate"], "TDG certificate", now));
   // Medical fitness reaches dispatch as a projection only.
-  const medRow = opCreds.filter(c => c.docType === "medical_fitness").sort((a, b) => (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0))[0];
-  const med = medicalFitnessForDispatch(medRow ? { docType: "medical_fitness", expiresAt: medRow.expiresAt, verificationStatus: medRow.verificationStatus, privateDetail: true } : null, now);
+  const med = medicalFitnessForDispatch(complianceRequirementValidity(opCreds, MEDICAL_FITNESS_DOC_TYPES, now));
   if (med.eligible === "no") extra.push({ code: "medical_fitness_not_current", label: "Commercial medical fitness not current", severity: "blocking", subject: "operator", overridable: false });
   else if (med.eligible === "unknown") extra.push({ code: "medical_fitness_unknown", label: "Commercial medical fitness not verified", severity: "unknown", subject: "operator", overridable: true, overrideAuthority: "manager" });
   contributions.push({ engine: "compliance", finding: `Medical fitness: ${med.eligible}` });
-  const medicalVersion = medRow ? versionOf([medRow.id, medRow.verificationStatus, medRow.expiresAt?.toISOString()]) : "none";
+  // Every medical row the verdict read, not one: a change to any of them can change the answer.
+  const medRows = opCreds.filter(c => MEDICAL_FITNESS_DOC_TYPES.includes(c.docType));
+  const medicalVersion = medRows.length ? versionOf(medRows.map(r => `${r.id}:${r.verificationStatus}:${r.issuedAt?.toISOString() ?? "∅"}:${r.expiresAt?.toISOString() ?? "∅"}:${r.capturedAt.toISOString()}`).sort()) : "none";
 
   const device = (await db.select({ status: fieldDevices.status }).from(fieldDevices).where(eq(fieldDevices.userId, op.userId ?? -1)).orderBy(desc(fieldDevices.enrolledAt)).limit(1))[0];
   const deviceVersion = device ? device.status : "none";
@@ -515,11 +658,11 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   let unitVersion = "none", releaseVersion = "none", criticalCount = 0;
   let unitCredentialVersion = "none", insuranceVersion = "none", roadsideVersion = "none", calibrationVersion = "none";
   const credentialVersionOf = (rows: readonly CredRow[]) => versionOf(rows.map(c => `${c.id}:${c.docType}:${c.verificationStatus}:${c.expiresAt?.toISOString() ?? "∅"}`).sort());
-  const insuranceVersionOf = (pols: readonly PolicyRecord[]) => versionOf(pols.map(p => `${p.policyRef}:${p.status}:${p.coverageVerificationStatus}:${p.expiresAt.toISOString()}:${p.document?.verificationStatus ?? "∅"}:${p.document?.expiresAt?.toISOString() ?? "∅"}`).sort());
+  const insuranceVersionOf = (pols: readonly PolicyRecord[]) => versionOf(pols.map(p => `${p.policyRef}:${p.status}:${p.coverageVerificationStatus}:${p.expiresAt.toISOString()}:${proofVersion(p.document)}`).sort());
   if (subject.unitId) {
     const unit = (await db.select().from(units).where(eq(units.id, subject.unitId)).limit(1))[0];
     if (!unit) throw new Error(`Unit ${subject.unitId} not found`);
-    const [uCreds, defects, releases, roadside, pols, assignments] = await Promise.all([
+    const [uCreds, defects, releases, roadside, pols, assignments, holds] = await Promise.all([
       credentialsFor("unit", unit.id),
       /*
        * Open defects, AND every critical one whatever its status. A resolved critical defect still
@@ -539,6 +682,8 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       db.select().from(roadsideServiceEvents).where(and(eq(roadsideServiceEvents.unitId, unit.id), inArray(roadsideServiceEvents.status, ["open", "vendor_assigned", "in_repair", "repaired_awaiting_release"]))),
       policiesCovering("unit", unit.id, now),
       db.select().from(measurementDeviceAssignments).where(and(eq(measurementDeviceAssignments.assignedToType, "unit"), eq(measurementDeviceAssignments.assignedToId, unit.id))),
+      // 0200 — the Fleet & Equipment Portfolio's active holds on this unit (the canonical hold table).
+      db.select().from(unitHolds).where(and(eq(unitHolds.unitId, unit.id), eq(unitHolds.status, "active"))),
     ]);
     /*
      * Two conditions, kept apart — the manifest has always listed them separately ("unresolved
@@ -568,19 +713,20 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     const withoutEvidence = owingEvidence.filter(d => currentReleaseEvidenceFor(d.id, storedReleases) == null);
     truck = {
       unitNumber: unit.unitNumber,
-      inspection: credentialState(uCreds, ["cvip_certificate", "annual_inspection"], "Annual inspection"),
-      registration: credentialState(uCreds, ["vehicle_registration"], "Registration"),
+      inspection: credentialState(uCreds, ["cvip_certificate", "annual_inspection"], "Annual inspection", now),
+      registration: credentialState(uCreds, ["vehicle_registration"], "Registration", now),
       insurance: { label: "Insurance", present: pols.length > 0, expiresAt: pols.length ? new Date(Math.max(...pols.map(p => p.expiresAt.getTime()))) : null },
       maintenanceOverdue: unit.maintenanceStatus === "blocked",
       criticalDefectOpen: unresolvedCritical.length > 0,
       mechanicReleaseRequired: owingEvidence.length > 0,
       mechanicReleaseGiven: owingEvidence.length > 0 && withoutEvidence.length === 0,
     };
-    unitVersion = versionOf([unit.maintenanceStatus, defects.length, ...defects.map(d => `${d.id}:${d.status}:${d.resolvedByReleaseId ?? "∅"}`)]);
+    unitVersion = versionOf([unit.maintenanceStatus, defects.length, ...defects.map(d => `${d.id}:${d.status}:${d.resolvedByReleaseId ?? "∅"}`), ...holds.map(h => `hold:${h.holdRef}:${h.dispatchEffect}`).sort()]);
+    for (const h of holds) extra.push(holdBlocker("unit", unit.unitNumber, h));
     releaseVersion = versionOf(releases.map(r => `${r.id}:${r.releaseType}:${r.testResult ?? "∅"}:${r.resolvedDefectIds ?? "∅"}`));
     unitCredentialVersion = credentialVersionOf(uCreds);
     for (const c of uCreds) governingExpiries.push({ what: `unitDoc:${c.id}`, at: c.expiresAt });
-    for (const p of pols) governingExpiries.push({ what: `unitPolicy:${p.policyRef}`, at: p.expiresAt }, { what: `unitPolicyProof:${p.policyRef}`, at: p.document?.expiresAt });
+    for (const p of pols) governingExpiries.push({ what: `unitPolicy:${p.policyRef}`, at: p.expiresAt }, { what: `unitPolicyProof:${p.policyRef}`, at: proofExpiry(p.document) });
     insuranceVersion = `unit=${insuranceVersionOf(pols)}`;
     roadsideVersion = versionOf(roadside.map(r => `${r.id}:${r.status}`).sort());
 
@@ -637,20 +783,24 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     // There is no trailers table: a trailer is a unit whose vehicleType says so.
     const tr = (await db.select().from(units).where(eq(units.id, subject.trailerId)).limit(1))[0];
     if (!tr) throw new Error(`Trailer ${subject.trailerId} not found`);
-    const [tCreds, pols] = await Promise.all([credentialsFor("trailer", tr.id), policiesCovering("trailer", tr.id, now)]);
+    const [tCreds, pols, tHolds] = await Promise.all([
+      credentialsFor("trailer", tr.id), policiesCovering("trailer", tr.id, now),
+      db.select().from(unitHolds).where(and(eq(unitHolds.unitId, tr.id), eq(unitHolds.status, "active"))),
+    ]);
+    for (const h of tHolds) extra.push(holdBlocker("trailer", tr.unitNumber, h));
     trailer = {
       trailerNumber: tr.unitNumber,
-      inspection: credentialState(tCreds, ["cvip_certificate", "annual_inspection"], "Trailer inspection"),
-      registration: credentialState(tCreds, ["vehicle_registration"], "Trailer registration"),
+      inspection: credentialState(tCreds, ["cvip_certificate", "annual_inspection"], "Trailer inspection", now),
+      registration: credentialState(tCreds, ["vehicle_registration"], "Trailer registration", now),
       insurance: { label: "Trailer insurance", present: pols.length > 0, expiresAt: pols.length ? new Date(Math.max(...pols.map(p => p.expiresAt.getTime()))) : null },
       maintenanceOverdue: false,
       compatibleWithTruck: null,
     };
     // C1a-6 — was [id, number of documents]: a trailer inspection replaced by an expired one read as unchanged.
-    trailerVersion = versionOf([tr.id, credentialVersionOf(tCreds)]);
+    trailerVersion = versionOf([tr.id, credentialVersionOf(tCreds), ...tHolds.map(h => `hold:${h.holdRef}:${h.dispatchEffect}`).sort()]);
     insuranceVersion = `${insuranceVersion};trailer=${insuranceVersionOf(pols)}`;
     for (const c of tCreds) governingExpiries.push({ what: `trailerDoc:${c.id}`, at: c.expiresAt });
-    for (const p of pols) governingExpiries.push({ what: `trailerPolicy:${p.policyRef}`, at: p.expiresAt }, { what: `trailerPolicyProof:${p.policyRef}`, at: p.document?.expiresAt });
+    for (const p of pols) governingExpiries.push({ what: `trailerPolicy:${p.policyRef}`, at: p.expiresAt }, { what: `trailerPolicyProof:${p.policyRef}`, at: proofExpiry(p.document) });
   }
 
   /* ---- job ---- */
@@ -916,11 +1066,14 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
       // so a change to it must move the fingerprint too.
       `legacyLicence:${op.licenseExpiresAt?.toISOString() ?? "∅"}`,
       `academy:${academyVersion}`,
+      `portfolio:${portfolioVersion}`,
     ]),
     hoursAvailableMinutes: null,
     unitId: subject.unitId, unitStatusVersion: unitVersion, criticalDefectCount: criticalCount, mechanicReleaseVersion: releaseVersion,
     trailerId: subject.trailerId, trailerStatusVersion: trailerVersion,
-    jobClassificationVersion: job ? versionOf([job.id, job.type, job.mode, job.status]) : "none",
+    // v23.31 — the commercial basis rides in the job's version: a PO recorded, a hold placed or a
+    // snapshot taken between check and award makes the check stale, like every other job fact.
+    jobClassificationVersion: job ? versionOf([job.id, job.type, job.mode, job.status, commercial.version]) : "none",
     materialClassificationVersion: dgAuthority.version,
     // Permits reach dispatch only inside a route approval's dependency hash (there is no permit
     // record yet — C6); `routeDecisionVersion` carries that hash in full.
@@ -935,7 +1088,7 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   };
   return {
     eligibility, facts, fingerprint: computeEligibilityFingerprint(facts), contributions,
-    capabilities: picture.capabilities, capabilityVerdict: picture.verdict, automationPolicy, ruleSetHash,
+    capabilities: picture.capabilities, capabilityVerdict: picture.verdict, automationPolicy, ruleSetHash, driverReadiness,
   };
 }
 

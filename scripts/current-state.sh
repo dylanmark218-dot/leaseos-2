@@ -4,6 +4,30 @@
 # gate regenerates it and fails if the committed copy differs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# The test universe is whatever the runner says it is. This used to be
+# `find server -name '*.test.ts'`, and the comment on that line already knew
+# the failure mode: a suite the runner enumerates and the counter does not.
+# On 2026-09-30 it was the 16 jsdom suites under client/src/**/*.dom.test.tsx —
+# in vitest's include since they were written, run by every gate, and absent
+# from this document, which said 378 while the gate ran 394. Asking vitest
+# itself means the two cannot drift, because there is one list.
+#
+# Fail closed: an empty answer is the runner or its config having broken, and
+# writing 0 into the document would be the exact false claim gate 8 exists
+# to catch. LEASEOS_VITEST_LIST_CMD exists so the test can prove that.
+list_tests() {
+  local cmd="${LEASEOS_VITEST_LIST_CMD:-pnpm exec vitest list --filesOnly}"
+  local list
+  list=$($cmd 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | grep -E '\.(test|spec)\.tsx?$' | sort || true)
+  if [ -z "$list" ]; then
+    echo "current-state: the runner listed no test files (\`$cmd\`); refusing to write a count of 0" >&2
+    return 1
+  fi
+  printf '%s\n' "$list"
+}
+if [ "${1:-}" = "--list-tests" ]; then list_tests; exit $?; fi
+
 # Captured before line 23's `set -- $PERMS`, which overwrites the positional
 # parameters to unpack a count triple. Reading $2 after that point returns a
 # permission count, which is how this script briefly tried to write the
@@ -34,8 +58,10 @@ const sensN=arr("SENSITIVE_PERMISSIONS"), uniN=arr("UNIVERSAL_PERMISSIONS");
 console.log(perms.size+" "+sensN+" "+uniN);')
 # This clobbers $1/$2; OUT and RELEASE are captured at the top for that reason.
 set -- $PERMS; PERM_COUNT=$1; SENS_COUNT=$2; UNI_COUNT=$3
-TEST_FILES=$(ls server/*.test.ts server/_core/*.test.ts 2>/dev/null | wc -l | tr -d ' ')
-TEST_CASES=$(cat server/*.test.ts server/_core/*.test.ts | grep -cE '^\s*it\(' || true)
+# The runner's own list — see list_tests above for why not a find or a glob.
+TEST_FILE_LIST=$(list_tests)
+TEST_FILES=$(printf '%s\n' "$TEST_FILE_LIST" | grep -c . || true)
+TEST_CASES=$(printf '%s\n' "$TEST_FILE_LIST" | xargs cat | grep -cE '^\s*it\(' || true)
 NATIVE=$(grep -o 'NotOnDeviceError(' client/src/runtime/adapters/capacitor.ts | wc -l | tr -d ' ')
 
 # The document body is a quoted heredoc: bash interprets none of it.
@@ -71,16 +97,44 @@ here can be added rather than read.
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
 
-Records vault · roles and server-side authorization · payroll, finance, tax
+Records vault · roles and server-side authorization, scoped to the
+organization that granted them — with the migration that scoped them verified
+against a real MariaDB (pre-state, legacy rows of every shape, apply, assert),
+a read-only diagnostic that counts the quarantine before and after deployment,
+a bootstrap that can no longer mint cross-tenant authority, a resolution
+procedure for the grants the migration refused to guess at, a CI gate that
+now proves which suites ran from vitest's own report rather than by grepping
+coloured output, and People & Access — the first surface that creates a
+membership at all, through an invitation claimed with a one-time token and an
+authenticated identity rather than an unverified email: a role issued by one company authorizes
+nothing in another, capabilities and workspaces are computed from the acting
+organization's grants rather than filtered afterwards, branch grants name
+their organization explicitly because branch identifiers have no owner, grant
+and revoke are organization-specific, and a pre-scope grant that could not be
+attributed without guessing is quarantined rather than assigned · one identity
+across several jobs: the session surface that resolves membership,
+organization and workspace server-side, refuses a workspace the caller does
+not hold, ends access with the membership rather than with the grant, and
+verifies a named organization against the membership table before it scopes
+anything · payroll, finance, tax
 rules (unverified) · geospatial source registry (8 verified licences, 10
 blocked) · AI Secretary typed commits, OCR forms, fingerprinting · secure
 field runtime protocol (server half) · fuel ledger, bulk fuel, card
 statements, anomalies · roadside, purchasing, AP · compliance registry,
-requirement engine, packs, calibration · insurance and risk · universal
+requirement engine, packs, calibration · safety & compliance program builder
+(module and pack library, controlled policies with chained versions, stepwise
+acknowledgements, client overlays, reviews, training requirements and matrix
+snapshots, corrective actions, COR readiness, vendor package manifest; 0228) ·
+insurance and risk · universal
 surfaces (exceptions, inbox, my day, search, timeline) · dispatch gate with
 enforcement setting · IFTA · GST/HST · period close · bank reconciliation ·
 accounts receivable, credits, collections, write-offs · customer identity ·
 commercial core (terms, POs and AFEs, customer rate cards, billing check) ·
+customer, contract and rate management (the customer profile with its
+contacts and roles, contracts with a lifecycle and supersession, rate sheets
+as versioned groups of charge definitions approved as a unit, conditioned
+rate lines, the job's frozen commercial snapshot, the billable commercial
+context the next Billing checkpoint consumes) ·
 external identities and the customer / vendor / facility portal · the site
 sign-off chain (clocks, frozen revisions, signature authority, post-site
 supplement, delay and road-hazard evidence, three closes) · portal
@@ -93,7 +147,31 @@ existing queue, chain of custody, approval queue, timeline, completion
 package, vendor and facility shells) · fleet shop (parts ledger with cores
 and counts, tires by serial and axle position, warranty policies and
 two-person claims, serialized tools, recalls held unverified, work-order
-and unit cost that names what it cannot know) · capital assets (one
+and unit cost that names what it cannot know) · fleet maintenance,
+checkpoint 1 (a work order owned by a person holding a shop role, with
+every assignment kept as history; a cancelled work order that repairs
+nothing, releases nothing and leaves its defect open; a legacy update that
+can no longer move a status; a forward-only advance that stamps when work
+started and finished and keeps its note; telematics answering not-found
+across an organization) · fleet maintenance, checkpoint 2 (a defect from
+the reporter's words to an independent return to service: the proposal
+kept apart from the triage decision, a reported critical holding the unit
+at once, the work order and its first task opened together, tasks that
+only move forward, one release door that waits for every task, and a
+return to service refused to the technician who signed the release that
+resolves the defect, lifts its hold, closes its roadside event and the
+work order in one act, every step an event) · Fleet & Equipment Portfolio foundation (typed
+holds whose effect is a warning, a block releasable only under an approved
+policy, or — for a safety hold — out of service with no override, placed
+and released by different people with the hold's type deciding who, never
+edited and never deleted, read into dispatch readiness and its
+fingerprint; a unit's meters read where each figure already lives —
+telemetry, work orders, fuel, trips, tire service — beside a ledger for
+readings with no other home, nothing copied, a reading that went below an
+accepted one kept as evidence while any service count from before it
+answers METER_REGRESSION rather than a due figure; the unit's operational
+state derived on every read, indeterminate when a source cannot be read,
+and naming what it does not evaluate) · capital assets (one
 identity per unit, two-person capital review, CCA class as a verified
 candidate, pool arithmetic with the claim UNKNOWN until the rate is
 verified, year-end schedule reviewed by a second person, the asset twin) ·
@@ -231,8 +309,11 @@ browser fallback. Carried communication packages: fetched, hash-verified on
 this side, written to the encrypted vault, read back before being acknowledged,
 read again on every open, and refused rather than shown when they no longer
 match what was stored — proven in Node against the runtime contracts, with the
-native vault still a stub. Internal portal: shell, switcher, My Day, exceptions,
-inbox, timeline, search, sync indicator, quick capture, view-models.
+native vault still a stub. Internal portal: shell, server-authoritative switcher, My Day,
+exceptions, inbox, timeline, search, sync indicator, quick capture,
+view-models. Sign-in, organization chooser, workspace chooser and the refusal
+screens at `/login` and `/workspaces`, each rendering only what the server
+offered and each run through the axe WCAG A/AA rules at three widths.
 Training Academy at `/training-academy`: course catalog, My Training, current-version lesson completion, locked/unlocked final assessment, results, certificate/qualification portfolio, and self-signing of pending regulated certificates.
 Marketplace at `/marketplace`: Job Board, My Bids, Invitations, Awards, Active Contracts, Completed Work over the marketplace procedures only — sealed prices as the server withheld them, the client's eligibility projections, a bidder's own readiness rows, submit enabled only on the server's verdict, the award with its reason.
 Customer portal at `/customer`: invitation acceptance, job board,
@@ -247,8 +328,7 @@ readiness — every step the server's answer.
 
 Native shell (Capacitor), encrypted SQLite, hardware keystore, native file
 vault, camera, GPS, biometric signing, local notifications. Browser/mobile
-end-to-end tests. LoadSense authenticated gateway ingestion/native BLE service and hardware deployment (the recovered protocol, calibration/stability/material-movement engines and persistence model are present; the production machine-authenticated device edge is not yet wired). Routing services (a native graph built from imported Alberta road data routes within built areas; no provincial routing source — P0 outside them; PostGIS/Valhalla/Martin/MapLibre not deployed; ATS v4.1 importable per township and imported where a person has run it — coordinates are verified one at a time with evidence). Radio and coverage data as imports (the ISED, BC and CRTC adapters are not written — channels are seeded or recorded by hand, road assignments are recorded or confirmed from a field observation, and coverage is whatever somebody has recorded; no cellular or spectrum layer has been ingested). Fluids as measured inventory (parts ledger only). Contracts and MSAs as
-records; WBS below cost code; earned-value schedules. AI extraction of rate sheets from
+end-to-end tests. LoadSense authenticated gateway ingestion/native BLE service and hardware deployment (the recovered protocol, calibration/stability/material-movement engines and persistence model are present; the production machine-authenticated device edge is not yet wired). Routing services (a native graph built from imported Alberta road data routes within built areas; no provincial routing source — P0 outside them; PostGIS/Valhalla/Martin/MapLibre not deployed; ATS v4.1 importable per township and imported where a person has run it — coordinates are verified one at a time with evidence). Radio and coverage data as imports (the ISED, BC and CRTC adapters are not written — channels are seeded or recorded by hand, road assignments are recorded or confirmed from a field observation, and coverage is whatever somebody has recorded; no cellular or spectrum layer has been ingested). Fluids as measured inventory (parts ledger only). WBS below cost code; earned-value schedules. AI extraction of rate sheets from
 uploaded documents (a proposal path exists; the document reader that fills
 it does not); formula pricing is recorded, not evaluated. inbound
 vendor bills and facility tickets by machine (portal only). GPS on the

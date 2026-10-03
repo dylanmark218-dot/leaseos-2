@@ -4,7 +4,7 @@ import { readFileSync } from "fs";
  */
 import { describe, expect, it } from "vitest";
 import {
-  capabilityStatus, capabilitySummary, NotVerifiable, reject, validityOf, verify,
+  capabilityStatus, capabilitySummary, EXPIRY_OPTIONAL_TYPES, NotVerifiable, reject, validityOf, verify,
   type DocumentVersion,
 } from "./_core/documentValidity";
 import type { DocumentType } from "./_core/documentExtraction";
@@ -63,15 +63,59 @@ describe("a new version is not automatically the valid one", () => {
   });
 
   it("does not treat a version as in force before its effective date", () => {
+    // Checked but not yet current is its own state now. It used to read "unverified", with a
+    // reason saying nobody had checked a document somebody had.
     const future = verify({ versions: [version(1)], version: 1, byUserId: 9, at: AT, effectiveFrom: days(30), expiresAt: days(400) });
-    expect(validityOf(future, AT).state).toBe("unverified");
+    expect(validityOf(future, AT)).toMatchObject({ state: "not_yet_effective", version: 1 });
+    expect(validityOf(future, AT).reason).toContain(`not in force until ${days(30).toISOString().slice(0, 10)}`);
     expect(validityOf(future, days(31)).state).toBe("in_force");
+  });
+
+  it("keeps the earlier verified version in force while the next waits for its effective date", () => {
+    const first = verify({ versions: [version(1), version(2)], version: 1, byUserId: 9, at: AT, effectiveFrom: null, expiresAt: days(40) });
+    const both = verify({ versions: first, version: 2, byUserId: 9, at: AT, effectiveFrom: days(30), expiresAt: days(400) });
+    expect(validityOf(both, AT)).toMatchObject({ state: "in_force", version: 1 });
+    expect(validityOf(both, days(31))).toMatchObject({ state: "in_force", version: 2 });
   });
 
   it("refuses to verify something already verified, superseded or absent", () => {
     const v = inForce();
     expect(() => verify({ versions: v, version: 1, byUserId: 9, at: AT, effectiveFrom: null, expiresAt: null })).toThrow(NotVerifiable);
     expect(() => verify({ versions: v, version: 9, byUserId: 9, at: AT, effectiveFrom: null, expiresAt: null })).toThrow(/No version 9/);
+  });
+});
+
+describe("a missing expiry is not a permanent one", () => {
+  // Owner's ruling, 2026-09-25: a verified document with no expiry is in force only when its type
+  // is named as never-expiring. No type is named yet, so every one fails closed.
+  const noExpiry = (type = TYPE) =>
+    verify({ versions: [version(1, { type })], version: 1, byUserId: 9, at: AT, effectiveFrom: null, expiresAt: null });
+
+  it("reports a verified document with no expiry as incomplete, not in force", () => {
+    const v = validityOf(noExpiry(), AT);
+    expect(v).toMatchObject({ state: "incomplete", version: 1, expiresAt: null });
+    expect(v.reason).toContain("no expiry is recorded");
+  });
+
+  it("names no never-expiring type yet — the list is added to one type at a time, with a reason", () => {
+    expect(Array.from(EXPIRY_OPTIONAL_TYPES)).toEqual([]);
+  });
+
+  it("would read a named never-expiring type as in force", () => {
+    const optional = "__test_never_expires" as DocumentType;
+    (EXPIRY_OPTIONAL_TYPES as Set<DocumentType>).add(optional);
+    try {
+      expect(validityOf(noExpiry(optional), AT)).toMatchObject({ state: "in_force", expiresAt: null });
+      expect(validityOf(noExpiry(TYPE), AT).state).toBe("incomplete");
+    } finally {
+      (EXPIRY_OPTIONAL_TYPES as Set<DocumentType>).delete(optional);
+    }
+  });
+
+  it("blocks the capability that depends on an incomplete document", () => {
+    const s = capabilityStatus({ requirements: [{ capability: "haul", requires: [TYPE] }], at: AT, documents: { [TYPE]: noExpiry() } });
+    expect(s[0]).toMatchObject({ allowed: false });
+    expect(s[0]!.blockedBy[0]).toMatchObject({ state: "incomplete" });
   });
 });
 
@@ -158,14 +202,22 @@ describe("one rule, shared", () => {
   it("is reached through the adapter by the routers that need it", () => {
     const adapter = readFileSync("server/_core/qualificationValidity.ts", "utf8");
     expect(adapter).toContain('from "./documentValidity"');
-    for (const f of ["openShiftsRouter", "readinessRouter"]) {
+    // C1b-3: the four qualification readers go through the D-05 read adapter, which decides through
+    // qualificationValidity / documentValidity — not through their own reading of a store.
+    const reads = readFileSync("server/qualificationReads.ts", "utf8");
+    expect(reads).toContain('from "./_core/qualificationValidity"');
+    expect(reads).toContain('from "./_core/documentValidity"');
+    // 0206 moved open work's eligibility read out of its router into openShiftsService, so that is
+    // the open-shift reader this holds to the adapter; the router reads no qualification store at all.
+    expect(readFileSync("server/openShiftsRouter.ts", "utf8")).not.toContain("workerQualifications");
+    for (const f of ["openShiftsService", "readinessRouter", "crewRouter", "calendarRouter"]) {
       const src = readFileSync(`server/${f}.ts`, "utf8");
-      expect(src).toContain("_core/qualificationValidity");
+      expect(src, f).toContain('from "./qualificationReads"');
     }
   });
 
   it("leaves no router deciding a verification state by hand", () => {
-    for (const f of ["openShiftsRouter", "readinessRouter"]) {
+    for (const f of ["openShiftsRouter", "openShiftsService", "readinessRouter"]) {
       const src = readFileSync(`server/${f}.ts`, "utf8");
       // Reading the column to load rows is fine; branching on its values is the
       // second implementation.
@@ -175,10 +227,12 @@ describe("one rule, shared", () => {
   });
 
   it("classifies by a returned code rather than by matching prose", () => {
-    const src = readFileSync("server/openShiftsRouter.ts", "utf8");
-    expect(src).toContain("gap.why ===");
+    // SPINE item 2: open-shift eligibility is judged in the engine now; the router only reads.
+    const src = readFileSync("server/_core/openShifts.ts", "utf8");
+    expect(src).toContain('q?.notHeld === "expired"');
+    expect(src).toContain('q?.notHeld === "unverified"');
     // Matching on wording reclassified every unverified ticket the moment the
-    // wording improved.
-    expect(src).not.toContain('gap.reason.includes("verified it")');
+    // wording improved — in either file.
+    for (const f of [src, readFileSync("server/openShiftsRouter.ts", "utf8")]) expect(f).not.toMatch(/reason\.includes\(/);
   });
 });
