@@ -17,6 +17,25 @@ afterAll(async () => { await pool?.end(); });
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
 async function withRole(role: string) { const userId = seq++; await pool.execute("INSERT INTO userRoleAssignments (userId, role, scopeType, grantedByUserId, grantedAt) VALUES (?,?,'global',1,NOW())", [userId, role]); return userId; }
 
+/**
+ * 0233 — the ArcGIS importer reads only from a source a person approved in the source registry. This is
+ * what an operator does once after deploying: seed the registry, then a manager approves the source as it
+ * stands. A re-request, when one is needed, comes from a second manager, because whoever asks for an
+ * approval does not grant it.
+ */
+async function approvedInRegistry(sourceKey: string) {
+  const manager = await withRole("management"), requester = await withRole("management");
+  await callerFor(manager).sourceRegistry.seed();
+  let { source, approvals } = await callerFor(manager).sourceRegistry.get({ sourceKey });
+  const standing = approvals.find(a => a.state === "approved");
+  if (source.lifecycle === "approved" && standing && standing.sourceRevision === source.revision && standing.expiresAt && new Date(standing.expiresAt).getTime() > Date.now() + 86_400_000) return;
+  if (source.lifecycle !== "pending_approval") {
+    await callerFor(requester).sourceRegistry.requestReview({ sourceKey, expectedRowVersion: source.rowVersion, scope: ["facility_directory.arcgis_import"], reason: "facility directory test: the layer is imported below" });
+    source = (await callerFor(manager).sourceRegistry.get({ sourceKey })).source;
+  }
+  await callerFor(manager).sourceRegistry.approve({ sourceKey, expectedRowVersion: source.rowVersion, reviewBy: new Date(Date.now() + 90 * 86_400_000), note: "facility directory test: approving the seeded layer as it stands" });
+}
+
 d("facility directory — seed and licences", () => {
   it("imports the 36 leads (23 from v7, 13 more from the operator brief) as leads: community-level or unknown coordinates, nothing routable, each with lead evidence under the operator's site; a second run is idempotent", async () => {
     const safety = await withRole("safety");
@@ -202,11 +221,20 @@ d("facility directory — regulator layer import and the LSD finder", () => {
       { attributes: { LICENCENUM: `WP${rnd()}`, OWNERNAME: "CENOVUS ENERGY INC.", LICTYPE: "OIL SATELLITE", LICSTATUS: "SUSPENDED", SURFACELOC: "08-29-052-23W3" }, geometry: { rings: [ring(k.easting + 5000, k.northing + 5000)] } },
       { attributes: { OWNERNAME: "NO LICENCE NUMBER" }, geometry: null },
     ];
+    await approvedInRegistry("sk_petroleum_gis");
     const base = { source: "sk_facilities", layerUrl: SK_FACILITIES.layerUrl, wkid: 2957, layerFields: SK_FACILITIES.fields, mapping: SK_FACILITIES.mapping, features };
     await expect(callerFor(safety).facilityDirectory.arcgis.importFeatures({ ...base, licenceKey: "mb_unconfirmed" })).rejects.toThrow(/permission_required/);
     await expect(callerFor(safety).facilityDirectory.arcgis.importFeatures({ ...base, licenceKey: "sk_unrestricted_use_v2", layerFields: ["OBJECTID", "LICENCENUM"] })).rejects.toThrow(/no field for: operator → OWNERNAME/);
     const run = await callerFor(safety).facilityDirectory.arcgis.importFeatures({ ...base, licenceKey: "sk_unrestricted_use_v2" });
     expect(run).toMatchObject({ featureCount: 3, inserted: 2, updated: 0, skipped: 1, attribution: expect.stringContaining("Standard Unrestricted Use Data Licence") });
+    // The run names the registry authority it ran under, and its provenance row says the same.
+    expect(run.provenance).toMatchObject({ sourceKey: "sk_petroleum_gis", endpointRef: "sk_petroleum_gis/petroleum_facilities_layer_17" });
+    const [prov] = await pool.query<mysql.RowDataPacket[]>(
+      "SELECT d.importRef, d.sourceRevision, d.purpose, d.sourceFormat, d.featureCount, d.coordinateSystem, d.importedByUserId, s.sourceKey, s.revision, e.endpointRef, a.state AS approvalState, a.sourceRevision AS approvedRevision FROM facilityImportRuns r JOIN externalDatasetImports d ON d.id = r.externalDatasetImportId JOIN externalDataSources s ON s.id = d.externalDataSourceId JOIN externalSourceEndpoints e ON e.id = d.endpointId JOIN externalSourceApprovals a ON a.id = d.approvalId WHERE r.importRef = ?",
+      [run.importRef]);
+    expect(prov[0]).toMatchObject({ importRef: run.provenance.datasetImportRef, sourceKey: "sk_petroleum_gis", endpointRef: "sk_petroleum_gis/petroleum_facilities_layer_17", purpose: "facility_directory.arcgis_import", sourceFormat: "arcgis_json_supplied", featureCount: 3, coordinateSystem: "EPSG:2957", importedByUserId: safety, approvalState: "approved" });
+    expect(prov[0]!.sourceRevision).toBe(prov[0]!.revision);
+    expect(prov[0]!.approvedRevision).toBe(prov[0]!.revision);
     const key = `sk_facilities:${lic}`;
     const v = await callerFor(safety).facilityDirectory.driverView({ facilityKey: key });
     expect(v.facility).toMatchObject({ coordinatePrecision: "approximate_site", regulatorRef: lic, lifecycle: "operating", commercialAccess: "unknown", routable: false, province: "SK" });

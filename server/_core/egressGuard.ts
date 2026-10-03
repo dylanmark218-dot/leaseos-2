@@ -60,7 +60,31 @@ export type EgressLimits = {
   accept: string;
   /** Media types a 2xx answer may carry. Anything else, or none, is refused. */
   contentTypes: readonly string[];
+  /**
+   * A narrowing rule the caller adds — the source registry's endpoint policy is the one that
+   * exists. It runs on the first URL and on every redirect hop, after the guard's own checks, and
+   * a reason it returns refuses the hop. It can only refuse more: a hop it accepts still has to
+   * pass every rule above, so no policy can admit a private address, plain http or a credential.
+   */
+  destinationPolicy?: (url: URL) => string | null;
 };
+
+/**
+ * The most any caller may ask for, whoever configured it. A limit is a safety property, so a
+ * value read from configuration (a registry endpoint, say) cannot widen it past these: a request
+ * asking for more is refused rather than quietly trimmed. Each ceiling is the largest value a
+ * caller used when it was set — Québec's WFS at 60 s, the feed client's 32 MiB, ArcGIS's 3
+ * redirects — so nothing that worked is refused.
+ */
+export const EGRESS_CEILINGS = { timeoutMs: 60_000, maxBytes: 32 * 1024 * 1024, maxRedirects: 3 } as const;
+
+function limitsRefusal(limits: { timeoutMs: number; maxBytes?: number; maxRedirects?: number }): string | null {
+  const within = (v: number | undefined, min: number, max: number) => v === undefined || (Number.isInteger(v) && v >= min && v <= max);
+  if (!within(limits.timeoutMs, 1, EGRESS_CEILINGS.timeoutMs)) return `timeoutMs ${limits.timeoutMs} is outside 1–${EGRESS_CEILINGS.timeoutMs}`;
+  if (!within(limits.maxBytes, 1, EGRESS_CEILINGS.maxBytes)) return `maxBytes ${limits.maxBytes} is outside 1–${EGRESS_CEILINGS.maxBytes}`;
+  if (!within(limits.maxRedirects, 0, EGRESS_CEILINGS.maxRedirects)) return `maxRedirects ${limits.maxRedirects} is outside 0–${EGRESS_CEILINGS.maxRedirects}`;
+  return null;
+}
 
 export type EgressResponse = {
   ok: boolean;
@@ -82,11 +106,11 @@ export type EgressResponse = {
 };
 
 export type EgressRefusalCode =
-  | "invalid_url" | "scheme" | "credentials_in_url" | "blocked_host" | "blocked_address" | "unresolvable"
-  | "too_many_redirects" | "content_type" | "content_encoding" | "too_large" | "timeout" | "transport";
+  | "invalid_url" | "scheme" | "credentials_in_url" | "blocked_host" | "blocked_address" | "unresolvable" | "unapproved_destination"
+  | "too_many_redirects" | "content_type" | "content_encoding" | "too_large" | "timeout" | "transport" | "limits";
 
 /** The destination itself is refused, as against one that answered badly or not at all. */
-const DESTINATION_CODES: EgressRefusalCode[] = ["invalid_url", "scheme", "credentials_in_url", "blocked_host", "blocked_address", "unresolvable"];
+const DESTINATION_CODES: EgressRefusalCode[] = ["invalid_url", "scheme", "credentials_in_url", "blocked_host", "blocked_address", "unresolvable", "unapproved_destination"];
 
 /** Messages name the host or the URL the caller gave, and never an address a lookup returned. */
 export class EgressRefused extends Error {
@@ -337,7 +361,14 @@ function answer(status: number, url: URL, hops: string[], contentType: string | 
  * with `ok` false and its body unread.
  */
 export async function guardedGet(target: string | URL, edges: EgressEdges, limits: EgressLimits): Promise<EgressResponse> {
-  let url = checkEgressUrl(target);
+  const overLimit = limitsRefusal(limits);
+  if (overLimit) throw new EgressRefused("limits", `refused before any request: ${overLimit}`);
+  const permitted = (u: URL): URL => {
+    const why = limits.destinationPolicy?.(u) ?? null;
+    if (why) throw new EgressRefused("unapproved_destination", `${u.host}${u.pathname} is not an approved destination: ${why}`);
+    return u;
+  };
+  let url = permitted(checkEgressUrl(target));
   const hops: string[] = [];
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), limits.timeoutMs);
@@ -354,7 +385,7 @@ export async function guardedGet(target: string | URL, edges: EgressEdges, limit
           if (hops.length > limits.maxRedirects) throw new EgressRefused("too_many_redirects", `more than ${limits.maxRedirects} redirects from ${hops[0]}`);
           let next: URL;
           try { next = new URL(location, url); } catch { throw new EgressRefused("invalid_url", `a redirect from ${url.host} names no valid URL`); }
-          url = checkEgressUrl(next);
+          url = permitted(checkEgressUrl(next));
           continue;
         }
         const contentType = res.headers["content-type"] ?? null;
@@ -447,6 +478,8 @@ export async function guardedPost(
   edges: EgressPostEdges,
   options: { body: string; headers?: Record<string, string>; timeoutMs: number },
 ): Promise<EgressPostResult> {
+  const overLimit = limitsRefusal({ timeoutMs: options.timeoutMs });
+  if (overLimit) throw new EgressRefused("limits", `refused before any request: ${overLimit}`);
   const url = checkEgressUrl(target);
   const bytes = new TextEncoder().encode(options.body).byteLength;
   const headers = postHeaders(options.headers ?? {}, bytes);

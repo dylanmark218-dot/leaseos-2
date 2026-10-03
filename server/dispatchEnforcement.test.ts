@@ -153,6 +153,8 @@ d("jobUnits.create under off, advisory and enforced", () => {
     await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Class 1', NOW(), DATE_ADD(NOW(), INTERVAL 400 DAY), 'verified')", [operatorId]);
     const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress) VALUES (?, 'water_haul', 'transport', 'Acme', 'LSD 12-01-050-08W5', 'dispatched', 0)", [key("JOB").slice(0, 40)]);
     const jobId = Number(j.insertId);
+    // RI-0.6: a job with no load classification is UNKNOWN for dangerous goods; the established fixture classifies its load.
+    await pool.execute("INSERT INTO loadProfiles (jobId, material, classificationStatus, verifiedAt) VALUES (?, 'Produced water', 'verified', NOW())", [jobId]);
     // Insured, inspected, registered — so only the unknowns remain.
     for (const [t, title] of [["cvip_certificate", "CVIP"], ["vehicle_registration", "Registration"], ["insurance_proof", "Pink card"]]) await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('unit', ?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 300 DAY), 'verified')", [unitId, t, title]);
     const [insr] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO insuranceProviders (providerRef, name, role, status) VALUES (?, ?, 'insurer', 'active')", [key("PRV").slice(0, 40), key("Ins").slice(0, 60)]);
@@ -163,7 +165,7 @@ d("jobUnits.create under off, advisory and enforced", () => {
 
     // OFF: the setting is global and persists across runs, so establish it rather than assume it.
     await callerFor(manager).dispatch.enforcementSet({ mode: "off", reason: "Test start — establish the default explicitly" });
-    expect((await callerFor(dispatcher).dispatch.enforcementGet()).mode).toBe("off");
+    expect((await callerFor(manager).dispatch.enforcementGet()).mode).toBe("off");
     // Assigns as it always has, and records that it did so under "off".
     const id1 = await identity(dispatcher).create({ jobId, unitId, operatorId, role: "operator", joinedAt: new Date() });
     const [r1] = await pool.execute<mysql.RowDataPacket[]>("SELECT enforcementModeAtCreate, eligibilityCheckId FROM jobUnits WHERE id = ?", [id1]);
@@ -231,7 +233,7 @@ d("jobUnits.create under off, advisory and enforced", () => {
 
     // Back to off, so other suites' legacy assignments are unaffected.
     await callerFor(manager).dispatch.enforcementSet({ mode: "off", reason: "Test teardown — restore default" });
-    expect((await callerFor(dispatcher).dispatch.enforcementGet()).mode).toBe("off");
+    expect((await callerFor(manager).dispatch.enforcementGet()).mode).toBe("off");
   });
 });
 

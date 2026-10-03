@@ -3,8 +3,8 @@
  */
 
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq } from "drizzle-orm";
-import { actingScopeFor, getDb, jobInScope, ownershipScopeWhere, unitInScope, type TenantScope } from "./db";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { actingScopeFor, getDb, jobInScope, jobScopeSubquery, ownershipScopeWhere, unitInScope, type TenantScope } from "./db";
 import { dispatchEligibilityChecks, dispatchEnforcementSettings, dispatchOverrides, jobUnits, operators, type InsertJobUnit } from "../drizzle/schema";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { currentMode, decideLegacyAssignment, type EnforcementMode } from "./_core/dispatchEnforcement";
@@ -132,12 +132,13 @@ export async function createJobUnitGated(input: GatedJobUnitInput): Promise<Gate
 }
 
 /** Advisory-mode assignments made without a check, or against a blocked/unknown one — for the exception centre. */
-export async function loadUngatedAssignments(limit = 200): Promise<{ jobUnitId: number; jobId: number; unitId: number; operatorId: number | null; createdAt: Date; finding: string }[]> {
+/** SEC-1: the caller's organization only — an assignment belongs to its job. */
+export async function loadUngatedAssignments(fs: TenantScope, limit = 200): Promise<{ jobUnitId: number; jobId: number; unitId: number; operatorId: number | null; createdAt: Date; finding: string }[]> {
   const db = await getDb();
   if (!db) return [];
   const rows = await db.select({ id: jobUnits.id, jobId: jobUnits.jobId, unitId: jobUnits.unitId, operatorId: jobUnits.operatorId, createdAt: jobUnits.createdAt, checkId: jobUnits.eligibilityCheckId, verdict: dispatchEligibilityChecks.verdict })
     .from(jobUnits).leftJoin(dispatchEligibilityChecks, eq(dispatchEligibilityChecks.id, jobUnits.eligibilityCheckId))
-    .where(eq(jobUnits.enforcementModeAtCreate, "advisory")).orderBy(desc(jobUnits.createdAt)).limit(limit);
+    .where(and(eq(jobUnits.enforcementModeAtCreate, "advisory"), inArray(jobUnits.jobId, jobScopeSubquery(db, fs)))).orderBy(desc(jobUnits.createdAt)).limit(limit);
   return rows
     .filter(r => r.checkId == null || r.verdict === "blocked" || r.verdict === "unknown")
     .map(r => ({ jobUnitId: r.id, jobId: r.jobId, unitId: r.unitId, operatorId: r.operatorId, createdAt: r.createdAt, finding: r.checkId == null ? "Assignment made without a readiness check" : `Assignment made against a ${r.verdict} check` }));

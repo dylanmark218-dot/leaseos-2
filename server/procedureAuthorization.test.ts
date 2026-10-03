@@ -48,6 +48,7 @@ const fleetPortfolioRouter = readFileSync("server/fleetPortfolioRouter.ts", "utf
 const assetRouter = readFileSync("server/assetRouter.ts", "utf8");
 const projectRouter = readFileSync("server/projectRouter.ts", "utf8");
 const integrationRouter = readFileSync("server/integrationRouter.ts", "utf8");
+const integrationHubRouter = readFileSync("server/integrationHubRouter.ts", "utf8");
 const telematicsRouter = readFileSync("server/telematicsRouter.ts", "utf8");
 const workforceRouter = readFileSync("server/workforceRouter.ts", "utf8");
 const auditRouter = readFileSync("server/auditRouter.ts", "utf8");
@@ -87,6 +88,7 @@ const payrollCompensationRouter = readFileSync("server/payrollCompensationRouter
 const payrollScheduleRouter = readFileSync("server/payrollScheduleRouter.ts", "utf8");   // payroll P2 (0227)
 // 0228: the Safety & Compliance Program Builder, gated from the start.
 const safetyProgramRouter = readFileSync("server/safetyProgramRouter.ts", "utf8");
+const sourceRegistryRouter = readFileSync("server/sourceRegistryRouter.ts", "utf8");   // approved external source registry (0233)
 const inventory = readFileSync("PROCEDURE_AUTHORIZATION_INVENTORY.md", "utf8");
 const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
 
@@ -95,7 +97,7 @@ const dataSources = readFileSync("DATA_SOURCES.md", "utf8");
  * payrollRouter.ts both draw from it. Checking only one would let a declared
  * permission go unwired without anyone noticing.
  */
-const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, payrollCompensationRouter, payrollScheduleRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + customerCommercialRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter + attestRouter, maintenanceRouter, fleetPortfolioRouter + driverPortfolioRouter + safetyProgramRouter].join("\n");
+const OPERATIONAL_SOURCES = [routers, peopleRouter, automationPolicyRouter, restrictedVaultRouter, payrollRouter, payrollCompensationRouter, payrollScheduleRouter, sourceRegistryRouter, portalFundingRouter, purchasingRouter, deviceRouter, complianceRouter, requirementRouter, insuranceRouter, surfacesRouter, widgetsRouter, manifestCustodyRouter, securityIncidentsRouter, commercialOfficeRouter, facilityDirectoryRouter, dispatchRouter, iftaRouter, fuelOpsRouter, periodRouter, gstRouter, cashRouter, commercialRouter, closeoutRouter, shopRouter, assetRouter, projectRouter, integrationRouter, integrationHubRouter, telematicsRouter, workforceRouter, auditRouter, spatialRouter, commercialSetupRouter + customerCommercialRouter + invoicingRouter + geoRouter + commsRouter + hosRouter + enforcementRouter + timeOffRouter + openShiftsRouter + crewRouter + calendarRouter + readinessRouter + messageBoardRouter + agentRouter + liveAssistRouter + assistantAskRouter + contractorOperationsRouter + trainingAcademyRouter + paperworkRouter + documentControlRouter + attestRouter, maintenanceRouter, fleetPortfolioRouter + driverPortfolioRouter + safetyProgramRouter].join("\n");
 
 const countBuilders = (src: string, builder: string) =>
   (src.match(new RegExp(`\\w+:\\s*${builder}\\b`, "g")) ?? []).length;
@@ -160,10 +162,17 @@ describe("records surface is fully role-authorized", () => {
   });
 });
 
+/**
+ * Builders that enforce the declared domain permission: `roleProcedure`, and (F1.3) the mixed builder for
+ * procedures serving one organization's row and the global one — it enforces the same permission for the
+ * organization's row and during bootstrap, and platform authority for the global row.
+ */
+const ROLE_GATED = /(?:roleProcedure|platformOrOrganizationProcedure)\("([^"]+)"/g;
+
 describe("migrated operational procedures", () => {
   it("gates every declared operational procedure in routers.ts", () => {
     const wired = new Set(
-      Array.from(OPERATIONAL_SOURCES.matchAll(/roleProcedure\("([^"]+)"\)/g)).map(m => m[1])
+      Array.from(OPERATIONAL_SOURCES.matchAll(ROLE_GATED)).map(m => m[1])
     );
     for (const declared of Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS)) {
       expect(wired.has(declared), `${declared} declared but not wired`).toBe(true);
@@ -173,7 +182,7 @@ describe("migrated operational procedures", () => {
 
   it("has no roleProcedure in routers.ts without a declared permission", () => {
     const wired = Array.from(
-      OPERATIONAL_SOURCES.matchAll(/roleProcedure\("([^"]+)"\)/g)
+      OPERATIONAL_SOURCES.matchAll(ROLE_GATED)
     ).map(m => m[1]);
     for (const name of wired) {
       expect(
@@ -188,19 +197,21 @@ describe("migrated operational procedures", () => {
     // 40-procedure payroll/finance surface, all gated from the start.
     // 85 operational + 40 payroll/finance + 10 portals/funding + 9 roadside/purchasing/AP + 6 devices/sync + 9 compliance + 6 requirement/calibration + 12 insurance.
     // The merged surface includes 8 Live Assist, 2 paperwork, 23 Document Control, and 10 auth-workspace procedures.
-    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(858);   // 0228: +38 safetyProgram.* (Safety & Compliance Program Builder);   // driver portfolio (#16): +17 driverPortfolio.*;   // payroll P2: +12 payrollSchedule.*;   // payroll P1: +11 payrollCompensation.*;   // payroll P0: +3 payroll.{runCollect,runSubmit,earningApprove};   // 0221: +7 maintenance.{defectReport,defectTriage,defectSendToShop,taskAdd,taskSetStatus,returnToService,defectHistory} (fleet maintenance CP2);   // 0200: +9 fleet.{unitState,holdList,holdPlace,holdRelease,meterReadings,meterProgress,meterRecord,meterDecide,history} (portfolio foundation);   // 0199: +3 maintenance.{workOrderAssignment,workOrderAssign,workOrderCancel} (fleet maintenance CP1);   // SA1: +14 attest.* (server/attestRouter.ts);   // merge of main (b35bac4) into #59: main 723 + #59's 21 (7 board.*, 14 shifts.*);   // v23.31: +40 customerCommercial.* (customers, contacts, contracts, rate sheets, job commercial basis, expiry sweep);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review)
+    expect(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length).toBe(904);   // SEC-1: +1 securityIncidents.statusChange (state moves under incident.review, split from timelineAppend);   // 0233: +16 sourceRegistry.* (approved external source registry);   // 0228: +38 safetyProgram.* (Safety & Compliance Program Builder);   // driver portfolio (#16): +17 driverPortfolio.*;   // payroll P2: +12 payrollSchedule.*;   // payroll P1: +11 payrollCompensation.*;   // payroll P0: +3 payroll.{runCollect,runSubmit,earningApprove};   // 0221: +7 maintenance.{defectReport,defectTriage,defectSendToShop,taskAdd,taskSetStatus,returnToService,defectHistory} (fleet maintenance CP2);   // 0200: +9 fleet.{unitState,holdList,holdPlace,holdRelease,meterReadings,meterProgress,meterRecord,meterDecide,history} (portfolio foundation);   // 0199: +3 maintenance.{workOrderAssignment,workOrderAssign,workOrderCancel} (fleet maintenance CP1);   // SA1: +14 attest.* (server/attestRouter.ts);   // merge of main (b35bac4) into #59: main 723 + #59's 21 (7 board.*, 14 shifts.*);   // v23.31: +40 customerCommercial.* (customers, contacts, contracts, rate sheets, job commercial basis, expiry sweep);   // Canadian provider runtime: +1 geo.transportFeeds (read-only feed health and attribution, under geo.source.review);   // Integration Hub: +29 integrationHub.*
     expect(UNREVIEWED_BASELINE).toBe(0);
   });
 
   it("wires exactly as many roleProcedures as it declares permissions for", () => {
-    const wired = (OPERATIONAL_SOURCES.match(/roleProcedure\(/g) ?? []).length;
+    const wired = (OPERATIONAL_SOURCES.match(/(?:roleProcedure|platformOrOrganizationProcedure)\(/g) ?? []).length;
     expect(wired).toBe(Object.keys(OPERATIONAL_PROCEDURE_PERMISSIONS).length);
   });
+
 
   it("has no bare protectedProcedure in the payroll or finance surface", () => {
     expect(countBuilders(payrollRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(payrollCompensationRouter, "protectedProcedure")).toBe(0);
     expect(countBuilders(payrollScheduleRouter, "protectedProcedure")).toBe(0);
+    expect(countBuilders(sourceRegistryRouter, "protectedProcedure")).toBe(0);
   });
 
   it("has no bare protectedProcedure in the portal or funding surface", () => {
@@ -296,15 +307,17 @@ describe("migrated operational procedures", () => {
 });
 
 describe("the data source document matches the seeded registry", () => {
-  it("states the corrected count of ten verified and eighteen not", () => {
+  it("states the corrected count of ten verified and twenty not", () => {
     // The research summary said nine of eleven were clean; three were unresolved,
     // so it was eight. v22.17 added six spectrum and coverage sources, none of
     // them licence-cleared, so nine are now blocked. The document and the seed
     // must agree or a future reader trusts the wrong number. The Canadian 511 tranche cleared two
-    // (Ontario, Québec) and blocked five (MB, NB, YT, NL, SK).
-    expect(dataSources).toContain("Ten verified, eighteen not");
+    // (Ontario, Québec) and blocked five (MB, NB, YT, NL, SK). 0233 registered the facility
+    // directory's two regulator GIS services (SK Petroleum, BCER) so the approved-source registry can
+    // govern their importer; their licences are named and not yet cleared here, so twenty.
+    expect(dataSources).toContain("Ten verified, twenty not");
     expect(VERIFIED_DATA_SOURCES).toHaveLength(10);
-    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(18);
+    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(20);
   });
 
   it("lists exactly the blocked sources as blocked", () => {

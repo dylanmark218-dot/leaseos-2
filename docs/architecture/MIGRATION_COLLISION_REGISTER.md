@@ -108,6 +108,29 @@ Next free number at that time: `0191` (superseded above).
   `0189`, the first number no branch holds, rather than `0175` (named free on 2026-09-23 and claimed by
   four branches since). No other branch renumbered.
 
+## Claim: 0233 (approved external source registry, 2026-10-03)
+
+Scanned at the registry commit against `main` = `48a64e1` (head `0227`), and again before rebasing onto
+`main` = `9ec123a` (#99 merged; head **`0228_safety_program_builder.sql`**) over all 133 remote refs:
+
+| Number | Migration file | Branch | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|
+| 0220 | `0220_eld_event_ledger.sql` | `claude/eld-compliance-intelligence-ramlrd` | open | none (below main's head) | — |
+| 0224 | `0224_eld_duty_day_designations.sql` | `claude/eld-compliance-intelligence-ramlrd` | open | with ci-stabilization | first to merge keeps it |
+| 0224, 0225 | `0224_offline_capture_identity_scope.sql`, `0225_queued_package_identity_scope.sql` | `fix/main-ci-stabilization` | open | 0224 with ELD | first to merge keeps it |
+| 0228 | `0228_safety_program_builder.sql` | `main` (#99) | merged | — | keeps 0228 |
+| 0228 | `0228_payroll_time_candidates_exceptions.sql` | `claude/payroll-p3-time-candidates` | open | **with main** (#99) | its author renumbers at rebase |
+| 0229–0232 | `0229_integration_hub_connectors.sql` … `0232_integration_hub_conflicts_and_links.sql` | `claude/integration-hub-subsystem-6nzrkw` | open | none (renumbered from 0220–0223 by its author) | keeps 0229–0232 |
+| **0233** | **`0233_external_source_registry.sql`** | **`claude/external-source-registry`** | **claiming** | **none** | **keeps 0233** |
+
+The registry was drafted as `0228`, free on `main` and on every branch at the morning scan; the pre-commit rescan
+found `0228` claimed by payroll P3 and `0229`–`0232` by the integration hub, so it moved to `0233` before any
+environment applied it. Main has since taken `0228` itself (#99); `0233` was still free on main and every branch
+at the rescan. No ref then held anything at or above `0234`. Main has since taken `0236` (#135, which counted
+`0233` among the claimed slots); `0233` stays, below main's head, and the ledger applies it by name. Next free
+number for new work: see the latest section below (`0237` at the #135 merge; re-check with the scan before
+committing).
+
 ## Claim: 0227 (payroll P2 — pay schedules and the pay-period machine, 2026-10-03)
 
 `main` = `a61ff29`, migration head **`0226_payroll_compensation_agreements.sql`** (P1, merged as #130). Scan over
@@ -309,6 +332,14 @@ anywhere is `0193`, so `0194` is the first free everywhere.
 
 ## Change log
 
+* **2026-10-03 (PR)**: the safety program follow-up moves `0233 → 0236 → 0237 → 0241` before merging: `0233` became a
+  three-way collision (external-source-registry, billing-invoicing-ar), payroll P4 holds `0234`–`0235`, and
+  `0236` was claimed by marketplace-main-reconcile and security/driver-portfolio-hardening during the PR's gate. `0237` was then claimed by `claude/fleet-equipment-portfolio-design-3d13d5` (`0237`–`0238`)
+  and the marketplace branches (`0237`–`0240`, PR #109) while #140 was open, so it moves to `0241`.
+
+* **2026-10-03 (later)**: #99 merged with `0228`. Its follow-up takes `0233` for the event-chain uniqueness index:
+  `0229`–`0232` are the integration hub branch's.
+
 * **2026-10-03**: the Safety & Compliance Program Builder (#99) moves `0182 → 0228` on merging main: document
   control had claimed `0182`, and `0228` was the first slot above every slot in use in any lineage.
 
@@ -388,6 +419,45 @@ A scan of main and all 131 remote branches found every slot from `0180` to `0227
 every slot in use, so it moved to `0228`. The migration creates only new tables and depends on nothing after
 `0174`, so the move changes no DDL order. `server/migrationSlots.test.ts` records it and pins the head at `0228`.
 
+## Claim: 0241 (Safety program event chain, 2026-10-03)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0241 | `0241_safety_program_event_chain_unique.sql` | `claude/safety-compliance-program-builder-2qnty0` | #140, follow-up to #99 | `93b9cfc` (main merged in) | gated | none | keeps 0241 |
+
+A follow-up to #99, which merged with `0228`. It adds a UNIQUE index to `safetyProgramEvents.previousHash` so the
+hash chain cannot fork under concurrent writes. It is a new file rather than an edit to `0228` because the
+migration ledger refuses a changed, already-applied file. Drafted as `0233` (above `0229`–`0232`,
+`claude/integration-hub-subsystem-6nzrkw`), then `0236` when `0233` became a three-way collision
+(`claude/external-source-registry`, which then merged it to `main` as #133, and
+`claude/leaseos-billing-invoicing-ar`; recorded in main's SPINE reconciliation) and `0234`–`0235` were held by `claude/payroll-p4-expenses-reimbursements`. While the PR's gate
+ran, `0236` was claimed by `claude/marketplace-main-reconcile` and `security/driver-portfolio-hardening` (which then
+merged it to `main` as #135), it took `0237`, the number main's register named as next free after #135. While
+#140 was open, `0237` was claimed by `claude/fleet-equipment-portfolio-design-3d13d5` (`0237`–`0238`) and by
+`claude/leaseos-marketplace-bidding-h3stdw` / `claude/marketplace-main-reconcile` (`0237`–`0240`, PR #109), so at the
+final scan of main and all 142 remote branches it takes `0241`, the first slot above every slot in use. It was
+not merged or applied anywhere under any earlier number. This branch claims none of `0233`, `0236` or `0237`.
+**Next free number after this: `0242`** (re-check
+with the scan before committing).
+
 ## Change log (continued)
 
 * **2026-10-01 (SA1 merge)**: Sign & Attest `0214`–`0216` recorded against `main` `ce27fec`; next free `0220`.
+* **2026-10-03 (Integration Hub renumber, PR #116)**: `0220`–`0223` → `0229`–`0232`, contents unchanged.
+  Scan of `main` (`48a64e1`) and every remote ref: `main` holds `0221`/`0222` (defect lifecycle) and
+  `0226`/`0227` (payroll P1/P2); `claude/eld-compliance-intelligence-ramlrd` holds `0220` and `0224`; an
+  offline-capture branch holds `0224`/`0225`; a payroll branch holds `0228`. As the later, unmerged claimant
+  the Hub moved to the first four numbers free everywhere. Next free after it: `0233`.
+
+## State at the Driver Portfolio security hardening (2026-10-03, `main` = `60de8c2`)
+
+`main` migration head: **`0228_safety_program_builder.sql`**. The security-hardening branch
+(`security/driver-portfolio-hardening`, PR #135) takes **`0236_compliance_document_recorder.sql`** — one
+nullable column, `complianceDocuments.recordedByUserId`, no back-fill (NULL = recorder unknown). Drafted as
+`0229`; the scan across all 144 remote branches found `0229` claimed by
+`claude/integration-hub-subsystem-6nzrkw` and `0230`–`0235` by other open branches, so it moved to `0236`
+before it was ever applied on main. The ledger runner applies it by name.
+
+**Next free number after this: `0237`** (re-check with the scan before committing).
+
+* **2026-10-03 (Driver Portfolio hardening)**: drafted `0229`, renumbered to `0236` on merging `main` `60de8c2` (0229–0235 claimed by open branches); next free `0237`.

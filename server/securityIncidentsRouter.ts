@@ -16,7 +16,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { router, roleProcedure } from "./_core/trpc";
 import { getDb } from "./db";
 import { resolveActingScope } from "./_core/actingScope";
-import { incidentNotificationObligations, privacyBreachAssessments, securityIncidentEvents, securityIncidentOrganizations, securityIncidents } from "../drizzle/schema";
+import { incidentNotificationObligations, organizations, privacyBreachAssessments, securityIncidentEvents, securityIncidentOrganizations, securityIncidents } from "../drizzle/schema";
 
 async function dbOrThrow() { const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return db; }
 type Db = Awaited<ReturnType<typeof dbOrThrow>>;
@@ -54,11 +54,30 @@ export const securityIncidentsRouter = router({
       return { incidentRef, status: "open" as const };
     }),
 
-  /** Append to the timeline; some events also move the incident's status. */
+  /**
+   * Append a note to the timeline. Anyone who may report may add to what is known; a note never
+   * moves the incident's status (SEC-1: this used to accept triage, contained, recovery and
+   * reopened under incident.create — held by drivers — and move the status for each).
+   */
   timelineAppend: roleProcedure("securityIncidents.timelineAppend")
     .input(z.object({
       incidentRef: z.string().min(1).max(64),
-      eventType: z.enum(["triage", "evidence_added", "contained", "scope_changed", "customer_identified", "recovery", "reopened"]),
+      eventType: z.enum(["evidence_added", "scope_changed", "customer_identified"]),
+      detail: z.string().max(4000).nullable().optional(), evidenceRecordId: z.number().int().positive().nullable().optional(), occurredAt: z.coerce.date(),
+    }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const { i } = await ownedIncident(db, ctx.user.id, input.incidentRef);
+      if (i.status === "closed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The incident is closed; reopen it to add to its timeline" });
+      const sequence = await appendEvent(db, i.id, { eventType: input.eventType, actorUserId: ctx.user.id, detail: input.detail, evidenceRecordId: input.evidenceRecordId, occurredAt: input.occurredAt });
+      return { incidentRef: i.incidentRef, sequence, status: i.status };
+    }),
+
+  /** Move the incident's state: a reviewer's act (incident.review), recorded on the timeline like any other. */
+  statusChange: roleProcedure("securityIncidents.statusChange")
+    .input(z.object({
+      incidentRef: z.string().min(1).max(64),
+      eventType: z.enum(["triage", "contained", "recovery", "reopened"]),
       detail: z.string().max(4000).nullable().optional(), evidenceRecordId: z.number().int().positive().nullable().optional(), occurredAt: z.coerce.date(),
     }).strict())
     .mutation(async ({ ctx, input }) => {
@@ -66,10 +85,9 @@ export const securityIncidentsRouter = router({
       const { i } = await ownedIncident(db, ctx.user.id, input.incidentRef);
       if (i.status === "closed" && input.eventType !== "reopened") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The incident is closed; reopen it to add to its timeline" });
       const sequence = await appendEvent(db, i.id, { eventType: input.eventType, actorUserId: ctx.user.id, detail: input.detail, evidenceRecordId: input.evidenceRecordId, occurredAt: input.occurredAt });
-      const status = { triage: "triaging", contained: "contained", recovery: "recovering", reopened: "investigating" } as const;
-      const next = (status as Record<string, typeof securityIncidents.$inferInsert["status"]>)[input.eventType];
-      if (next) await db.update(securityIncidents).set({ status: next, ...(input.eventType === "contained" ? { containedAt: input.occurredAt } : {}), ...(input.eventType === "reopened" ? { closedAt: null } : {}) }).where(eq(securityIncidents.id, i.id));
-      return { incidentRef: i.incidentRef, sequence, status: next ?? i.status };
+      const next = ({ triage: "triaging", contained: "contained", recovery: "recovering", reopened: "investigating" } as const)[input.eventType];
+      await db.update(securityIncidents).set({ status: next, ...(input.eventType === "contained" ? { containedAt: input.occurredAt } : {}), ...(input.eventType === "reopened" ? { closedAt: null } : {}) }).where(eq(securityIncidents.id, i.id));
+      return { incidentRef: i.incidentRef, sequence, status: next };
     }),
 
   /** Name an organization the incident touched. Suspected until someone confirms or rules it out. */
@@ -78,6 +96,9 @@ export const securityIncidentsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const { i } = await ownedIncident(db, ctx.user.id, input.incidentRef);
+      // SEC-1: an affected organization is one that exists; a free string here was a record about nobody.
+      const named = (await db.select({ orgRef: organizations.orgRef }).from(organizations).where(eq(organizations.orgRef, input.orgRef)).limit(1))[0];
+      if (!named) throw new TRPCError({ code: "NOT_FOUND", message: "Organization not found" });
       await db.insert(securityIncidentOrganizations).values({ securityIncidentId: i.id, orgRef: input.orgRef, affectedStatus: input.affectedStatus, dataCategoriesJson: JSON.stringify(input.dataCategories) })
         .onDuplicateKeyUpdate({ set: { affectedStatus: input.affectedStatus, dataCategoriesJson: JSON.stringify(input.dataCategories) } });
       await appendEvent(db, i.id, { eventType: "customer_identified", actorUserId: ctx.user.id, detail: `${input.orgRef}: ${input.affectedStatus}`, occurredAt: new Date() });

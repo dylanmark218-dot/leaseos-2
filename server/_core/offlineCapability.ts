@@ -15,18 +15,27 @@
  * unknown compliance question as passed, and cannot turn an extraction into a
  * confirmed fact. Losing signal must not become a way around the server.
  *
- * **The class is declared, never inferred.** A model deciding that something
- * "seems safe enough to do locally" is the model granting itself authority. The
- * class travels with the capability definition.
+ * **SPINE item 3 — three questions, kept apart.** CAN the device do it is HS1
+ * (`shared/hardwareCapability.ts`). MAY it run without the server is
+ * `requiresOnline`, declared on the capability and read only through
+ * `actionGateway.mayRunWithoutServer`. MAY this person do it is the server's, on
+ * reconnect. This module composes the first two with connectivity into what the
+ * device may attempt now — capture, draft, read, or refuse — and decides nothing
+ * about the third. Hardware can narrow availability; it never grants it. Being
+ * online satisfies connectivity and nothing else: server work is still queued for
+ * the server, never executed here.
  *
- * **It binds to the gateway's risk levels rather than restating them.** Two
- * independently maintained vocabularies for "how dangerous is this" is the
- * shape that has already produced two receipt models and two never-automatic
- * floors in this codebase. Here the mapping is explicit and a test fails if one
- * side moves alone.
+ * **The offline class is derived, never declared.** Before item 3 a capability
+ * carried its own `offlineClass` beside `requiresOnline`, two answers to one
+ * question, and the class won. Now the class is read off `requiresOnline` and the
+ * gateway's risk level, so there is one declaration. A capability that may run
+ * without the server yet carries `approval_required` or `restricted` is a
+ * contradiction and refuses — it is never quietly classed as local.
  */
 
-import type { CapabilityDefinition, RiskLevel } from "./actionGateway";
+import type { HardwareCapability, CapabilityMatrix } from "@shared/hardwareCapability";
+import { missingHardware } from "@shared/hardwareCapability";
+import { mayRunWithoutServer, type CapabilityDefinition, type RiskLevel } from "./actionGateway";
 
 export type OfflineClass =
   | "local_safe"          // reads what is already on the device
@@ -34,43 +43,41 @@ export type OfflineClass =
   | "local_prepare"       // drafts something a server will later decide on
   | "server_authoritative"; // only the server may do this at all
 
-/**
- * Which risks a class may carry.
- *
- * `local_capture` is allowed `low_risk_action` because recording an
- * observation is an action — it creates a record — and refusing that offline
- * would make the device useless exactly where it matters most.
- */
-const RISKS_PERMITTED: Record<OfflineClass, readonly RiskLevel[]> = {
-  local_safe: ["read"],
-  local_capture: ["read", "prepare", "low_risk_action"],
-  local_prepare: ["prepare"],
-  server_authoritative: ["low_risk_action", "approval_required", "restricted"],
-};
-
-export type FieldCapability = CapabilityDefinition & { offlineClass: OfflineClass };
-
 export class ClassRiskMismatch extends Error {}
 
+type ClassInput = Pick<CapabilityDefinition, "key" | "riskLevel" | "requiresOnline">;
+
 /**
- * Check a definition against its class.
- *
- * A capability marked `local_safe` that carries `approval_required` is not a
- * configuration nuance; it is a server decision labelled as a local read, and
- * the label is the thing an offline device would obey.
+ * The class a capability falls in, from its declaration. Exhaustive over `RiskLevel`, so a new risk
+ * level fails the typecheck here until somebody decides what it means offline.
  */
-export function validateCapability(capability: FieldCapability): void {
-  const permitted = RISKS_PERMITTED[capability.offlineClass];
-  if (!permitted.includes(capability.riskLevel)) {
-    throw new ClassRiskMismatch(
-      `${capability.key} is ${capability.offlineClass} but carries risk ${capability.riskLevel}. ` +
-      `A ${capability.offlineClass} capability may be ${permitted.join(" or ")} — otherwise the label is the only thing standing between an offline device and a server decision.`,
-    );
+export function offlineClassOf(capability: ClassInput): OfflineClass {
+  if (!mayRunWithoutServer(capability)) return "server_authoritative";
+  const risk: RiskLevel = capability.riskLevel;
+  switch (risk) {
+    case "read": return "local_safe";
+    case "prepare": return "local_prepare";
+    case "low_risk_action": return "local_capture";
+    case "approval_required":
+    case "restricted":
+      throw new ClassRiskMismatch(
+        `${capability.key} carries risk ${risk} but is declared to run without the server. ` +
+        `Approval and restricted work is the server's; declare it requiresOnline — the label is the only thing an offline device would obey.`,
+      );
+    default: {
+      const unreachable: never = risk;
+      throw new ClassRiskMismatch(`${capability.key}: unknown risk level ${String(unreachable)}`);
+    }
   }
 }
 
-/** Every disagreement between the two vocabularies, named rather than counted. */
-export function classRiskDisagreements(capabilities: readonly FieldCapability[]): string[] {
+/** Check a declaration: throws where requiresOnline and the risk level contradict each other. */
+export function validateCapability(capability: ClassInput): void {
+  offlineClassOf(capability);
+}
+
+/** Every contradiction among a set of declarations, named rather than counted. */
+export function classRiskDisagreements(capabilities: readonly ClassInput[]): string[] {
   const out: string[] = [];
   for (const c of capabilities) {
     try { validateCapability(c); } catch (e) { out.push((e as Error).message); }
@@ -79,44 +86,52 @@ export function classRiskDisagreements(capabilities: readonly FieldCapability[])
 }
 
 /* ------------------------------------------------------------------ */
-/* What happens when there is no signal                                 */
+/* What the device may attempt now                                     */
 /* ------------------------------------------------------------------ */
 
-export type OfflineOutcome =
-  | { outcome: "execute_locally"; note: string }
-  | { outcome: "capture_locally"; note: string }
-  | { outcome: "prepare_and_queue"; note: string }
-  | { outcome: "unavailable"; note: string };
+/** An operation the device may be asked to do: its declaration, the hardware it needs, and whether it can be drafted. */
+export type DeviceOperation = ClassInput & {
+  requiredHardware: readonly HardwareCapability[];
+  /** Server work that can usefully be prepared now and decided on reconnect. */
+  draftable: boolean;
+};
 
 /**
- * Decide what an offline device may do with a capability.
- *
- * A server-authoritative capability is *never* executed offline. Where it can
- * usefully be drafted it is queued for a server decision, and where it cannot
- * it is simply unavailable — said plainly, rather than appearing to work and
- * failing hours later when the truck reaches signal.
+ * What the device may attempt. The outcomes are the module's existing four; `reason` says which
+ * question produced them, so a missing camera and a server-only act are never the same refusal.
+ * None carries a permission, a scope or an authorization claim — this is availability, not authority.
  */
-export function offlineOutcome(capability: FieldCapability, args: { online: boolean; draftable: boolean }): OfflineOutcome {
-  if (args.online) {
-    return { outcome: "execute_locally", note: "Online; the server decides as usual." };
+export type RuntimeAvailability =
+  | { outcome: "execute_locally"; reason: "local_read"; note: string }
+  | { outcome: "capture_locally"; reason: "local_capture"; note: string }
+  | { outcome: "prepare_and_queue"; reason: "local_draft" | "server_decides"; note: string }
+  | { outcome: "unavailable"; reason: "hardware_missing"; missing: HardwareCapability[]; note: string }
+  | { outcome: "unavailable"; reason: "server_required_offline"; note: string };
+
+/**
+ * Compose HS1's hardware facts, the one offline policy and connectivity.
+ *
+ * Hardware first: a missing camera is missing online or off. Then the class from `requiresOnline`:
+ * local reads, captures and drafts take the existing offline path whether or not there is signal;
+ * server work is queued for the server — with signal it is sent now, without it only if it can be
+ * drafted — and is never executed or captured as done on the device.
+ */
+export function runtimeAvailability(operation: DeviceOperation, ctx: { hardware: CapabilityMatrix; online: boolean }): RuntimeAvailability {
+  const missing = missingHardware(ctx.hardware, operation.requiredHardware);
+  if (missing.length) {
+    return { outcome: "unavailable", reason: "hardware_missing", missing, note: `${operation.key} needs ${missing.join(", ")}, which this device does not have.` };
   }
-  switch (capability.offlineClass) {
+  switch (offlineClassOf(operation)) {
     case "local_safe":
-      return { outcome: "execute_locally", note: `${capability.key} reads what is already on the device.` };
+      return { outcome: "execute_locally", reason: "local_read", note: `${operation.key} reads what is already on the device.` };
     case "local_capture":
-      return {
-        outcome: "capture_locally",
-        note: `${capability.key} records what was observed. The observation is a fact; what it permits is decided when this reaches the server.`,
-      };
+      return { outcome: "capture_locally", reason: "local_capture", note: `${operation.key} records what was observed. What it permits is decided when it reaches the server.` };
     case "local_prepare":
-      return { outcome: "prepare_and_queue", note: `${capability.key} is drafted here and decided by the server.` };
+      return { outcome: "prepare_and_queue", reason: "local_draft", note: `${operation.key} is drafted here and decided by the server.` };
     case "server_authoritative":
-      return args.draftable
-        ? { outcome: "prepare_and_queue", note: `${capability.key} needs the server. It can be prepared now and will be decided when this device reconnects.` }
-        : {
-            outcome: "unavailable",
-            note: `${capability.key} needs the server and cannot be usefully prepared offline. Losing signal is not a way around it.`,
-          };
+      return ctx.online || operation.draftable
+        ? { outcome: "prepare_and_queue", reason: "server_decides", note: `${operation.key} is the server's to decide. It is sent to the server${ctx.online ? " now" : " when this device reconnects"}; nothing is done here.` }
+        : { outcome: "unavailable", reason: "server_required_offline", note: `${operation.key} needs the server and cannot be usefully prepared offline. Losing signal is not a way around it.` };
   }
 }
 

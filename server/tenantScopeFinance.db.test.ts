@@ -470,7 +470,7 @@ d("F1.1 — inventory and other rows with no owner fail closed once organization
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 /** One organization's compliance subjects and the credentials its own people filed against them. */
 async function world12(orgRef: string) {
-  const people = { office: await member(orgRef, ["office"]), hr: await member(orgRef, ["hr"]), dispatcher: await member(orgRef, ["dispatcher"]) };
+  const people = { office: await member(orgRef, ["office"]), office2: await member(orgRef, ["office"]), hr: await member(orgRef, ["hr"]), dispatcher: await member(orgRef, ["dispatcher"]) };
   const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES (?, NOW())", [`Op ${rnd()}`]);
   const operatorId = Number(op.insertId);
   await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'operator', ?, 1)", [orgRef, operatorId]);
@@ -547,50 +547,56 @@ d("F1.2 — Organization B cannot read or file compliance records against Organi
       expect((await callerFor(A.dispatcher).compliance.passport({ subjectType, subjectId, jurisdiction: "CA-AB" })).verdict, subjectType).toBeTruthy();
     expect((await callerFor(A.dispatcher).compliance.jobPassport({ jurisdiction: "CA-AB", carrier: { id: A.entityId }, operator: { id: A.operatorId }, unit: { id: A.unitId }, trailer: { id: A.unitId } })).verdict).toBeTruthy();
     expect((await callerFor(A.dispatcher).compliance.medicalEligibility({ operatorId: A.operatorId })).eligible).toBe("unknown");
-    expect((await callerFor(A.office).compliance.credentialVerify({ credentialId: A.credentialId, outcome: "verified" })).verificationStatus).toBe("verified");
+    // A.office recorded it, so a second office user in A verifies it (separation of duties).
+    expect((await callerFor(A.office2).compliance.credentialVerify({ credentialId: A.credentialId, outcome: "verified" })).verificationStatus).toBe("verified");
     expect((await callerFor(A.office).compliance.consentRecord({ subjectUserId: A.hr, consentType: "driver_abstract", purpose: "annual abstract", signedAt: days(-1), signatureEvidenceRecordId: A.evidenceId })).consentRef).toBeTruthy();
   });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
-// F1.3 — the global dispatch mode is platform-governed
+// F1.3 — platform governance: the global dispatch mode and the global compliance requirement registry
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
-d("F1.3 — once organizations exist, only platform authority changes the global dispatch mode", () => {
-  /** A caller whose session claims `claimed`; what counts is the users row, if any. */
-  const session = (userId: number, claimed: "user" | "admin") => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: claimed } as never });
-  const usersRow = (userId: number, role: "user" | "admin") => pool.execute("INSERT INTO users (id, openId, role) VALUES (?, ?, ?)", [userId, `f13-${userId}-${rnd()}`, role]);
+/** A caller whose session claims `claimed`. What counts is the users row, if there is one. */
+const session = (userId: number, claimed: "user" | "admin") => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: claimed } as never });
+const usersRow = (userId: number, role: "user" | "admin") => pool.execute("INSERT INTO users (id, openId, role) VALUES (?, ?, ?)", [userId, `f13-${userId}-${rnd()}`, role]);
+
+d("F1.3 — the global dispatch mode is platform configuration; an organization's own mode is organization configuration", () => {
   const book = async (orgRef: string) => Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'Dispatch Ltd.', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, orgRef]))[0].insertId);
   const latestGlobal = async () => (await one("SELECT mode, setByUserId FROM dispatchEnforcementSettings WHERE financialEntityId IS NULL ORDER BY setAt DESC, id DESC LIMIT 1", [])) as { mode: string; setByUserId: number };
-  let orgA: string, orgB: string, admin: number, orgAdmin: number, unaffiliated: number, mgrA: number, mgrB: number, bookA: number, bookA2: number, bookB: number;
+  let orgA: string, orgB: string, admin: number, orgAdmin: number, unaffiliated: number, mgrA: number, ctlA: number, mgrB: number, bookA: number, bookA2: number, bookB: number;
 
   beforeAll(async () => {
     orgA = await org(); orgB = await org();
-    admin = await member(null, ["management"]); await usersRow(admin, "admin");            // platform admin, no membership
-    orgAdmin = await member(orgA, ["management"]); await usersRow(orgAdmin, "admin");      // platform admin who also works for A
-    unaffiliated = await member(null, ["management"]); await usersRow(unaffiliated, "user"); // ordinary, unaffiliated, holds the permission
-    mgrA = await member(orgA, ["management"]); mgrB = await member(orgB, ["management"]);
+    admin = await member(null, []); await usersRow(admin, "admin");                           // platform admin, NO domain role, no membership
+    orgAdmin = await member(orgA, []); await usersRow(orgAdmin, "admin");                     // platform admin who works for A, no domain role
+    unaffiliated = await member(null, ["management", "controller"]); await usersRow(unaffiliated, "user"); // ordinary, unaffiliated, holds the permission
+    mgrA = await member(orgA, ["management"]); ctlA = await member(orgA, ["controller"]); mgrB = await member(orgB, ["management"]);
     bookA = await book(orgA); bookA2 = await book(orgA); bookB = await book(orgB);
   }, 30_000);
   afterAll(async () => { if (admin) await session(admin, "admin").dispatch.enforcementSet({ mode: "off", reason: "F1.3 teardown — restore the global default" }); });
 
-  it("1. lets a platform administrator set the global mode — unaffiliated or a member of an organization", async () => {
+  it("1. lets a platform administrator read and set the global mode with no organization role at all", async () => {
     expect((await session(admin, "admin").dispatch.enforcementSet({ mode: "advisory", reason: "platform: advisory everywhere by default" })).scope).toBe("global");
-    expect((await session(orgAdmin, "admin").dispatch.enforcementSet({ mode: "advisory", reason: "platform: same default, set by an admin in org A" })).scope).toBe("global");
+    expect((await session(orgAdmin, "admin").dispatch.enforcementSet({ mode: "advisory", reason: "platform: same default, set by an admin who works for A" })).scope).toBe("global");
+    expect((await session(admin, "admin").dispatch.enforcementGet()).mode).toBe("advisory");
     expect(await latestGlobal()).toMatchObject({ mode: "advisory", setByUserId: orgAdmin });
   });
 
-  it("2. refuses an ordinary unaffiliated user, though they hold the dispatch permission", async () => {
-    await expect(session(unaffiliated, "user").dispatch.enforcementSet({ mode: "off", reason: "unaffiliated, so surely mine to change" })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(session(mgrA, "user").dispatch.enforcementSet({ mode: "off", reason: "org A trying the global switch" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  it("2. refuses the global mode, to read or set, to every ordinary user: unaffiliated, or an organization's manager or controller", async () => {
+    for (const who of [unaffiliated, mgrA, ctlA]) {
+      await expect(session(who, "user").dispatch.enforcementSet({ mode: "off", reason: "an organization role is not platform authority" }), String(who)).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(session(who, "user").dispatch.enforcementGet(), String(who)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    }
   });
 
-  it("3. lets Organization A's authorized user set A's own mode", async () => {
+  it("3. lets Organization A's authorized user read and set A's own mode", async () => {
     expect((await session(mgrA, "user").dispatch.enforcementSet({ financialEntityId: bookA, mode: "enforced", reason: "A enforces its own dispatch" })).scope).toBe(bookA);
   });
 
-  it("4. refuses Organization A's user on Organization B's mode, as not found", async () => {
+  it("4. refuses A's user on B's mode (NOT_FOUND), and platform authority does not bypass B's domain controls", async () => {
     await expect(session(mgrA, "user").dispatch.enforcementSet({ financialEntityId: bookB, mode: "off", reason: "A switching B's gate off" })).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(session(mgrA, "user").dispatch.enforcementGet({ financialEntityId: bookB })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(session(admin, "admin").dispatch.enforcementSet({ financialEntityId: bookB, mode: "off", reason: "platform admin reaching into B's own mode" })).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(session(mgrB, "user").dispatch.enforcementSet({ financialEntityId: bookB, mode: "advisory", reason: "B sets its own mode" })).resolves.toBeTruthy();
   });
 
@@ -603,32 +609,119 @@ d("F1.3 — once organizations exist, only platform authority changes the global
     expect((await latestGlobal()).mode).toBe("advisory");
   });
 
-  it("7. cannot be bypassed: a claimed session role, extra input, a demotion, a missing users row, or no domain permission", async () => {
+  it("7. cannot be bypassed: a claimed session role, input flags, a null entity, no users row, or a demotion", async () => {
     const before = await latestGlobal();
-    // A session that claims admin, over a users row that says otherwise.
     await expect(session(unaffiliated, "admin").dispatch.enforcementSet({ mode: "off", reason: "my session says admin" })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    // Authority smuggled in the input: stripped, and it would not count anyway.
     await expect(session(unaffiliated, "user").dispatch.enforcementSet({ mode: "off", reason: "input says admin", role: "admin", platformAdmin: true, isAdmin: true } as never)).rejects.toMatchObject({ code: "FORBIDDEN" });
-    // An explicit null entity is the global row, not a loophole.
     await expect(session(mgrA, "user").dispatch.enforcementSet({ financialEntityId: null, mode: "off", reason: "null entity, maybe unchecked" })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    // No users row at all.
+    await expect(session(mgrA, "user").dispatch.enforcementSet({ financialEntityId: "abc", mode: "off", reason: "a malformed entity id" } as never)).rejects.toBeTruthy();
     const ghost = await member(null, ["management"]);
     await expect(session(ghost, "admin").dispatch.enforcementSet({ mode: "off", reason: "no row, but my session says admin" })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    // Platform authority is not a domain permission: an admin without it is refused by the role gate.
-    const bareAdmin = await member(null, []); await usersRow(bareAdmin, "admin");
-    await expect(session(bareAdmin, "admin").dispatch.enforcementSet({ mode: "off", reason: "admin, but no dispatch permission" })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    // Demotion takes effect on the next call, though the session was minted while they were an admin.
-    const demoted = await member(null, ["management"]); await usersRow(demoted, "admin");
+    const demoted = await member(null, []); await usersRow(demoted, "admin");
     await session(demoted, "admin").dispatch.enforcementSet({ mode: "advisory", reason: "while still an administrator" });
     await pool.execute("UPDATE users SET role = 'user' WHERE id = ?", [demoted]);
     await expect(session(demoted, "admin").dispatch.enforcementSet({ mode: "off", reason: "after demotion, same session" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(session(demoted, "admin").dispatch.enforcementGet()).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(await latestGlobal()).toMatchObject({ mode: before.mode, setByUserId: demoted });
-    expect((await latestGlobal()).mode).toBe("advisory");
   });
 
-  it("keeps C1a's read rule: an organization member cannot read the global row; the single tenant and platform authority can", async () => {
-    await expect(session(mgrA, "user").dispatch.enforcementGet()).rejects.toMatchObject({ code: "FORBIDDEN" });
-    expect((await session(unaffiliated, "user").dispatch.enforcementGet()).mode).toBe("advisory");
-    expect((await session(orgAdmin, "admin").dispatch.enforcementGet()).mode).toBe("advisory");
+  it("records platform-authority refusals in the authorization trail", async () => {
+    expect(Number((await one("SELECT COUNT(*) AS n FROM authorizationDecisions WHERE actorUserId = ? AND permission = 'platform.authority' AND outcome = 'denied_permission'", [unaffiliated])).n)).toBeGreaterThan(0);
+  });
+});
+
+d("F1.3 — the requirement registry is organization-scoped: no organization changes what another reads", () => {
+  /** Exactly the rows an organization's registry reads (NULL-org legacy rows plus its own), and their events. */
+  const view = async (orgRef: string) => JSON.stringify([
+    (await pool.query<mysql.RowDataPacket[]>("SELECT * FROM complianceRequirements WHERE orgRef IS NULL OR orgRef = ? ORDER BY id", [orgRef]))[0],
+    (await pool.query<mysql.RowDataPacket[]>("SELECT * FROM requirementVerificationEvents WHERE orgRef IS NULL OR orgRef = ? ORDER BY id", [orgRef]))[0],
+  ]);
+  const sharedRows = async () => Number((await one("SELECT COUNT(*) AS n FROM complianceRequirements WHERE orgRef IS NULL", [])).n);
+  const propose = (who: number, key: string, title = "Class 1 driver licence", extra: Record<string, unknown> = {}) => callerFor(who).compliance.requirementLoad({
+    requirementKey: key, family: "driver_licensing", title, subjectType: "operator", jurisdiction: jur,
+    satisfiedByDocTypes: ["driver_licence"], missingSeverity: "review",
+    // FIXTURE citation — not a verified reading of any instrument.
+    instrumentTitle: "FIXTURE INSTRUMENT — not a real regulation", sourceAuthority: "FIXTURE AUTHORITY", sourceReference: "s. 1(1)",
+    sourceUrl: "https://www.alberta.ca/fixture-not-a-real-page", authorityType: "law", effectiveFrom: new Date("2026-01-01T00:00:00Z"), ...extra,
+  } as never) as Promise<{ requirementKey: string; version: number }>;
+  const approval = (key: string, version: number) => ({ requirementKey: key, version, target: "CITATION_VERIFIED" as const, decision: "approve" as const, reason: "Checked against the cited section" });
+  let orgA: string, orgB: string, ctlA: number, legalA: number, govA: number, ctlB: number, legalB: number, mgrB: number, dispA: number, dispB: number, unaffiliated: number, key: string, opA: number, opB: number, entA: number, officeA: number, reviewerA: number;
+  let revA: { version: number };
+  // A jurisdiction of its own: an unverified proposal makes every passport it applies to UNKNOWN, so a shared
+  // one ("CA-AB") would leak into other suites' passports (the convention requirementRegistry.db.test.ts uses).
+  const jur = `CA-ZZ-${rnd()}`;
+
+  beforeAll(async () => {
+    orgA = await org(); orgB = await org();
+    ctlA = await member(orgA, ["controller"]); legalA = await member(orgA, ["legal"]); govA = await member(orgA, ["management"]); officeA = await member(orgA, ["office", "safety", "hr"]); reviewerA = await member(orgA, ["office", "safety", "hr"]); dispA = await member(orgA, ["dispatcher"]);
+    ctlB = await member(orgB, ["controller"]); legalB = await member(orgB, ["legal"]); mgrB = await member(orgB, ["management"]); dispB = await member(orgB, ["dispatcher"]);
+    unaffiliated = await member(null, ["controller"]);
+    key = `f13.req.${rnd().toLowerCase()}`;
+    for (const [orgRef, set] of [[orgA, (v: number) => { opA = v; }], [orgB, (v: number) => { opB = v; }]] as const) {
+      const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (name, createdAt) VALUES (?, NOW())", [`Op ${rnd()}`]);
+      await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'operator', ?, 1)", [orgRef, op.insertId]);
+      set(Number(op.insertId));
+    }
+    entA = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, 'A Ltd.', 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, orgA]))[0].insertId);
+  }, 30_000);
+
+  it("stamps Organization A's proposal with A — from server scope, not from anything in the input", async () => {
+    const shared = await sharedRows();
+    revA = await propose(ctlA, key, "A's rule", { orgRef: orgB, tenantId: orgB, organizationId: orgB });
+    expect((await one("SELECT orgRef FROM complianceRequirements WHERE requirementKey = ? AND version = ?", [key, revA.version])).orgRef).toBe(orgA);
+    expect(await sharedRows(), "no proposal creates a row every organization reads").toBe(shared);
+  });
+
+  it("keeps A's revision out of B's registry: B's passport, provenance and verification cannot reach it", async () => {
+    const bBefore = await view(orgB);
+    expect((await callerFor(dispB).compliance.passport({ subjectType: "operator", subjectId: opB, jurisdiction: jur })).items.find(i => i.requirementKey === key)).toBeUndefined();
+    await expect(callerFor(dispB).compliance.requirementProvenance({ requirementKey: key })).rejects.toThrow(/NOT_FOUND/);
+    await expect(callerFor(legalB).compliance.requirementVerify(approval(key, revA.version))).rejects.toThrow(/NOT_FOUND/);
+    await expect(callerFor(mgrB).compliance.requirementSecondApprove(approval(key, revA.version))).rejects.toThrow(/NOT_FOUND/);
+    await expect(callerFor(ctlB).compliance.requirementWithdraw({ requirementKey: key, version: revA.version, reason: "B withdrawing A's rule" } as never)).rejects.toThrow(/NOT_FOUND/);
+    expect(await view(orgB)).toBe(bBefore);
+  });
+
+  it("lets B propose the same key for itself without touching A's view of the registry, byte for byte", async () => {
+    const aBefore = await view(orgA);
+    const revB = await propose(ctlB, key, "B's rule");
+    expect((await one("SELECT orgRef FROM complianceRequirements WHERE requirementKey = ? AND version = ?", [key, revB.version])).orgRef).toBe(orgB);
+    await callerFor(legalB).compliance.requirementVerify(approval(key, revB.version));
+    expect(await view(orgA)).toBe(aBefore);
+    // A still reads A's revision; B reads B's.
+    expect((await callerFor(dispA).compliance.passport({ subjectType: "operator", subjectId: opA, jurisdiction: jur })).items.find(i => i.requirementKey === key)).toBeTruthy();
+    expect((await callerFor(dispB).compliance.passport({ subjectType: "operator", subjectId: opB, jurisdiction: jur })).items.find(i => i.requirementKey === key)).toBeTruthy();
+  });
+
+  it("gives an unaffiliated controller only the single tenant's registry ('default'), never a shared row", async () => {
+    const shared = await sharedRows();
+    const aBefore = await view(orgA);
+    const r = await propose(unaffiliated, `${key}.default`);
+    expect((await one("SELECT orgRef FROM complianceRequirements WHERE requirementKey = ? AND version = ?", [`${key}.default`, r.version])).orgRef).toBe("default");
+    expect(await sharedRows()).toBe(shared);
+    expect(await view(orgA)).toBe(aBefore);
+  });
+
+  it("keeps passports working after legitimate proposals and verification, for each organization", async () => {
+    await callerFor(legalA).compliance.requirementVerify(approval(key, revA.version));
+    const p = await callerFor(dispA).compliance.passport({ subjectType: "operator", subjectId: opA, jurisdiction: jur });
+    expect(p.items.find(i => i.requirementKey === key)?.status).toBe("missing");
+    expect((await callerFor(dispA).compliance.knowledgeCatalog({})).items.length).toBeGreaterThan(0);
+  });
+
+  it("gives Organization A no indirect way, through its other compliance procedures, to change what B reads", async () => {
+    const bBefore = await view(orgB);
+    const shared = await sharedRows();
+    const ev = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, capturedAt, capturedBy) VALUES ('Licence', 'compliance', NOW(), ?)", [officeA]))[0].insertId);
+    const cred = await callerFor(officeA).compliance.credentialRecord({ ownerType: "operator", ownerId: opA, docType: "driver_licence", requirementKey: key, title: "Class 1 licence", evidenceRecordId: ev, expiresAt: new Date(Date.now() + 400 * 86_400_000) });   // #52 ruling B: a verified licence with no expiry is incomplete, never satisfied
+    // Main (#135): whoever recorded a credential may not verify it, so a second reviewer in A does.
+    await callerFor(reviewerA).compliance.credentialVerify({ credentialId: cred.credentialId, outcome: "verified" });
+    await callerFor(officeA).compliance.consentRecord({ subjectUserId: dispA, consentType: "driver_abstract", purpose: "annual abstract", signedAt: new Date("2026-01-01T00:00:00Z") });
+    await callerFor(officeA).compliance.programPublish({ programKey: `P-${rnd()}`, title: "Safety manual", programType: "safety", financialEntityId: entA, effectiveFrom: new Date("2026-01-01T00:00:00Z") });
+    await callerFor(officeA).compliance.profileReviewRecord({ financialEntityId: entA, jurisdiction: "CA-AB", profileObtainedAt: new Date("2026-01-01T00:00:00Z"), inspectionsOnProfile: 0, convictionsOnProfile: 0, collisionsOnProfile: 0, knownInspections: 0, knownConvictions: 0, knownCollisions: 0 });
+    await callerFor(govA).compliance.verificationPolicySet({ mode: "CITATION_ALLOWED", reason: "A's own verification policy for its own rules" });
+    expect((await callerFor(dispA).compliance.passport({ subjectType: "operator", subjectId: opA, jurisdiction: jur })).items.find(i => i.requirementKey === key)?.status).toBe("satisfied");
+    expect(await view(orgB)).toBe(bBefore);
+    expect(await sharedRows()).toBe(shared);
   });
 });
