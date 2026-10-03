@@ -208,6 +208,11 @@ export const complianceRouter = router({
    * gone: `sourceVerified` and `requestedStatus` are still accepted so old callers do not break, and are
    * ignored. Verification is `requirementVerify` (and `requirementSecondApprove` for a blocking rule),
    * by other people, through the ledger.
+   *
+   * F1.3 — ORGANIZATION-SCOPED (owner decision: keep C1b-2's model). The proposal is stamped with the
+   * caller's acting organization from server scope, never input, and the registry is read as NULL-org
+   * legacy rows plus the caller's own organization's revisions. No endpoint writes a row another
+   * organization reads; `financeScopeCoverage.test.ts` pins that.
    */
   requirementLoad: roleProcedure("compliance.requirementLoad")
     .input(z.object({
