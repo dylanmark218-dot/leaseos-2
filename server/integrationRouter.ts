@@ -18,6 +18,7 @@ import { resolveActingScope } from "./_core/actingScope";
 import { frameKey, validateGatewayFrame } from "./_core/loadSenseProtocol";
 import { applyCalibration, assessWeightStability, buildWeightSnapshot, fitMultiPointCalibration, legalAxleDetermination } from "./_core/loadSense";
 import { assignRecordOwner, recordBelongsToOrganization, type OwnedRecordType } from "./_core/coreRecordOwnership";
+import { EgressRefused, checkEgressUrl } from "./_core/egressGuard";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -134,6 +135,9 @@ export const integrationRouter = router({
       const key = mfaKey();
       if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Webhook secrets need LEASEOS_PORTAL_MFA_KEY on the server; it is not configured" });
       if (!/^https:\/\//.test(input.url)) throw new TRPCError({ code: "BAD_REQUEST", message: "Webhooks are delivered over https only" });
+      // Static policy now (main's egress guard), so a private or loopback destination is refused
+      // when it is saved; delivery re-checks the resolved address at connect time (egressPost).
+      try { checkEgressUrl(input.url); } catch (e) { if (e instanceof EgressRefused) throw new TRPCError({ code: "BAD_REQUEST", message: e.message }); throw e; }
       const secret = randomBytes(32).toString("base64url");
       const subscriptionRef = ref("WH");
       await db.insert(webhookSubscriptions).values({ orgRef, subscriptionRef, name: input.name, url: input.url, secretEnc: encryptSecret(secret, key), eventTypesJson: JSON.stringify(input.eventTypes), createdByUserId: ctx.user.id });

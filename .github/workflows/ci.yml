@@ -95,6 +95,13 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Dependency advisories at high or critical fail the build. The 2026-09-21
+      # hardening pass recorded 2 critical and 39 high and nothing stopped them
+      # shipping; audit/hardening-2026-09-24/REMEDIATION.md took both to zero.
+      # Moderates are tracked there with the reason each is not yet upgraded.
+      - name: Dependency audit (high and critical)
+        run: pnpm audit --audit-level high
+
       # B23.1B — say plainly that the database is reachable before running a
       # seven-minute gate against it.
       #

@@ -78,6 +78,8 @@ async function establishedScene(opts: { foreignRecordFirst?: boolean } = {}) {
   await pool.execute("INSERT INTO insuranceCoveredEntities (insurancePolicyId, entityType, entityId, coveredFrom) VALUES (?, 'unit', ?, DATE_SUB(NOW(), INTERVAL 60 DAY))", [policyId, unitId]);
   const [j] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO jobs (jobCode, type, mode, customer, location, status, progress) VALUES (?, 'water_haul', 'transport', ?, 'LSD 04-12-052-09W5', 'dispatched', 0)", [key("JOB").slice(0, 40), key("Cust").slice(0, 40)]);
   const jobId = Number(j.insertId);
+  // RI-0.6: a job with no load classification is UNKNOWN for dangerous goods; the established scene classifies its load.
+  await pool.execute("INSERT INTO loadProfiles (jobId, material, classificationStatus, verifiedAt) VALUES (?, 'Produced water', 'verified', NOW())", [jobId]);
   const posting = await caller(dispatcher).dispatch.createPosting({ jobId, roles: [{ roleCode: "PRIMARY_UNIT" }] });
   const roleId = posting.roleIds[0]!;
   const approvalRef = key("RA").slice(0, 60);
