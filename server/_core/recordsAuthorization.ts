@@ -393,6 +393,11 @@ export type Permission =
   | "attest.read" | "attest.document.open" | "attest.field.place" | "attest.signer.assign"
   | "attest.sign_own" | "attest.decline_own" | "attest.witness"
   | "attest.finalize" | "attest.void" | "attest.supersede" | "attest.export"
+  // 0228 — Safety & Compliance Program Builder. read_own / acknowledge_own are universal and self-scoped
+  // in the router (the caller's own policies, the caller's own signature); manage, approve and verify are
+  // the acts that change what the company is taken to require, make a version binding, or close a loop.
+  | "safety_program.read" | "safety_program.write" | "safety_program.manage" | "safety_program.approve" | "safety_program.verify"
+  | "safety_program.read_own" | "safety_program.acknowledge_own"
   // Analytics Checkpoint B — read-only metrics over existing records. `analytics.read` opens the
   // organization's metrics, each still gated by its source records' own read permission;
   // `analytics.read_own` is universal and self-scoped in code (analyticsRouter.mine).
@@ -849,6 +854,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     /* C1b-2b — requirement verification */
     "compliance.requirement.propose",
     "compliance.requirement.verify",
+    "safety_program.read",
+    "safety_program.write",
+    "safety_program.manage",
+    "safety_program.approve",
+    "safety_program.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -997,6 +1007,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "document.issue",
     "document.void",
     "document.template.manage",
+    "safety_program.read",
     "device.verifySeal",
     "vault.matter.manage",
     "hos.recordScannedLog",
@@ -1204,6 +1215,11 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "compliance.requirement.second_approve",
     "compliance.requirement.retire",
     "compliance.verification.govern",
+    "safety_program.read",
+    "safety_program.write",
+    "safety_program.manage",
+    "safety_program.approve",
+    "safety_program.verify",
     "device.verifySeal",
     "vault.matter.manage",
     "restricted.read",
@@ -1481,6 +1497,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
     "analytics.read",
     "document.read",
+    "safety_program.read",
+    "safety_program.write",
     "academy.assign",
     "academy.manage",
     "academy.evaluate",
@@ -1531,6 +1549,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "compliance.requirement.verify",
     "compliance.requirement.second_approve",
     "compliance.verification.govern",
+    "safety_program.read",
     "evidence.read_legal",
     "evidence.browse",
     "evidence.read_safety_summary",
@@ -1565,6 +1584,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
     "analytics.read",
     "document.read",
+    "safety_program.read",
     "facility.directory.read",
     "evidence.read_job_operational",
     "evidence.browse",
@@ -1771,6 +1791,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "compliance.requirement.verify",
     "compliance.requirement.second_approve",
     "compliance.requirement.retire",
+    "safety_program.read",
     "facility.directory.read",
     "enforcement.read",
     "oos.policy.manage",
@@ -2021,6 +2042,9 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   "attest.decline_own",
   // 0206 — a person's own availability reads and writes `ctx.user.id` and nothing the request could name.
   "shifts.availability_own",
+  // 0228 — your own policies to acknowledge, your own signature. The router resolves the person from ctx.user.id.
+  "safety_program.read_own",
+  "safety_program.acknowledge_own",
   // Analytics Checkpoint B — your own numbers. analyticsRouter.mine resolves the operator from
   // `ctx.user.id`; the input cannot name one.
   "analytics.read_own",
@@ -2096,6 +2120,10 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "document.catalog.manage",
   "document.series.manage",
   "document.template.manage",
+  "safety_program.manage",
+  "safety_program.approve",
+  "safety_program.verify",
+  "safety_program.acknowledge_own",
   "academy.source.review",
   "academy.certificate.issue",
   "academy.certificate.sign_own",
@@ -3560,6 +3588,46 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "telematics.videoView": "safety.video.read",
 
   /* ---- v22.21/v22.22: Training Academy ---- */
+  // 0182 — Safety & Compliance Program Builder
+  "safetyProgram.catalog": "safety_program.read",
+  "safetyProgram.templateDetail": "safety_program.read",
+  "safetyProgram.syncCatalog": "safety_program.manage",
+  "safetyProgram.syncContent": "safety_program.manage",
+  "safetyProgram.obligations": "safety_program.read",
+  "safetyProgram.programGet": "safety_program.read",
+  "safetyProgram.programSet": "safety_program.manage",
+  "safetyProgram.assemble": "safety_program.read",
+  "safetyProgram.policyCreate": "safety_program.write",
+  "safetyProgram.policyList": "safety_program.read",
+  "safetyProgram.policyDetail": "safety_program.read",
+  "safetyProgram.versionDraft": "safety_program.write",
+  "safetyProgram.versionDraftFromTemplate": "safety_program.write",
+  "safetyProgram.versionEdit": "safety_program.write",
+  "safetyProgram.versionApprove": "safety_program.approve",
+  "safetyProgram.versionWithdraw": "safety_program.approve",
+  "safetyProgram.policyRetire": "safety_program.approve",
+  "safetyProgram.myPolicies": "safety_program.read_own",
+  "safetyProgram.acknowledge": "safety_program.acknowledge_own",
+  "safetyProgram.acknowledgementStatus": "safety_program.read",
+  "safetyProgram.overlaySet": "safety_program.write",
+  "safetyProgram.overlayList": "safety_program.read",
+  "safetyProgram.reviewSchedule": "safety_program.write",
+  "safetyProgram.reviewComplete": "safety_program.approve",
+  "safetyProgram.referenceList": "safety_program.read",
+  "safetyProgram.referenceUpsert": "safety_program.manage",
+  "safetyProgram.referenceVerify": "safety_program.verify",
+  "safetyProgram.trainingRequirementList": "safety_program.read",
+  "safetyProgram.trainingRequirementUpsert": "safety_program.manage",
+  "safetyProgram.trainingMatrixCompute": "safety_program.write",
+  "safetyProgram.trainingMatrix": "safety_program.read",
+  "safetyProgram.correctiveActionOpen": "safety_program.write",
+  "safetyProgram.correctiveActionProgress": "safety_program.write",
+  "safetyProgram.correctiveActionVerify": "safety_program.verify",
+  "safetyProgram.correctiveActionList": "safety_program.read",
+  "safetyProgram.corReadiness": "safety_program.read",
+  "safetyProgram.vendorPackageManifest": "safety_program.read",
+  "safetyProgram.events": "safety_program.read",
+
   "academy.catalog": "academy.read_own",
   "academy.myTraining": "academy.read_own",
   "academy.assignmentDetail": "academy.read_own",

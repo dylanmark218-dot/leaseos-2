@@ -539,6 +539,8 @@ describe("payroll and tax authorization boundaries", () => {
       "attest.sign_own", "attest.decline_own",
       // 0206 — your own availability declaration.
       "shifts.availability_own",
+      // 0228 — the policies a person must acknowledge, and their own signature on one.
+      "safety_program.read_own", "safety_program.acknowledge_own",
       // Analytics Checkpoint B — your own numbers; the operator comes from the session.
       "analytics.read_own",
     ]);
