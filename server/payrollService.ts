@@ -706,3 +706,232 @@ export async function shareOwnTaxDocument(args: {
     .where(eq(personalTaxDocuments.id, args.documentId));
   return { ok: true };
 }
+
+/* ------------------------------------------------------------------ */
+/* P0 — statements, legacy rate ownership, trail, approval, collection  */
+/* ------------------------------------------------------------------ */
+
+import { authorizationDecisions, payGroups } from "../drizzle/schema";
+import { sql } from "drizzle-orm";
+import { payRunMayCollect, selectCollectible, type CollectibleEarning } from "./_core/payrollEngine";
+
+/**
+ * The runs that carry a line for THIS profile, in THIS book. A run with no line for the
+ * profile is not the profile's statement, whatever state it is in; a run in another book
+ * never appears, whatever profile it carries.
+ */
+export async function listOwnStatements(args: { profileId: number; financialEntityId: number }) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      payRunRef: payRuns.payRunRef,
+      state: payRuns.state,
+      paidAt: payRuns.paidAt,
+      lineCount: sql<number>`count(${payRunLines.id})`,
+      amountCents: sql<number>`coalesce(sum(${payRunLines.amountCents}), 0)`,
+    })
+    .from(payRuns)
+    .innerJoin(payRunLines, and(eq(payRunLines.payRunId, payRuns.id), eq(payRunLines.employeePayrollProfileId, args.profileId)))
+    .where(and(eq(payRuns.financialEntityId, args.financialEntityId), inArray(payRuns.state, ["paid", "closed", "amended"])))
+    .groupBy(payRuns.id, payRuns.payRunRef, payRuns.state, payRuns.paidAt)
+    .orderBy(desc(payRuns.paidAt))
+    .limit(24);
+  return rows.map(r => ({ ...r, lineCount: Number(r.lineCount), amountCents: Number(r.amountCents) }));
+}
+
+/** The newest version of a legacy rate key, with the columns that say whose it is. */
+export async function loadLatestPayRate(rateKey: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select({ id: payRates.id, version: payRates.version, employeePayrollProfileId: payRates.employeePayrollProfileId, payGroupId: payRates.payGroupId })
+    .from(payRates)
+    .where(eq(payRates.rateKey, rateKey))
+    .orderBy(desc(payRates.version))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * The book a legacy rate belongs to, through its profile or its pay group. A rate attached to
+ * neither has no book and is nobody's to supersede (the F1 rule for no-book rows).
+ */
+export async function payRateOwnerEntityId(rate: { employeePayrollProfileId: number | null; payGroupId: number | null }): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  if (rate.employeePayrollProfileId != null) {
+    const p = (await db.select({ financialEntityId: employeePayrollProfiles.financialEntityId }).from(employeePayrollProfiles).where(eq(employeePayrollProfiles.id, rate.employeePayrollProfileId)).limit(1))[0];
+    return p?.financialEntityId ?? null;
+  }
+  if (rate.payGroupId != null) {
+    const g = (await db.select({ financialEntityId: payGroups.financialEntityId }).from(payGroups).where(eq(payGroups.id, rate.payGroupId)).limit(1))[0];
+    return g?.financialEntityId ?? null;
+  }
+  return null;
+}
+
+export async function loadPayGroup(payGroupId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select().from(payGroups).where(eq(payGroups.id, payGroupId)).limit(1))[0] ?? null;
+}
+
+/**
+ * Who originated a payroll record, read from the authorization trail. The handler writes a
+ * second, subject-bearing `allowed` row beside the gate's own (the assistant-commit precedent),
+ * so the question "who created run X" has an answer without a schema change.
+ */
+export async function findOriginator(args: { subjectType: "payRun" | "payrollEarning"; subjectId: string; procedureName: string }): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select({ actorUserId: authorizationDecisions.actorUserId })
+    .from(authorizationDecisions)
+    .where(and(eq(authorizationDecisions.subjectType, args.subjectType), eq(authorizationDecisions.subjectId, args.subjectId), eq(authorizationDecisions.procedureName, args.procedureName), eq(authorizationDecisions.outcome, "allowed")))
+    .orderBy(authorizationDecisions.id)
+    .limit(1);
+  return rows[0]?.actorUserId ?? null;
+}
+
+type TrailRow = { actorUserId: number; procedureName: string; permission: string; subjectType: "payRun" | "payrollEarning"; subjectId: string; detail: string };
+
+/**
+ * Create a pay run and its originator row in one transaction. A run whose creator could not
+ * be recorded is not created: separation of duties later depends on this row existing.
+ */
+export async function createPayRunWithTrail(args: { run: typeof payRuns.$inferInsert; trail: TrailRow }) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return db.transaction(async tx => {
+    const r = await tx.insert(payRuns).values(args.run);
+    const id = Number(r[0]?.insertId);
+    const t = await tx.insert(authorizationDecisions).values({
+      actorUserId: args.trail.actorUserId, procedureName: args.trail.procedureName, permission: args.trail.permission,
+      rolesHeld: null, outcome: "allowed", subjectType: args.trail.subjectType, subjectId: args.trail.subjectId, detail: args.trail.detail, occurredAt: new Date(),
+    });
+    if (!t[0]?.insertId) throw new Error("Refused: the pay run's originator could not be recorded");
+    return id;
+  });
+}
+
+/** Insert an earning event and its proposer row in one transaction (same reasoning as the run). */
+export async function insertEarningWithTrail(args: { earning: typeof payrollEarningEvents.$inferInsert; trail: TrailRow }) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return db.transaction(async tx => {
+    const r = await tx.insert(payrollEarningEvents).values(args.earning);
+    const id = Number(r[0]?.insertId);
+    const t = await tx.insert(authorizationDecisions).values({
+      actorUserId: args.trail.actorUserId, procedureName: args.trail.procedureName, permission: args.trail.permission,
+      rolesHeld: null, outcome: "allowed", subjectType: args.trail.subjectType, subjectId: args.trail.subjectId, detail: args.trail.detail, occurredAt: new Date(),
+    });
+    if (!t[0]?.insertId) throw new Error("Refused: the earning's proposer could not be recorded");
+    return id;
+  });
+}
+
+export async function loadEarning(earningRef: string) {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select().from(payrollEarningEvents).where(eq(payrollEarningEvents.earningRef, earningRef)).limit(1))[0] ?? null;
+}
+
+/**
+ * Approve one earning: `pending → approved`, guarded by the current status so two approvers
+ * racing produce one approval. A `held` earning is blocked for a stated reason and needs that
+ * reason resolved (a new proposal), not an approval.
+ */
+export async function approveEarning(args: { earningRef: string }): Promise<"approved" | "not_pending"> {
+  const db = await getDb();
+  if (!db) return "not_pending";
+  const r = await db
+    .update(payrollEarningEvents)
+    .set({ status: "approved" })
+    .where(and(eq(payrollEarningEvents.earningRef, args.earningRef), eq(payrollEarningEvents.status, "pending")));
+  return (r[0]?.affectedRows ?? 0) === 1 ? "approved" : "not_pending";
+}
+
+export type CollectionResult = {
+  state: "draft" | "collecting" | "review" | "approved" | "processing" | "paid" | "closed" | "amended";
+  collected: number;
+  skipped: Array<{ id: number; reason: string }>;
+  amountCents: number;
+};
+
+/**
+ * Collect approved earnings into the run's lines. One transaction, the run row locked, so two
+ * collectors cannot both add the same event; an event already carried by ANY run is skipped
+ * (an earning is paid once); amounts are copied from the integer shadows. Idempotent: a second
+ * call collects nothing and reports why.
+ */
+export async function collectApprovedEarnings(args: { payRunRef: string }): Promise<CollectionResult | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    const run = (await tx.select().from(payRuns).where(eq(payRuns.payRunRef, args.payRunRef)).for("update").limit(1))[0];
+    if (!run) return null;
+    if (!payRunMayCollect(run.state)) {
+      throw Object.assign(new Error(`Pay run is ${run.state}; lines may be collected only in draft or collecting`), { code: "PRECONDITION_FAILED" });
+    }
+    if (run.state === "draft") {
+      await tx.update(payRuns).set({ state: "collecting" }).where(eq(payRuns.id, run.id));
+    }
+    const candidates = await tx
+      .select({
+        id: payrollEarningEvents.id,
+        status: payrollEarningEvents.status,
+        calculatedAmountCents: payrollEarningEvents.calculatedAmountCents,
+        rateAppliedMillis: payrollEarningEvents.rateAppliedMillis,
+        quantity: payrollEarningEvents.quantity,
+        earningType: payrollEarningEvents.earningType,
+        employeePayrollProfileId: payrollEarningEvents.employeePayrollProfileId,
+        payPeriodId: payrollEarningEvents.payPeriodId,
+        financialEntityId: employeePayrollProfiles.financialEntityId,
+        existingLineId: payRunLines.id,
+      })
+      .from(payrollEarningEvents)
+      .innerJoin(employeePayrollProfiles, eq(employeePayrollProfiles.id, payrollEarningEvents.employeePayrollProfileId))
+      .leftJoin(payRunLines, eq(payRunLines.payrollEarningEventId, payrollEarningEvents.id))
+      .where(and(eq(payrollEarningEvents.payPeriodId, run.payPeriodId), eq(employeePayrollProfiles.financialEntityId, run.financialEntityId)));
+    const decision = selectCollectible({
+      run: { financialEntityId: run.financialEntityId, payPeriodId: run.payPeriodId },
+      events: candidates.map<CollectibleEarning>(c => ({
+        id: c.id, status: c.status, calculatedAmountCents: c.calculatedAmountCents,
+        financialEntityId: c.financialEntityId, payPeriodId: c.payPeriodId, alreadyCollected: c.existingLineId != null,
+      })),
+    });
+    const byId = new Map(candidates.map(c => [c.id, c]));
+    let amountCents = 0;
+    for (const e of decision.collect) {
+      const c = byId.get(e.id)!;
+      const cents = e.calculatedAmountCents!;
+      amountCents += cents;
+      await tx.insert(payRunLines).values({
+        payRunId: run.id,
+        employeePayrollProfileId: c.employeePayrollProfileId,
+        lineType: "earning",
+        earningType: c.earningType,
+        payrollEarningEventId: c.id,
+        quantity: c.quantity,
+        // Legacy doubles are derived FROM the shadows here, never the other way around.
+        rateApplied: c.rateAppliedMillis != null ? c.rateAppliedMillis / 1000 : null,
+        rateAppliedMillis: c.rateAppliedMillis,
+        amount: cents / 100,
+        amountCents: cents,
+        taxRuleId: null,
+        // An earning line is not a statutory computation; nothing here is UNKNOWN about it.
+        ruleStatus: "not_applicable",
+      });
+    }
+    return { state: run.state === "draft" ? "collecting" : run.state, collected: decision.collect.length, skipped: decision.skipped, amountCents };
+  });
+}
+
+/** Lines already on a run, for the caller to see what collection produced. */
+export async function listPayRunLines(payRunId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(payRunLines).where(eq(payRunLines.payRunId, payRunId)).limit(2000);
+}
+

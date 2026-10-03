@@ -102,11 +102,11 @@ describe("census", () => {
           const from = n.moduleSpecifier.text;
           const names = n.importClause?.namedBindings && ts.isNamedImports(n.importClause.namedBindings)
             ? n.importClause.namedBindings.elements.map(e => (e.propertyName ?? e.name).text) : [];
-          // SPINE item 2 (owner's ruling, main): `_core/openShifts.ts` is the one open-shift rule, and it
-          // reads the LICENCE's expiry through the canonical `readExpiry`. That is the one carve-out, and
-          // only that name: no qualification is judged there — its standings come from the adapter.
-          const licenceExpiry = f === "_core/openShifts.ts" && from === "./documentValidity" && names.length > 0 && names.every(x => x === "readExpiry");
-          if (!licenceExpiry) expect(ENGINES, `${f} imports the validity engine ${from}`).not.toContain(from);
+          // No exception. The open-shift rule once judged the legacy licence date here with `readExpiry`
+          // (#117 allowed it); that date is an unverified claim, so the licence now arrives as a standing
+          // from `licenceReads` over the canonical `driverLicenceVerdict`, and nothing in open work
+          // imports a validity engine — for a qualification or a licence.
+          expect(ENGINES, `${f} imports the validity engine ${from}`).not.toContain(from);
           if (from.endsWith("drizzle/schema")) {
             for (const t of STORES) expect(names, `${f} reads ${t} directly`).not.toContain(t);
           }
