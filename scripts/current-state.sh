@@ -102,7 +102,11 @@ rules (unverified) · geospatial source registry (10 verified licences, 25
 blocked) · AI Secretary typed commits, OCR forms, fingerprinting · secure
 field runtime protocol (server half) · fuel ledger, bulk fuel, card
 statements, anomalies · roadside, purchasing, AP · compliance registry,
-requirement engine, packs, calibration · insurance and risk · universal
+requirement engine, packs, calibration · safety & compliance program builder
+(module and pack library, controlled policies with chained versions, stepwise
+acknowledgements, client overlays, reviews, training requirements and matrix
+snapshots, corrective actions, COR readiness, vendor package manifest; 0228) ·
+insurance and risk · universal
 surfaces (exceptions, inbox, my day, search, timeline) · dispatch gate with
 enforcement setting · IFTA · GST/HST · period close · bank reconciliation ·
 accounts receivable, credits, collections, write-offs · customer identity ·
