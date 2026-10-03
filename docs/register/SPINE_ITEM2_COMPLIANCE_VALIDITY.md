@@ -158,3 +158,10 @@ centre's per-type cases).
   metadata is a later hardening checkpoint.
 - `compliancePassport.test.ts` › "through the registry" passes on a fresh database and fails on a
   second run against the same one; it is not re-run safe. The gate always uses a fresh database.
+
+## 2026-10-01 — the driver licence
+
+Two more readers of "is this licence in force?" were found after #52: open-shift eligibility and
+shift readiness each judged the legacy `operators.licenseExpiresAt` themselves. Both now read
+`driverLicenceVerdict` through `server/licenceReads.ts`; the dispatch composer's legacy-date rule
+moved into that verdict unchanged. Record: `SPINE_ITEM2_DUPLICATIONS.md` §3, "Follow-up".
