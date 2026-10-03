@@ -88,17 +88,21 @@ export const SEALED_TYPE_READ_CATEGORY = {
   incident: "evidence.read_safety_summary",
   near_miss: "evidence.read_safety_summary",
   bill_receipt: "evidence.read_commercial",
-  // Sign & Attest (SA1). Deliberately NO category — owner-only through
-  // evidence.read_own — until Sign & Attest decides who browses them. A stroke
-  // document is handwriting the SA1 design keeps from becoming biometric
-  // material; a rendered mark is a reusable image of someone's signature; a
-  // signed artifact can be a field ticket or an HR consent, which its type
-  // cannot tell apart; a receipt is audit material. SA1 reads them through its
-  // own procedures, so nobody loses access by this.
+  // Sign & Attest (SA1). Signing material is never ordinary job paperwork.
+  //   signature_strokes: no category, and never browsable at all (see
+  //     FILE_MANAGER_EXCLUDED_TYPES) — handwriting the SA1 design keeps from
+  //     becoming biometric material, reachable only through Sign & Attest.
+  //   signature_render: legal — a reusable image of someone's signature; its
+  //     signer still reaches it through evidence.read_own.
+  //   signed_artifact: no category BY TYPE. A signed document takes the category
+  //     of the document it signs, resolved from Sign & Attest's own linkage
+  //     (signingClassification); unresolved, it is owner-only.
+  //   attest_receipt: legal — audit material, which does not become visible
+  //     because the document it proves is.
   signature_strokes: null,
-  signature_render: null,
+  signature_render: "evidence.read_legal",
   signed_artifact: null,
-  attest_receipt: null,
+  attest_receipt: "evidence.read_legal",
 } as const satisfies Record<EvidenceRecordType, ReadCategory | null>;
 
 /**
@@ -201,19 +205,90 @@ export type FileVisibility =
  * request. Ownership facts come from the database: the operator relationship
  * the seal covers, or the capturing user.
  */
+/** Types the File Manager never shows, to anyone — owner included. Reached only through their own workflow. */
+export const FILE_MANAGER_EXCLUDED_TYPES: readonly EvidenceRecordType[] = ["signature_strokes"];
+
+/**
+ * What Sign & Attest's own tables say a record is — read server-side from
+ * attestMarks and attestArtifacts, never from the record's type column or
+ * the request. It wins over `recordType`: a stroke document sealed before
+ * capture kinds were normalized is stored as `other`, and it is still strokes.
+ */
+export type SigningRole = "strokes" | "rendered_mark" | "signed_document" | "receipt";
+export type SigningLink = {
+  role: SigningRole;
+  /** For a signed document: the category of the document it signs, or null when that cannot be resolved. */
+  inheritedCategory: ReadCategory | null;
+};
+
+/** The record type each signing role is, for classification. */
+const SIGNING_ROLE_TYPE: Readonly<Record<SigningRole, EvidenceRecordType>> = {
+  strokes: "signature_strokes",
+  rendered_mark: "signature_render",
+  signed_document: "signed_artifact",
+  receipt: "attest_receipt",
+};
+
+/**
+ * The category a signed document inherits from what was signed. Signing never
+ * widens a document's audience: the signed copy is read by exactly whoever
+ * reads the original.
+ *   evidence_record      → that record's own category (null if it is itself signing material)
+ *   field_ticket_revision → a field ticket's category
+ *   commercial_document   → commercial
+ * Any other subject is unresolved: null, owner-only.
+ */
+export function signedSubjectCategory(subject: { subjectType: string; subjectRecordType: string | null; subjectIsSigningMaterial: boolean }): ReadCategory | null {
+  switch (subject.subjectType) {
+    case "evidence_record":
+      if (subject.subjectIsSigningMaterial || subject.subjectRecordType == null) return null;
+      if (FILE_MANAGER_EXCLUDED_TYPES.includes(subject.subjectRecordType as EvidenceRecordType)) return null;
+      return readCategoryFor(subject.subjectRecordType);
+    case "field_ticket_revision":
+      return readCategoryFor("field_ticket");
+    case "commercial_document":
+      return "evidence.read_commercial";
+    default:
+      return null;
+  }
+}
+
+export type RecordClassification =
+  | { excluded: true }
+  | { excluded: false; category: ReadCategory | null; effectiveType: string };
+
+/** One answer to "what is this record, for reading": the signing linkage first, then the type column. */
+export function classifyRecord(args: { recordType: string; signing?: SigningLink | null }): RecordClassification {
+  const effectiveType = args.signing ? SIGNING_ROLE_TYPE[args.signing.role] : args.recordType;
+  if (FILE_MANAGER_EXCLUDED_TYPES.includes(effectiveType as EvidenceRecordType)) return { excluded: true };
+  const category = args.signing?.role === "signed_document" ? args.signing.inheritedCategory : readCategoryFor(effectiveType);
+  return { excluded: false, category, effectiveType };
+}
+
+/**
+ * Whether the caller may see this record in the file manager.
+ *
+ * `held` is the set of permissions `authorize()` already allowed for the
+ * caller — computed by the router from the caller's grants, never from the
+ * request. Ownership facts come from the database: the operator relationship
+ * the seal covers, or the capturing user. `signing` comes from Sign & Attest's
+ * own tables, loaded by the service.
+ */
 export function fileVisibility(args: {
   held: ReadonlySet<Permission>;
   recordType: string;
   isOwner: boolean;
+  signing?: SigningLink | null;
 }): FileVisibility {
-  const category = readCategoryFor(args.recordType);
-  if (category && args.held.has(category)) return { visible: true, basis: "category", category };
-  if (args.isOwner && args.held.has("evidence.read_own")) return { visible: true, basis: "own", category };
+  const c = classifyRecord(args);
+  if (c.excluded) return { visible: false, reason: "Signature stroke data is reached only through Sign & Attest" };
+  if (c.category && args.held.has(c.category)) return { visible: true, basis: "category", category: c.category };
+  if (args.isOwner && args.held.has("evidence.read_own")) return { visible: true, basis: "own", category: c.category };
   return {
     visible: false,
-    reason: category
-      ? `Requires ${category}${args.isOwner ? " or evidence.read_own" : ""}`
-      : `Record type "${args.recordType}" belongs to no read category — only its owner reaches it`,
+    reason: c.category
+      ? `Requires ${c.category}${args.isOwner ? " or evidence.read_own" : ""}`
+      : `Record type "${c.effectiveType}" belongs to no read category — only its owner reaches it`,
   };
 }
 

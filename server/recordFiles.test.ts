@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  signedSubjectCategory,
   CAPTURE_KIND_RECORD_TYPE,
   FORWARD_TYPE_READ_CATEGORY,
   normalizeSealRecordType,
@@ -74,11 +75,12 @@ const POLICY: Record<string, string | null> = {
   employment_record: "evidence.read_personnel",
   // legal
   legal_correspondence: "evidence.read_legal",
-  // Sign & Attest — classified, deliberately in no category: owner-only until SA decides
+  // Sign & Attest. Strokes: no category, and excluded from browsing entirely. A rendered mark and an audit
+  // receipt: legal. A signed artifact: no category by type — it inherits the signed document's, via linkage.
   signature_strokes: null,
-  signature_render: null,
+  signature_render: "evidence.read_legal",
   signed_artifact: null,
-  attest_receipt: null,
+  attest_receipt: "evidence.read_legal",
 };
 
 /** The seal's own vocabulary, as `EvidenceRecordType` declares it. */
@@ -146,6 +148,7 @@ describe("who each policy group reaches", () => {
 
   it("reaches exactly the holders of the mapped category — the file manager widens no grant", () => {
     for (const [type, category] of Object.entries(POLICY)) {
+      if (type === "signature_strokes") continue;   // excluded from browsing outright; pinned separately
       expect(reaches(type), type).toEqual(category === null ? [] : holders(category as Permission));
     }
   });
@@ -160,13 +163,21 @@ describe("who each policy group reaches", () => {
     }
   });
 
-  it("keeps signatures and signed artifacts out of every category", () => {
-    for (const t of ["signature_strokes", "signature_render", "signed_artifact", "attest_receipt"]) {
-      expect(readCategoryFor(t), t).toBeNull();
-      expect(reaches(t), t).toEqual([]);
-      // ...and the signer keeps their own, as listForOperator already gives them.
+  it("never shows stroke data to anyone — the signer and legal included", () => {
+    for (const role of ROLES) {
+      expect(fileVisibility({ held: heldBy(role), recordType: "signature_strokes", isOwner: true }).visible, role).toBe(false);
+    }
+  });
+
+  it("keeps a rendered mark and an audit receipt with legal and the signer", () => {
+    for (const t of ["signature_render", "attest_receipt"]) {
+      expect(reaches(t), t).toEqual(["legal"]);
       expect(fileVisibility({ held: heldBy("driver"), recordType: t, isOwner: true }).visible, t).toBe(true);
     }
+  });
+
+  it("gives a signed artifact no category by its type alone", () => {
+    expect(reaches("signed_artifact")).toEqual([]);
   });
 
   it("keeps legal correspondence with legal", () => {
@@ -377,5 +388,49 @@ describe("sealing normalizes the device's capture kind", () => {
     const other = readCategoryFor(normalizeSealRecordType("brand_new_kind").recordType);
     expect(other).toBe("evidence.read_job_operational");
     for (const raw of hostile) expect(readCategoryFor(normalizeSealRecordType(raw).recordType), raw).toBe(other);
+  });
+});
+
+describe("signing: what Sign & Attest's tables say a record is", () => {
+  const sees = (role: DomainRole, signing: Parameters<typeof fileVisibility>[0]["signing"], recordType = "other", isOwner = false) =>
+    fileVisibility({ held: heldBy(role), recordType, isOwner, signing }).visible;
+
+  it("a signed document is read by exactly whoever reads what was signed", () => {
+    for (const subject of ["load_ticket", "work_order", "bill_receipt", "credential", "incident"]) {
+      const inherited = signedSubjectCategory({ subjectType: "evidence_record", subjectRecordType: subject, subjectIsSigningMaterial: false });
+      expect(inherited, subject).toBe(readCategoryFor(subject));
+      for (const role of ROLES) {
+        expect(sees(role, { role: "signed_document", inheritedCategory: inherited }), `${role} on signed ${subject}`)
+          .toBe(fileVisibility({ held: heldBy(role), recordType: subject, isOwner: false }).visible);
+      }
+    }
+  });
+
+  it("signing a personnel document does not show it to the office", () => {
+    const personnel = signedSubjectCategory({ subjectType: "evidence_record", subjectRecordType: "credential", subjectIsSigningMaterial: false });
+    expect(sees("office", { role: "signed_document", inheritedCategory: personnel })).toBe(false);
+    expect(sees("hr", { role: "signed_document", inheritedCategory: personnel })).toBe(true);
+  });
+
+  it("resolves field tickets and commercial documents, and nothing it does not know", () => {
+    expect(signedSubjectCategory({ subjectType: "field_ticket_revision", subjectRecordType: null, subjectIsSigningMaterial: false })).toBe("evidence.read_job_operational");
+    expect(signedSubjectCategory({ subjectType: "commercial_document", subjectRecordType: null, subjectIsSigningMaterial: false })).toBe("evidence.read_commercial");
+    expect(signedSubjectCategory({ subjectType: "something_new", subjectRecordType: null, subjectIsSigningMaterial: false })).toBeNull();
+    // A signed copy of signing material, or of an unknown record, is owner-only — never wider.
+    expect(signedSubjectCategory({ subjectType: "evidence_record", subjectRecordType: "photo", subjectIsSigningMaterial: true })).toBeNull();
+    expect(signedSubjectCategory({ subjectType: "evidence_record", subjectRecordType: null, subjectIsSigningMaterial: false })).toBeNull();
+    expect(signedSubjectCategory({ subjectType: "evidence_record", subjectRecordType: "signature_strokes", subjectIsSigningMaterial: false })).toBeNull();
+  });
+
+  it("an unresolved signed document reaches only its owner", () => {
+    for (const role of ROLES) expect(sees(role, { role: "signed_document", inheritedCategory: null }), role).toBe(false);
+    expect(sees("driver", { role: "signed_document", inheritedCategory: null }, "other", true)).toBe(true);
+  });
+
+  it("the linkage wins over the type column — legacy stroke data stored as `other` is still strokes", () => {
+    for (const role of ROLES) expect(sees(role, { role: "strokes", inheritedCategory: null }, "other", true), role).toBe(false);
+    expect(sees("dispatcher", { role: "rendered_mark", inheritedCategory: null }, "photo")).toBe(false);
+    expect(sees("dispatcher", { role: "receipt", inheritedCategory: null }, "load_ticket")).toBe(false);
+    expect(sees("legal", { role: "receipt", inheritedCategory: null }, "load_ticket")).toBe(true);
   });
 });

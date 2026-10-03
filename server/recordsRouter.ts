@@ -34,13 +34,13 @@ import {
   type RoleGrant,
 } from "./_core/recordsAuthorization";
 import {
+  classifyRecord,
   fileVisibility,
   normalizeSealRecordType,
   folderCounts,
   inFolder,
   lifecycleStage,
   matchRecord,
-  readCategoryFor,
   typeFolderFor,
   type FolderKey,
 } from "./recordFiles";
@@ -568,16 +568,23 @@ export const recordsRouter = router({
         const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id), ctx.organization);
         // Read one past the window so "there is more" is a fact, not a guess.
         const candidates = await svc.listFileCandidates(scope, 501);
+        // Sign & Attest's own linkage, not the type column, says what signing material is.
+        const signing = await svc.signingLinksFor(candidates.map(c => c.id));
         const truncated = candidates.length > 500;
 
         const visible = candidates.slice(0, 500).flatMap(c => {
           const ownerOperatorId = ownerOperatorOf(c.relationships);
           const isOwner =
             (ownerOperatorId != null && ownerOperatorId === me.operatorId) || c.capturedBy === ctx.user.id;
-          const v = fileVisibility({ held, recordType: c.recordType, isOwner });
+          const link = signing.get(c.id) ?? null;
+          const v = fileVisibility({ held, recordType: c.recordType, isOwner, signing: link });
           if (!v.visible) return [];
           const entityRelationshipCount = c.relationships.filter(r => r.entityType !== "operator").length;
-          return [{ c, basis: v.basis, isOwner, entityRelationshipCount }];
+          // From here on the record is what its linkage says it is: a rendered mark stored as `other`
+          // is filed, searched and labelled as a rendered mark.
+          const effective = classifyRecord({ recordType: c.recordType, signing: link });
+          const recordType = effective.excluded ? c.recordType : effective.effectiveType;
+          return [{ c: { ...c, recordType }, basis: v.basis, isOwner, entityRelationshipCount }];
         });
 
         const facts = visible.map(({ c, entityRelationshipCount }) => ({ ...c, entityRelationshipCount }));
@@ -635,8 +642,11 @@ export const recordsRouter = router({
         const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id), ctx.organization);
         const ownerOperatorId = ownerOperatorOf(d.relationships);
         const isOwner = (ownerOperatorId != null && ownerOperatorId === me.operatorId) || d.rec.capturedBy === ctx.user.id;
-        const v = fileVisibility({ held, recordType: d.rec.recordType, isOwner });
+        const link = (await svc.signingLinksFor([d.rec.id])).get(d.rec.id) ?? null;
+        const v = fileVisibility({ held, recordType: d.rec.recordType, isOwner, signing: link });
         if (!v.visible) throw notFound();
+        const classified = classifyRecord({ recordType: d.rec.recordType, signing: link });
+        const effectiveType = classified.excluded ? d.rec.recordType : classified.effectiveType;
 
         await svc.recordEvidenceAccess({
           evidenceRecordId: d.rec.id,
@@ -656,10 +666,10 @@ export const recordsRouter = router({
           id: d.rec.id,
           trackingNumber: d.rec.trackingNumber ?? null,
           title: d.rec.title,
-          recordType: d.rec.recordType,
+          recordType: effectiveType,
           category: d.rec.category,
-          readCategory: readCategoryFor(d.rec.recordType),
-          folder: typeFolderFor(d.rec.recordType),
+          readCategory: v.visible ? v.category : null,
+          folder: typeFolderFor(effectiveType),
           mimeType: d.rec.mimeType ?? null,
           hasContent: Boolean(d.rec.storageKey),
           capturedAt: d.rec.capturedAt,
@@ -753,7 +763,8 @@ export const recordsRouter = router({
         const held = heldFilePermissions(ctx.user.id, await listActiveUserRoles(ctx.user.id), ctx.organization);
         const isOwner =
           (subject.ownerOperatorId != null && subject.ownerOperatorId === me.operatorId) || subject.capturedBy === ctx.user.id;
-        if (!fileVisibility({ held, recordType: subject.recordType, isOwner }).visible) throw notFound();
+        const link = (await svc.signingLinksFor([subject.id])).get(subject.id) ?? null;
+        if (!fileVisibility({ held, recordType: subject.recordType, isOwner, signing: link }).visible) throw notFound();
 
         const stored = await svc.storageKeyForVersion(subject.id, input.version ?? null);
         if (!stored?.storageKey) {

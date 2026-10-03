@@ -32,7 +32,11 @@ import {
   unitHolds,
   workOrderReleases,
   workOrders,
+  attestArtifacts,
+  attestDocumentRevisions,
+  attestMarks,
 } from "../drizzle/schema";
+import { signedSubjectCategory, type SigningLink } from "./recordFiles";
 
 export type OperatorIdentity = {
   operatorId: number | null;
@@ -1024,4 +1028,73 @@ export async function storageKeyForVersion(evidenceId: number, version: number |
   // key belongs to the current version, and serving it as an older one would be a lie.
   if (version != null && version !== rec.currentVersion) return { storageKey: null, mimeType: null, version: wanted };
   return { storageKey: rec.storageKey ?? null, mimeType: rec.mimeType ?? null, version: wanted };
+}
+
+/**
+ * What Sign & Attest's own tables say each of these records is. Read from
+ * attestMarks (stroke and rendered-mark records) and attestArtifacts (finalized
+ * documents, page renders, audit receipts), never from the type column or the
+ * request — so a stroke document sealed as `other` is still found to be strokes.
+ *
+ * A signed document carries the category of what was signed (its revision's
+ * subject), resolved here so the projection can inherit it; a subject this
+ * cannot resolve leaves the signed document owner-only.
+ *
+ * When one record is linked more than one way, the most restrictive role wins.
+ */
+export async function signingLinksFor(evidenceIds: readonly number[]): Promise<Map<number, SigningLink>> {
+  const out = new Map<number, SigningLink>();
+  const ids = Array.from(new Set(evidenceIds));
+  const db = await getDb();
+  if (!db || ids.length === 0) return out;
+
+  const RANK: Record<SigningLink["role"], number> = { strokes: 4, rendered_mark: 3, receipt: 2, signed_document: 1 };
+  const put = (id: number, link: SigningLink) => {
+    const prev = out.get(id);
+    if (!prev || RANK[link.role] > RANK[prev.role]) out.set(id, link);
+  };
+
+  const [strokes, renders, artifacts] = await Promise.all([
+    db.select({ id: attestMarks.strokeEvidenceRecordId }).from(attestMarks).where(inArray(attestMarks.strokeEvidenceRecordId, ids)),
+    db.select({ id: attestMarks.renderedEvidenceRecordId }).from(attestMarks).where(inArray(attestMarks.renderedEvidenceRecordId, ids)),
+    db.select({
+      id: attestArtifacts.evidenceRecordId, kind: attestArtifacts.kind,
+      subjectType: attestDocumentRevisions.subjectType, subjectId: attestDocumentRevisions.subjectId,
+    }).from(attestArtifacts)
+      .innerJoin(attestDocumentRevisions, eq(attestDocumentRevisions.id, attestArtifacts.revisionId))
+      .where(inArray(attestArtifacts.evidenceRecordId, ids)),
+  ]);
+  for (const r of strokes) if (r.id != null) put(r.id, { role: "strokes", inheritedCategory: null });
+  for (const r of renders) if (r.id != null) put(r.id, { role: "rendered_mark", inheritedCategory: null });
+
+  // The subjects of signed documents that are themselves evidence records: their type, and whether they are signing material.
+  const subjectIds = Array.from(new Set(artifacts.filter(a => a.subjectType === "evidence_record" && a.subjectId != null).map(a => a.subjectId!)));
+  const subjectTypes = new Map<number, string>();
+  const subjectSigning = new Set<number>();
+  if (subjectIds.length) {
+    const [rows, markedStrokes, markedRenders, artifacted] = await Promise.all([
+      db.select({ id: evidenceRecords.id, recordType: evidenceRecords.recordType }).from(evidenceRecords).where(inArray(evidenceRecords.id, subjectIds)),
+      db.select({ id: attestMarks.strokeEvidenceRecordId }).from(attestMarks).where(inArray(attestMarks.strokeEvidenceRecordId, subjectIds)),
+      db.select({ id: attestMarks.renderedEvidenceRecordId }).from(attestMarks).where(inArray(attestMarks.renderedEvidenceRecordId, subjectIds)),
+      db.select({ id: attestArtifacts.evidenceRecordId }).from(attestArtifacts).where(inArray(attestArtifacts.evidenceRecordId, subjectIds)),
+    ]);
+    for (const r of rows) subjectTypes.set(r.id, r.recordType);
+    for (const r of [...markedStrokes, ...markedRenders, ...artifacted]) if (r.id != null) subjectSigning.add(r.id);
+  }
+
+  for (const a of artifacts) {
+    if (a.id == null) continue;
+    if (a.kind === "audit_receipt") { put(a.id, { role: "receipt", inheritedCategory: null }); continue; }
+    // finalized_pdf and page_render are both the signed document, in whole or by page.
+    const subjectRecordType = a.subjectType === "evidence_record" && a.subjectId != null ? subjectTypes.get(a.subjectId) ?? null : null;
+    put(a.id, {
+      role: "signed_document",
+      inheritedCategory: signedSubjectCategory({
+        subjectType: a.subjectType,
+        subjectRecordType,
+        subjectIsSigningMaterial: a.subjectId != null && subjectSigning.has(a.subjectId),
+      }),
+    });
+  }
+  return out;
 }

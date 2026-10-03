@@ -295,3 +295,70 @@ d("records.evidence.seal — the device's kind is normalized before it is writte
     await expect(callerFor(office).records.files.get({ evidenceId: legacy })).resolves.toMatchObject({ recordType: "other", folder: "other" });
   }, 120_000);
 });
+
+d("records.files — signing material is read by the rules of what it is", () => {
+  it("inherits a signed document's audience, keeps marks and receipts with legal, and never shows strokes", async () => {
+    const A = await org(), B = await org();
+    const jobA = await job(A);
+    const tag = rnd();
+    const signer = await member(A, ["driver"]);
+    const dispatcher = await member(A, ["dispatcher"]), office = await member(A, ["office"]);
+    const hr = await member(A, ["hr"]), legal = await member(A, ["legal"]);
+    const outsiderLegal = await member(B, ["legal", "office"]);
+
+    const ev = (title: string, recordType = "other", capturedBy: number | null = null) =>
+      evidence({ jobId: jobA, title: `${title} ${tag}`, recordType, capturedBy, storageKey: `org/${A}/attest/${rnd()}` });
+    const ticket = await ev("ticket", "load_ticket");
+    const credential = await ev("credential", "credential");
+    // Signing material sealed before capture kinds were normalized: stored as `other`.
+    const strokes = await ev("strokes", "other", signer);
+    const render = await ev("render", "other", signer);
+    const signedTicket = await ev("signed-ticket");
+    const signedCredential = await ev("signed-credential");
+    const signedCommercial = await ev("signed-commercial");
+    const receipt = await ev("receipt");
+
+    const revision = async (subjectType: string, subjectId: number | null) => {
+      const [r] = await pool.execute<mysql.ResultSetHeader>(
+        "INSERT INTO attestDocumentRevisions (revisionRef, orgRef, instanceRef, revision, subjectType, subjectRef, subjectId, revisionHash, state, openedAt) VALUES (?,?,?,1,?,?,?,?, 'finalized', NOW())",
+        [`REV-${rnd()}`, A, `INST-${rnd()}`, subjectType, String(subjectId ?? "DOC-1"), subjectId, "c".repeat(64)]);
+      return r.insertId;
+    };
+    const artifact = (revisionId: number, kind: string, evidenceRecordId: number) => pool.execute(
+      "INSERT INTO attestArtifacts (artifactRef, revisionId, orgRef, kind, mimeType, byteLength, contentHash, sourceRevisionHash, eventChainHead, rendererKey, rendererVersion, evidenceRecordId, generatedByUserId, generatedAt) VALUES (?,?,?,?, 'application/pdf', 10, ?, ?, ?, 'pdf', '1', ?, 1, NOW())",
+      [`ART-${rnd()}`, revisionId, A, kind, "d".repeat(64), "c".repeat(64), "e".repeat(64), evidenceRecordId]);
+    const rTicket = await revision("evidence_record", ticket);
+    await artifact(rTicket, "finalized_pdf", signedTicket);
+    await artifact(rTicket, "audit_receipt", receipt);
+    await artifact(await revision("evidence_record", credential), "finalized_pdf", signedCredential);
+    await artifact(await revision("commercial_document", null), "finalized_pdf", signedCommercial);
+    await pool.execute(
+      "INSERT INTO attestMarks (markRef, sessionId, fieldId, markKind, inputKind, strokeEvidenceRecordId, renderedEvidenceRecordId, payloadHash, completedAt) VALUES (?, 1, 1, 'signature', 'drawn', ?, ?, ?, NOW())",
+      [`MARK-${rnd()}`, strokes, render, "f".repeat(64)]);
+
+    const sees = async (user: number) => (await listTitles(user, { query: tag })).map(t => t.replace(` ${tag}`, "")).sort();
+    // A signed document is read by whoever reads what was signed — no wider.
+    expect(await sees(dispatcher)).toEqual(["signed-ticket", "ticket"]);
+    expect(await sees(office)).toEqual(["signed-commercial", "signed-ticket", "ticket"]);
+    expect(await sees(hr)).toEqual(["credential", "signed-credential"]);
+    // A rendered mark and an audit receipt are legal's; stroke data is nobody's here.
+    expect(await sees(legal)).toEqual(["receipt", "render", "signed-ticket", "ticket"]);
+    // The signer reaches their own rendered mark, never the stroke data.
+    expect(await sees(signer)).toEqual(["render"]);
+    // Another company sees none of it.
+    expect(await sees(outsiderLegal)).toEqual([]);
+
+    // Stroke data by id: not found for everyone, and no download is ever signed.
+    for (const user of [signer, legal, office, hr, dispatcher]) {
+      await expect(callerFor(user).records.files.get({ evidenceId: strokes })).rejects.toMatchObject({ code: "NOT_FOUND" });
+      await expect(callerFor(user).records.files.download({ evidenceId: strokes })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    }
+    await expect(callerFor(office).records.files.get({ evidenceId: signedCredential })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(callerFor(dispatcher).records.files.download({ evidenceId: render })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(signed.keys).toEqual([]);
+
+    // What it is, said in the record's own terms — the linkage, not the `other` it was stored as.
+    await expect(callerFor(legal).records.files.get({ evidenceId: render })).resolves.toMatchObject({ recordType: "signature_render", readCategory: "evidence.read_legal" });
+    await expect(callerFor(hr).records.files.get({ evidenceId: signedCredential })).resolves.toMatchObject({ recordType: "signed_artifact", readCategory: "evidence.read_personnel" });
+  }, 120_000);
+});
