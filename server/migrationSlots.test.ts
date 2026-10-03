@@ -54,12 +54,23 @@ describe("the real tree", () => {
     expect(files).toContain("0208_organization_invitations.sql");   // renumbered from 0175 on merging main, which took 0175
     // Main has since taken 0209 (0209_operating_zone_scope, P0-A2.1), above this checkpoint's two; the
     // ledger applies by name, so 0207/0208 still run on a database that already has 0209.
+    // The driver portfolio (#16) then took 0210–0212, yielding 0202–0204 to Live Assist, which merged first.
+    // SA1 (Sign & Attest) holds 0214–0216 on this branch, below v23.31's 0217–0219, which were renumbered
+    // around them; both lineages apply by name.
     // v23.31 took 0217–0219 (Customer, Contract and Rate Management): 0210–0216 are claimed by open
     // branches, so head+1 would have collided; the register records the scan.
     expect(files).toContain("0219_job_commercial_context.sql");
-    // The Integration Hub took 0220–0223, renumbered 2026-10-03 to 0229–0232 (main took 0221/0222 and
-    // 0226/0227; 0220 and 0228 are held by other branches) (connectors/contracts, sync, dead letters, conflicts +
-    // the nullable connector links), confirmed free across main and every open branch at the time.
+    // Mechanic Portal CP2 took 0221–0222 (defect lifecycle and its guards): 0220 is claimed by
+    // `claude/eld-compliance-intelligence-ramlrd`, so head+1 would have collided; the register records the scan.
+    expect(files).toContain("0222_defect_lifecycle_guards.sql");
+    // Payroll P1 took 0226 (compensation agreements): 0220–0225 are claimed by open branches (ELD, integration
+    // hub, CI stabilization), so head+1 would have collided twice; drafted as 0224 and moved before it was applied.
+    expect(files).toContain("0226_payroll_compensation_agreements.sql");
+    // Payroll P2 took 0227 (pay schedules): 0223–0225 are still claimed by open branches, below main's 0226.
+    expect(files).toContain("0227_payroll_pay_schedules.sql");
+    // The Integration Hub took 0220–0223 (connectors/contracts, sync, dead letters, conflicts + the nullable
+    // connector links); renumbered 2026-10-03 to 0229–0232 when main took 0221/0222 and 0226/0227 and other
+    // branches held 0220 and 0228.
     expect(files).toContain("0232_integration_hub_conflicts_and_links.sql");
     expect(headSlot(files)).toBe("0232");
   });

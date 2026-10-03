@@ -6,7 +6,7 @@
  *
  * The checks:
  *
- *   LICENCE          from `operators`, the one credential stored inline
+ *   LICENCE          the canonical licence verdict, through `licenceReads`
  *   QUALIFICATIONS   from the qualification read adapter (C1b-3), verified and unexpired only
  *   LEAVE            from `leaveRequests`, approved or recorded
  *   CREW             from `crewMembers`, whether they are on a crew at all
@@ -20,13 +20,13 @@
  * **An empty checklist is not ready.** If nothing was evaluated, the honest
  * answer is that nothing was evaluated.
  */
-import { readExpiry } from "./_core/documentValidity";
 import { effectiveQualifications } from "./qualificationReads";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, eq, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { getDb, operatorForUserInScope } from "./db";
+import { driverLicenceStanding } from "./licenceReads";
 import { crewMembers, crews, leaveRequests, operators, shiftPosts } from "../drizzle/schema";
 import { resolveActingScope } from "./_core/actingScope";
 import type { DbOrTx } from "./_core/dbTypes";
@@ -45,16 +45,32 @@ const ownerOf = (check: ReadinessCheck): Owner =>
 async function checksFor(d: DbOrTx, args: { tenantId: string; userId: number; startsAt: Date; requiredQualifications: readonly string[] }): Promise<ReadinessCheck[]> {
   const checks: ReadinessCheck[] = [];
 
-  /* Licence — the one credential operators store inline. */
-  const person = (await d.select().from(operators).where(eq(operators.id, args.userId)).limit(1))[0];
-  if (!person) {
-    checks.push({ key: "licence", label: "Driver record", state: "unknown", blocksShift: true, reason: "No operator record for this person — nothing about them can be established" });
-  } else if (!person.licenseExpiresAt) {
-    checks.push({ key: "licence", label: "Licence", state: "unknown", blocksShift: true, reason: "No licence expiry on record" });
-  } else if (readExpiry(person.licenseExpiresAt, args.startsAt, 0).expiry === "expired") {
-    checks.push({ key: "licence", label: "Licence", state: "failed", blocksShift: true, reason: `Expires ${person.licenseExpiresAt.toISOString().slice(0, 10)}, before this shift` });
-  } else {
-    checks.push({ key: "licence", label: "Licence", state: "satisfied", blocksShift: true, reason: null });
+  /*
+   * Licence — the canonical verdict at the shift (licenceReads → driverLicenceVerdict): documents
+   * first, the legacy date only as an unverified claim. The person's own operator record is found
+   * through operators.userId in the caller's organization; this used to read the operator whose id
+   * equalled the user id, which is a different person.
+   */
+  const operator = await operatorForUserInScope(args.userId, { tenantId: args.tenantId });
+  const standing = await driverLicenceStanding(d, operator, args.startsAt);
+  switch (standing.kind) {
+    case "none":
+      checks.push(operator.kind === "none"
+        ? { key: "licence", label: "Driver record", state: "unknown", blocksShift: true, reason: "No operator record for this person — nothing about them can be established" }
+        : { key: "licence", label: "Licence", state: "unknown", blocksShift: true, reason: "No licence on record — this cannot be established as current" });
+      break;
+    case "ambiguous":
+      checks.push({ key: "licence", label: "Licence", state: "unknown", blocksShift: true, reason: "More than one operator record for this person — no licence is chosen between them" });
+      break;
+    case "lapsed":
+      checks.push({ key: "licence", label: "Licence", state: "failed", blocksShift: true, reason: standing.expiresAt ? `Expires ${standing.expiresAt.toISOString().slice(0, 10)}, before this shift` : "Expired before this shift" });
+      break;
+    case "not_established":
+      checks.push({ key: "licence", label: "Licence", state: "unknown", blocksShift: true, reason: `Not established — ${standing.reason}` });
+      break;
+    case "in_force":
+      checks.push({ key: "licence", label: "Licence", state: "satisfied", blocksShift: true, reason: null });
+      break;
   }
 
   /* Qualifications the shift asks for. */

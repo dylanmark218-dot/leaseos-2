@@ -9,6 +9,16 @@ function canonical(value: unknown): string {
   return `{${Object.keys(obj).sort().map(k => `${JSON.stringify(k)}:${canonical(obj[k])}`).join(",")}}`;
 }
 
+/**
+ * SA1 — the one canonicalizer for anything a device signs in Sign & Attest. Plain JSON only (strings,
+ * numbers, booleans, null, ISO timestamps as strings): it matches the client's sorted-key
+ * `canonicalJson` byte for byte for that domain, which is why it is exported rather than a fifth
+ * `canonicalJson` being written beside the four that already disagree on `undefined` and `Date`.
+ */
+export function canonicalAttestPayload(value: unknown): Buffer {
+  return Buffer.from(canonical(value), "utf8");
+}
+
 export function canonicalDevicePackage(input: {
   deviceRef: string; packageRef: string; queuedAt: Date; signedAt: Date; nonce: string;
   items: unknown[]; recordUpdates: unknown[];
@@ -186,6 +196,10 @@ export const BIOMETRIC_MATERIAL_PATTERNS: readonly RegExp[] = [
   /\b(face|facial|iris|retina|voice)[A-Za-z_]*(template|embedding|vector|print|geometry|scan|model)/i,
   /biometric[A-Za-z_]*(template|data|sample|payload|blob|image|vector)/i,
   /\b(minutiae|faceEmbedding|irisCode)\b/i,
+  // SA1 — Sign & Attest stores strokes for rendering, never for identifying the hand that drew them.
+  // A column shaped like a behavioural profile is the same category as a template.
+  /(velocity|dynamics|rhythm|biometric)[A-Za-z_]*(profile|score|vector|signature|feature)/i,
+  /\b(strokeDynamics|signatureBiometric|handwritingModel)\b/i,
 ];
 
 export function looksLikeBiometricMaterial(name: string): boolean {
