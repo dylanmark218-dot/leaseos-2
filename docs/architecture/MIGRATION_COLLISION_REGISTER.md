@@ -332,9 +332,10 @@ anywhere is `0193`, so `0194` is the first free everywhere.
 
 ## Change log
 
-* **2026-10-03 (PR)**: the safety program follow-up moves `0233 → 0236 → 0237` before merging: `0233` became a
+* **2026-10-03 (PR)**: the safety program follow-up moves `0233 → 0236 → 0237 → 0241` before merging: `0233` became a
   three-way collision (external-source-registry, billing-invoicing-ar), payroll P4 holds `0234`–`0235`, and
-  `0236` was claimed by marketplace-main-reconcile and security/driver-portfolio-hardening during the PR's gate.
+  `0236` was claimed by marketplace-main-reconcile and security/driver-portfolio-hardening during the PR's gate. `0237` was then claimed by `claude/fleet-equipment-portfolio-design-3d13d5` (`0237`–`0238`)
+  and the marketplace branches (`0237`–`0240`, PR #109) while #140 was open, so it moves to `0241`.
 
 * **2026-10-03 (later)**: #99 merged with `0228`. Its follow-up takes `0233` for the event-chain uniqueness index:
   `0229`–`0232` are the integration hub branch's.
@@ -418,11 +419,11 @@ A scan of main and all 131 remote branches found every slot from `0180` to `0227
 every slot in use, so it moved to `0228`. The migration creates only new tables and depends on nothing after
 `0174`, so the move changes no DDL order. `server/migrationSlots.test.ts` records it and pins the head at `0228`.
 
-## Claim: 0237 (Safety program event chain, 2026-10-03)
+## Claim: 0241 (Safety program event chain, 2026-10-03)
 
 | Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
 |---|---|---|---|---|---|---|---|
-| 0237 | `0237_safety_program_event_chain_unique.sql` | `claude/safety-compliance-program-builder-2qnty0` | follow-up to #99 | `2864723` (main merged in) | gated | none | keeps 0237 |
+| 0241 | `0241_safety_program_event_chain_unique.sql` | `claude/safety-compliance-program-builder-2qnty0` | #140, follow-up to #99 | `93b9cfc` (main merged in) | gated | none | keeps 0241 |
 
 A follow-up to #99, which merged with `0228`. It adds a UNIQUE index to `safetyProgramEvents.previousHash` so the
 hash chain cannot fork under concurrent writes. It is a new file rather than an edit to `0228` because the
@@ -431,10 +432,12 @@ migration ledger refuses a changed, already-applied file. Drafted as `0233` (abo
 (`claude/external-source-registry`, which then merged it to `main` as #133, and
 `claude/leaseos-billing-invoicing-ar`; recorded in main's SPINE reconciliation) and `0234`–`0235` were held by `claude/payroll-p4-expenses-reimbursements`. While the PR's gate
 ran, `0236` was claimed by `claude/marketplace-main-reconcile` and `security/driver-portfolio-hardening` (which then
-merged it to `main` as #135), so at the
-final scan of main and all 141 remote branches it takes `0237`, the first slot above every slot in use. It was
-not merged or applied anywhere under either earlier number. This branch claims neither `0233` nor `0236`. It
-takes the number main's register named as next free after #135. **Next free number after this: `0238`** (re-check
+merged it to `main` as #135), it took `0237`, the number main's register named as next free after #135. While
+#140 was open, `0237` was claimed by `claude/fleet-equipment-portfolio-design-3d13d5` (`0237`–`0238`) and by
+`claude/leaseos-marketplace-bidding-h3stdw` / `claude/marketplace-main-reconcile` (`0237`–`0240`, PR #109), so at the
+final scan of main and all 142 remote branches it takes `0241`, the first slot above every slot in use. It was
+not merged or applied anywhere under any earlier number. This branch claims none of `0233`, `0236` or `0237`.
+**Next free number after this: `0242`** (re-check
 with the scan before committing).
 
 ## Change log (continued)

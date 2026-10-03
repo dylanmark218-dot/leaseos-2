@@ -1,11 +1,12 @@
--- 0237 — Safety program event ledger: one successor per event.
+-- 0241 — Safety program event ledger: one successor per event.
 --
 -- Slot: 0228 (the Safety & Compliance Program Builder) merged to main as #99 on 2026-10-03. This follow-up
--- was first numbered 0233, then 0236, each the first slot above every slot in use at its scan; each was
+-- was first numbered 0233, then 0236, then 0237, each the first slot above every slot in use at its scan; each was
 -- claimed by other branches before this merged (0233: external-source-registry, merged as #133, and billing-invoicing-ar,
 -- recorded in main's SPINE reconciliation; 0234–0235: payroll P4; 0236: marketplace-main-reconcile and
--- security/driver-portfolio-hardening, which merged it to main as #135). Under the register's rule a checkpoint takes the first slot above
--- every slot in use in any lineage, so it is 0237 at the PR's final scan of 141 remote branches. It had not
+-- security/driver-portfolio-hardening, which merged it to main as #135; 0237–0240: fleet-equipment-portfolio-design
+-- and the marketplace branches, PR #109). Under the register's rule a checkpoint takes the first slot above
+-- every slot in use in any lineage, so it is 0241 at the PR's final scan of 142 remote branches. It had not
 -- been merged or applied anywhere before. It is a separate migration, not an edit to 0228: the migration
 -- ledger checksums every applied file and refuses one that changed, so a database that has run 0228 would
 -- never see an edited copy.
