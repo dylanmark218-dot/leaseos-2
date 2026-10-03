@@ -23,7 +23,7 @@ describe("marketplace — preconditions", () => {
 
 const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let seq = 316_000_000 + Math.floor(Math.random() * 50_000);
+let seq = 322_000_000 + Math.floor(Math.random() * 50_000);
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
 
