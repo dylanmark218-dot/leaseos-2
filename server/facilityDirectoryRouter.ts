@@ -18,7 +18,8 @@ import { approximateFromLegalLocation } from "./_core/legalLocation";
 import { parseLsd } from "./_core/dls";
 import { checkMapping, featureToCandidate, lifecycleFromStatus, SK_FACILITIES, type ArcgisFeature, type FieldMapping } from "./_core/arcgisImport";
 import { checkEgressUrl, EgressRefused, type EgressLimits } from "./_core/egressGuard";
-import { egressGet } from "./_core/egressHttp";
+import { sameAuthority, type RegistryDecision, type RegistryPurpose } from "./_core/sourceRegistry";
+import { datasetChecksum, noteSchemaFingerprint, recordDatasetImport, registryGet, requireAuthorizedUrl, SourceRegistryError } from "./sourceRegistryService";
 import { readFileSync } from "node:fs";
 import { HYDROVAC_LIST, hydrovacFacilityKey, parseHydrovacList } from "./_core/hydrovacList";
 import { facilities, facilityAliases, facilityCallAheads, facilityCapabilities, facilityEvidence, facilityOperatingHours, facilitySourceLicences, facilityWaitReports, loadFacilityAssessments, loads, wasteStreamVocabulary, facilityImportRuns, atsLegalSubdivisions } from "../drizzle/schema";
@@ -45,12 +46,38 @@ async function dbOrThrow() {
  * limits leave ten times that. `?f=pjson` answers text/plain, `/query?f=json` JSON.
  */
 const ARCGIS_EGRESS: EgressLimits = { timeoutMs: 30_000, maxBytes: 16 * 1024 * 1024, maxRedirects: 3, accept: "application/json", contentTypes: ["application/json", "text/plain"] };
-const egressError = (e: unknown) => !(e instanceof EgressRefused) ? e
+const egressError = (e: unknown) => e instanceof SourceRegistryError
+  ? new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — source registry: ${e.message}` })
+  : !(e instanceof EgressRefused) ? e
   : e.destination ? new TRPCError({ code: "BAD_REQUEST", message: `Refused: ${e.message}` })
   : new TRPCError({ code: "BAD_GATEWAY", message: `Layer fetch failed: ${e.message}` });
-async function arcgisGet(url: string) {
-  try { return await egressGet(url, ARCGIS_EGRESS); } catch (e) { throw egressError(e); }
+/**
+ * Every regulator layer the importer touches is governed by the approved-source registry (0233): the
+ * layer must be an enabled endpoint of a source a person approved for this purpose, with an approval
+ * covering the endpoints as they stand. The order is the trust model's: the URL's own safety first (no
+ * database needed to refuse 169.254.169.254), then the registry, read fresh, then the egress guard with
+ * the endpoint as its destination policy. `pinned` holds a multi-page import to the authority it began
+ * under, so a revocation, suspension or edit stops it at the next page.
+ */
+const ARCGIS_PURPOSE: RegistryPurpose = "facility_directory.arcgis_import";
+const ARCGIS_IMPORTER_VERSION = "facilityDirectory.arcgis@0233";
+async function arcgisGet(url: string, pinned?: RegistryDecision) {
+  try {
+    checkEgressUrl(url);
+    return await registryGet({ url, purpose: ARCGIS_PURPOSE, defaults: ARCGIS_EGRESS, pinned });
+  } catch (e) { throw egressError(e); }
 }
+async function arcgisAuthority(layerUrl: string) {
+  try {
+    checkEgressUrl(layerUrl);
+    return await requireAuthorizedUrl({ url: new URL(layerUrl), purpose: ARCGIS_PURPOSE });
+  } catch (e) { throw egressError(e); }
+}
+/** The layer's own last-edit stamp, when it publishes one — the upstream version a provenance row records. */
+const layerVersion = (meta: { editingInfo?: { lastEditDate?: number; dataLastEditDate?: number } }) => {
+  const at = meta.editingInfo?.dataLastEditDate ?? meta.editingInfo?.lastEditDate;
+  return typeof at === "number" && Number.isFinite(at) ? new Date(at).toISOString() : null;
+};
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const jsonArray = <T,>(v: unknown): T[] => (typeof v === "string" ? (JSON.parse(v) as T[]) : Array.isArray(v) ? (v as T[]) : []);
 const routableOf = (f: { disposition: string; coordinatePrecision: string }) => f.disposition === "verified_facility" && (f.coordinatePrecision === "verified_entrance" || f.coordinatePrecision === "verified_site");
@@ -366,34 +393,47 @@ export const facilityDirectoryRouter = router({
     inspect: roleProcedure("facilityDirectory.arcgisInspect")
       .input(z.object({ layerUrl: z.string().url().max(1024) }))
       .mutation(async ({ input }) => {
-        const res = await arcgisGet(`${input.layerUrl.replace(/\/$/, "")}?f=pjson`);
+        const { response: res, decision } = await arcgisGet(`${input.layerUrl.replace(/\/$/, "")}?f=pjson`);
         if (!res.ok) throw new TRPCError({ code: "BAD_GATEWAY", message: `Layer returned ${res.status}` });
         const meta = res.json() as { name?: string; geometryType?: string; extent?: { spatialReference?: { wkid?: number; latestWkid?: number } }; fields?: { name: string; type: string; alias?: string }[]; copyrightText?: string; maxRecordCount?: number };
-        return { name: meta.name ?? null, geometryType: meta.geometryType ?? null, wkid: meta.extent?.spatialReference?.latestWkid ?? meta.extent?.spatialReference?.wkid ?? null, fields: (meta.fields ?? []).map(f => ({ name: f.name, type: f.type, alias: f.alias ?? null })), copyrightText: meta.copyrightText ?? null, maxRecordCount: meta.maxRecordCount ?? null, note: "Map these fields to ours and record the licence before importing; an empty copyrightText is not a licence." };
+        const schema = await noteSchemaFingerprint(decision.endpointId, (meta.fields ?? []).map(f => f.name));
+        return { name: meta.name ?? null, geometryType: meta.geometryType ?? null, wkid: meta.extent?.spatialReference?.latestWkid ?? meta.extent?.spatialReference?.wkid ?? null, fields: (meta.fields ?? []).map(f => ({ name: f.name, type: f.type, alias: f.alias ?? null })), copyrightText: meta.copyrightText ?? null, maxRecordCount: meta.maxRecordCount ?? null,
+          registry: { sourceKey: decision.sourceKey, endpointRef: decision.endpointRef, sourceRevision: decision.sourceRevision, schemaChanged: schema.changed },
+          note: "Map these fields to ours and record the licence before importing; an empty copyrightText is not a licence." };
       }),
     importFeatures: roleProcedure("facilityDirectory.arcgisImportFeatures")
       .input(z.object({ source: z.string().regex(/^[a-z][a-z0-9_]{1,39}$/), layerUrl: z.string().url().max(1024), licenceKey: z.string().min(1).max(40), wkid: z.number().int(), layerFields: z.array(z.string()).min(1), mapping: z.object({ id: z.string().min(1), name: z.string().optional(), facilityName: z.string().optional(), operator: z.string().optional(), licenceNumber: z.string().optional(), facilityType: z.string().optional(), status: z.string().optional(), legalLocation: z.string().optional() }), features: z.array(z.object({ attributes: z.record(z.string(), z.unknown()), geometry: z.object({ x: z.number().optional(), y: z.number().optional(), rings: z.array(z.array(z.array(z.number()))).optional() }).nullable().optional() })).max(5000), note: z.string().max(500).optional() }))
-      .mutation(async ({ ctx, input }) => importArcgis(ctx.user.id, input)),
+      .mutation(async ({ ctx, input }) => {
+        // Nothing is fetched, but the URL becomes the evidence's source: it must be an approved endpoint too.
+        const decision = await arcgisAuthority(input.layerUrl);
+        return importArcgis(ctx.user.id, input, { decision, sourceFormat: "arcgis_json_supplied", datasetVersion: null, checksumSha256: datasetChecksum([JSON.stringify(input.features)]), retrievedAt: new Date() });
+      }),
     importFromLayer: roleProcedure("facilityDirectory.arcgisImportFromLayer")
       .input(z.object({ source: z.string().regex(/^[a-z][a-z0-9_]{1,39}$/), layerUrl: z.string().url().max(1024), licenceKey: z.string().min(1).max(40), mapping: z.object({ id: z.string().min(1), name: z.string().optional(), facilityName: z.string().optional(), operator: z.string().optional(), licenceNumber: z.string().optional(), facilityType: z.string().optional(), status: z.string().optional(), legalLocation: z.string().optional() }), where: z.string().max(500).default("1=1"), maxFeatures: z.number().int().min(1).max(20000).default(5000), note: z.string().max(500).optional() }))
       .mutation(async ({ ctx, input }) => {
         const base = input.layerUrl.replace(/\/$/, "");
-        const metaRes = await arcgisGet(`${base}?f=pjson`);
+        const retrievedAt = new Date();
+        const { response: metaRes, decision } = await arcgisGet(`${base}?f=pjson`);
         if (!metaRes.ok) throw new TRPCError({ code: "BAD_GATEWAY", message: `Layer returned ${metaRes.status}` });
-        const meta = metaRes.json() as { extent?: { spatialReference?: { wkid?: number; latestWkid?: number } }; fields?: { name: string }[]; maxRecordCount?: number };
+        const meta = metaRes.json() as { extent?: { spatialReference?: { wkid?: number; latestWkid?: number } }; fields?: { name: string }[]; maxRecordCount?: number; editingInfo?: { lastEditDate?: number; dataLastEditDate?: number } };
         const wkid = meta.extent?.spatialReference?.latestWkid ?? meta.extent?.spatialReference?.wkid;
         if (!wkid) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The layer states no spatial reference; refusing to guess one" });
+        await noteSchemaFingerprint(decision.endpointId, (meta.fields ?? []).map(f => f.name));
         const page = Math.min(meta.maxRecordCount ?? 1000, 2000);
         const features: { attributes: Record<string, unknown>; geometry?: { x?: number; y?: number; rings?: number[][][] } | null }[] = [];
+        const bodies: Uint8Array[] = [metaRes.bytes];
         for (let offset = 0; features.length < input.maxFeatures; offset += page) {
           const q = new URLSearchParams({ where: input.where, outFields: "*", returnGeometry: "true", f: "json", resultOffset: String(offset), resultRecordCount: String(Math.min(page, input.maxFeatures - features.length)) });
-          const res = await arcgisGet(`${base}/query?${q}`);
+          // Pinned: the page is fetched only under the authority the import began with.
+          const { response: res } = await arcgisGet(`${base}/query?${q}`, decision);
           if (!res.ok) throw new TRPCError({ code: "BAD_GATEWAY", message: `Query returned ${res.status} at offset ${offset}` });
+          bodies.push(res.bytes);
           const data = res.json() as { features?: typeof features; exceededTransferLimit?: boolean };
           features.push(...(data.features ?? []));
           if (!data.exceededTransferLimit || !(data.features?.length)) break;
         }
-        return importArcgis(ctx.user.id, { ...input, wkid, layerFields: (meta.fields ?? []).map(f => f.name), features });
+        return importArcgis(ctx.user.id, { ...input, wkid, layerFields: (meta.fields ?? []).map(f => f.name), features },
+          { decision, sourceFormat: "arcgis_json", datasetVersion: layerVersion(meta), checksumSha256: datasetChecksum(bodies), retrievedAt });
       }),
     runs: roleProcedure("facilityDirectory.arcgisRuns").query(async () => (await dbOrThrow()).select().from(facilityImportRuns).orderBy(desc(facilityImportRuns.startedAt)).limit(50)),
   }),
@@ -497,10 +537,16 @@ async function nearbyFacilities(db: Db, latitude: number, longitude: number, rad
     .filter(x => x.distanceKm <= radiusKm).sort((a, b) => a.distanceKm - b.distanceKm).slice(0, limit);
 }
 
-/** One ArcGIS import run: check the mapping against the layer's fields, map, upsert, record evidence, write the run. */
-async function importArcgis(userId: number, input: { source: string; layerUrl: string; licenceKey: string; wkid: number; layerFields: string[]; mapping: FieldMapping; features: ArcgisFeature[]; note?: string }) {
-  // importFeatures fetches nothing, but the URL becomes the evidence's source link: a URL the server would refuse to fetch is not recorded as a regulator's.
-  try { checkEgressUrl(input.layerUrl); } catch (e) { throw egressError(e); }
+/** What an import ran under, for its provenance record (externalDatasetImports). */
+type ArcgisProvenance = { decision: RegistryDecision; sourceFormat: string; datasetVersion: string | null; checksumSha256: string; retrievedAt: Date };
+
+/** One ArcGIS import run: check the mapping against the layer's fields, map, upsert, record evidence and provenance, write the run. */
+async function importArcgis(userId: number, input: { source: string; layerUrl: string; licenceKey: string; wkid: number; layerFields: string[]; mapping: FieldMapping; features: ArcgisFeature[]; note?: string }, provenance: ArcgisProvenance) {
+  // The URL becomes the evidence's source link, so it is held to the same rules as a fetch — and the
+  // registry is asked again before anything is written: a source revoked or edited since the import
+  // began records nothing.
+  const now = await arcgisAuthority(input.layerUrl);
+  if (!sameAuthority(provenance.decision, now)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — source registry: ${now.sourceKey}'s authority changed during the import; nothing was recorded` });
   const db = await dbOrThrow();
   const lic = (await db.select().from(facilitySourceLicences).where(eq(facilitySourceLicences.licenceKey, input.licenceKey)).limit(1))[0];
   if (!lic) throw new TRPCError({ code: "BAD_REQUEST", message: `Unknown licence ${input.licenceKey}; register it first` });
@@ -529,8 +575,15 @@ async function importArcgis(userId: number, input: { source: string; layerUrl: s
     }
     await db.insert(facilityEvidence).values({ facilityId, publisher: lic.publisher, title: `Regulator layer feature ${c.facilityKey} (run ${importRef})`, sourceUrl: input.layerUrl, licenceKey: input.licenceKey, claimType: c.latitude === null ? "facility_exists" : "site_coordinate", claimValue: `${c.coordinateNote}; status ${c.sourceStatus ?? "?"}; type ${c.facilityType ?? "?"}; licence ${c.regulatorRef ?? "?"}`, cachedContent: true, retrievedAt: new Date(), confidence: "high", reviewState: "lead", recordedByUserId: userId });
   }
-  await db.insert(facilityImportRuns).values({ importRef, source: input.source, layerUrl: input.layerUrl, licenceKey: input.licenceKey, fieldMapping: input.mapping, wkid: input.wkid, featureCount: input.features.length, inserted, updated, skipped, skipReasons: Object.entries(skipReasons).map(([k, v]) => `${k} ×${v}`), startedByUserId: userId, note: input.note ?? null });
-  return { importRef, featureCount: input.features.length, inserted, updated, skipped, skipReasons, attribution: lic.attributionText, note: "Regulator coordinates are the site, ±, never an entrance; a person verifies from the evidence before directions exist. Commercial access is unknown until stated — a licensed facility is not necessarily a commercial one." };
+  const dataset = await recordDatasetImport({
+    decision: provenance.decision, datasetKey: provenance.decision.endpointRef, datasetVersion: provenance.datasetVersion, sourceFormat: provenance.sourceFormat,
+    checksumSha256: provenance.checksumSha256, importerVersion: ARCGIS_IMPORTER_VERSION, featureCount: input.features.length,
+    coordinateSystem: `EPSG:${input.wkid}`, retrievedAt: provenance.retrievedAt, importedByUserId: userId,
+  });
+  await db.insert(facilityImportRuns).values({ importRef, source: input.source, layerUrl: input.layerUrl, licenceKey: input.licenceKey, fieldMapping: input.mapping, wkid: input.wkid, featureCount: input.features.length, inserted, updated, skipped, skipReasons: Object.entries(skipReasons).map(([k, v]) => `${k} ×${v}`), startedByUserId: userId, note: input.note ?? null, externalDatasetImportId: dataset.id });
+  return { importRef, featureCount: input.features.length, inserted, updated, skipped, skipReasons, attribution: lic.attributionText,
+    provenance: { datasetImportRef: dataset.importRef, sourceKey: provenance.decision.sourceKey, endpointRef: provenance.decision.endpointRef, sourceRevision: provenance.decision.sourceRevision },
+    note: "Regulator coordinates are the site, ±, never an entrance; a person verifies from the evidence before directions exist. Commercial access is unknown until stated — a licensed facility is not necessarily a commercial one." };
 }
 
 async function exportRows(): Promise<FacilitySeedRow[]> {
