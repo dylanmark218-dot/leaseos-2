@@ -95,6 +95,16 @@ export const HUMAN_AUTHORIZATION_PERMISSIONS: readonly string[] = [
   "maintenance.defect.triage",              // deciding severity — lowering a critical defect frees its safety hold
 ];
 
+/**
+ * SPINE item 3 — the one answer to "may this run without the server?". `requiresOnline` is declared on
+ * the capability and read only here: the gateway's offline refusal and the device runtime's
+ * availability (`offlineCapability.runtimeAvailability`) both ask this, so they cannot disagree.
+ * It says nothing about hardware or about who may do it.
+ */
+export function mayRunWithoutServer(capability: Pick<CapabilityDefinition, "requiresOnline">): boolean {
+  return !capability.requiresOnline;
+}
+
 export class CapabilityUnknown extends Error {}
 
 export type Registry = ReadonlyMap<string, CapabilityDefinition>;
@@ -222,7 +232,7 @@ export function decide(request: ActionRequest, ctx: GatewayContext): Decision {
     return { decision: "deny", reasons: [`Missing ${missing.join(", ")}`] };
   }
 
-  if (capability.requiresOnline && !ctx.online) {
+  if (!mayRunWithoutServer(capability) && !ctx.online) {
     return { decision: "deny", reasons: [`${capability.key} needs the server. Offline, this can be prepared and not performed.`] };
   }
 

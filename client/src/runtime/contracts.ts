@@ -139,6 +139,9 @@ export interface Transport {
 }
 
 export interface Connectivity { online(): Promise<boolean>; }
+
+/** HS1 (HS_CONTRACTS §1): what this runtime can physically do. Defined once in `shared/`; probed by `capabilities.ts`. */
+export type { CapabilityMatrix, HardwareCapability } from "@shared/hardwareCapability";
 export interface Clock { now(): Date; }
 
 export class NotOnDeviceError extends Error {

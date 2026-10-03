@@ -9,14 +9,21 @@
  */
 
 import { isDirectCapture, type CaptureAuthorizationClaim, type CaptureKind, type GpsFix, type LocalCapture, type LocalStore, type FileVault, type Clock } from "./contracts";
+import { refuseUnavailable, type CaptureGate } from "./capabilities";
 
 const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 export class Outbox {
-  constructor(private store: LocalStore, private vault: FileVault, private clock: Clock) {}
+  /**
+   * SPINE item 3 — `gate` is HS1 plus the one offline rule (`capabilities.ts`). Where a composition
+   * root supplies it, a capture the device cannot make — no camera for a photo — or may not make
+   * offline is refused before anything reaches the vault or the store. It narrows; it never grants.
+   */
+  constructor(private store: LocalStore, private vault: FileVault, private clock: Clock, private gate?: CaptureGate) {}
 
   /** Save a draft locally. It is on the device and nowhere else. */
   async saveDraft(args: { kind: CaptureKind; formKey: string | null; title: string; category: string; fields: Record<string, unknown>; files?: { bytes: Uint8Array; fileName: string; mimeType: string }[]; gps?: GpsFix | null; jobId?: number | null; unitId?: number | null; capturedAt?: Date; captureAuthorizationClaim?: CaptureAuthorizationClaim; captureAuthorizationReason?: string | null }): Promise<LocalCapture> {
+    if (this.gate) refuseUnavailable(args.kind, await this.gate.check(args.kind));
     const now = this.clock.now().toISOString();
     const files: LocalCapture["files"] = [];
     for (const f of args.files ?? []) {
