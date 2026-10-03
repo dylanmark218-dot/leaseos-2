@@ -37,8 +37,11 @@ const DECLARED_UNWIRED: Record<string, string> = {
    * permission to skip the declaration; it was the declaration going unasked.
    *
    * They stay unwired because `docs/register/SPINE_WIRING_PLAN.md:3` says so:
-   * "no new engines until this path is wired". All 13 spine engines are still
-   * on this list, so the moratorium is fully in force, and the plan places the
+   * "no new engines until this path is wired". Three of the plan's 13 spine
+   * engines are now reached — `openShifts` and `complianceDocumentValidity`
+   * (SPINE item 2) and `offlineCapability` (SPINE item 3, through
+   * `sync.receivePackage`) — and the rest are still on this list, so the
+   * moratorium stays in force for this layer, and the plan places the
    * AI-adjacent engines (`modelGateway`, `voiceTranscription`) off the spine in
    * "later phases" (line 40). Wiring these ahead of the spine is the thing the
    * moratorium exists to prevent.
@@ -89,7 +92,6 @@ const DECLARED_UNWIRED: Record<string, string> = {
   migrationLedger: "the production migration ledger; reached from scripts/migrate.ts (the deploy path), not from a router — declared by the session that reconciled 5f3bef4",
   requiredSuites: "B23.1B — which test suites the gate refuses to pass without, and the pure check that reads vitest's JSON report. Unwired on purpose and permanently: its caller is scripts/verify-gate-run.ts, run by ci-gate.sh after the suite. A request has no opinion about whether the authorization suites ran.",
   migrationSlots: "B23.1A — the migration filename guard. Unwired on purpose and permanently: it inspects the repository's own `drizzle/` filenames, which is a fact about the tree rather than about any request, so the only caller is `migrationSlots.test.ts` and gate 0 of ci-gate.sh. A router that could answer 'is our migration numbering sound' would be answering it about the server's deployed copy, too late to matter.",
-  offlineCapability: "offline capability classes for the field device; no device runtime calls them yet",
   modelGateway: "model routing and licence gate; no AI provider is configured yet",
   dashboardWidget: "widget contract; no dashboard surface consumes it yet",
   financialCalendar: "AP/AR and company-event projections; no financial surface yet",
@@ -129,7 +131,7 @@ const DECLARED_UNWIRED: Record<string, string> = {
   "knowledge/perimeter": "the AI request perimeter and learning intake; assistantAskRouter gates through sourceGate, not through this, so the two-gate design is only half wired",
   "knowledge/repository": "declares itself the only way rows reach the knowledge corpus, and nothing calls it — knowledgeWritePaths.test.ts enforces that rule vacuously, since no write path exists at all yet",
   safetyBinder: "per-unit binder completeness and the office task queue; needs unitBinderSnapshots and safetyBinderRouter before anything reaches it",
-  boundaryConfirmation: "SPINE item 1 — the one resolver of which tripStops timestamps a person stands behind, read from committed receipt manifests; pure. Its receipt reader cannot exist here until tripStops carries updatedAt (this repository has no trip-stop provenance migration), and siteBaseline has no router yet",
+  boundaryConfirmation: "SPINE item 1 — the one resolver of which tripStops timestamps a person stands behind, read from committed receipt manifests; pure. Its receipt reader exists (boundaryEvidence, over 0179's tripStops provenance); what does not is a caller — the stop-timing router feeding siteBaseline, which is SPINE item 4",
   boundaryEvidence: "SPINE item 1 — the chain rule over a stop's assistantCommitReceipts and the receipt reader over tripStops provenance (0179), the sibling repository's code unchanged; refuses a broken chain (edited after commit, another writer, broken seal, unreadable manifest) and reads the stop through orgScopeWhere(trips). Its caller is the stop-timing router, which is SPINE item 4 and does not exist yet",
   siteBaseline: "per-site median/MAD stop-duration baselines and the stop assessment; needs siteStopBaselines/siteStopAlerts and siteBaselineRouter before anything reaches it",
   tripBillingProjection: "turns a completed trip into ChargeLineSource[] for calculateChargeLines; belongs inside the existing billing path where evaluateBillingReadiness already runs, which is the wiring decision still open",
@@ -335,7 +337,7 @@ describe("every engine is reached, or says why not", () => {
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(73);   // merge of main (b35bac4) into #59: main's 73 already counts openShifts as reached (SPINE item 2), the one engine #59 wired;   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
+    expect(unwired).toHaveLength(72);   // SPINE item 3: -1 offlineCapability — sync.receivePackage re-derives the offline field policy through it (the policy itself is shared/offlinePolicy.ts, which the field client runs too and this census does not walk; server/offlinePolicy.test.ts pins both consumers and the single implementation);   // merge of main (b35bac4) into #59: main's 73 already counts openShifts as reached (SPINE item 2), the one engine #59 wired;   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
     expect(engines.length).toBeGreaterThan(130);
   });
 });

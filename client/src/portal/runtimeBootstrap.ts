@@ -25,7 +25,7 @@ export function mountBrowserFallbackRuntime(transport: Transport): MountedRuntim
   const vault = new MemoryVault(keystore);
   const store = new MemoryStore();
   const connectivity = new FlagConnectivity(true);
-  const outbox = new Outbox(store, vault, tickingClock);
+  const outbox = new Outbox(store, vault, tickingClock, connectivity);
   const engine = new SyncEngine({ store, vault, keystore, transport, connectivity, clock: tickingClock, platform: "web" });
   if (typeof window !== "undefined") {
     window.addEventListener("online", () => { connectivity.isOnline = true; void engine.syncOnce(); });

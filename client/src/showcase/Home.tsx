@@ -11,6 +11,8 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { BrowserFilePickerScanner } from "@/runtime/adapters/browserFilePicker";
+import { toBase64 } from "@/runtime/crypto";
 import { useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import {
@@ -1561,7 +1563,12 @@ function EvidenceWorkspace() {
     }
   };
   const [captureType, setCaptureType] = useState<"photo" | "document">("photo");
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // HS1: the showcase acquires files through the runtime's DocumentScanner interface, like every
+  // other surface — never a file input of its own. Mutations here are still refused by ShowcaseFrame.
+  const pickers = useMemo(() => ({
+    photo: new BrowserFilePickerScanner({ accept: "image/*" }),
+    document: new BrowserFilePickerScanner({ accept: "image/*,application/pdf,.doc,.docx" }),
+  }), []);
   const uploadMutation = trpc.fieldRoute.evidence.upload.useMutation({
     onSuccess: async () => {
       await utils.fieldRoute.evidence.list.invalidate();
@@ -1570,25 +1577,23 @@ function EvidenceWorkspace() {
     },
     onError: error => toast.error(error.message),
   });
-  const handleCapture = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = String(reader.result).split(",")[1] ?? "";
-      uploadMutation.mutate({
-        title: `${captureType === "photo" ? "Field photo" : "Field document"} · JOB-08421`,
-        category: captureType === "photo" ? "field_photo" : "document",
-        fileName: file.name,
-        mimeType: file.type || "application/octet-stream",
-        dataBase64: base64,
-        latitude: 53.557,
-        longitude: -113.286,
-        notes: "Original captured from the field workspace.",
-      });
-    };
-    reader.readAsDataURL(file);
-    event.target.value = "";
+  const handleCapture = async (kind: "photo" | "document") => {
+    setCaptureType(kind);
+    let pages;
+    try { pages = await pickers[kind].scan({ maxPages: 1, allowGallery: true }); }
+    catch (error) { toast.error(error instanceof Error ? error.message : String(error)); return; }
+    const page = pages?.[0];
+    if (!page) return;
+    uploadMutation.mutate({
+      title: `${kind === "photo" ? "Field photo" : "Field document"} · JOB-08421`,
+      category: kind === "photo" ? "field_photo" : "document",
+      fileName: `${kind}-${Date.now()}.${(page.mimeType.split("/")[1] ?? "bin").split("+")[0]}`,
+      mimeType: page.mimeType,
+      dataBase64: toBase64(page.bytes),
+      latitude: 53.557,
+      longitude: -113.286,
+      notes: "Original captured from the field workspace.",
+    });
   };
   return (
     <div>
@@ -1805,17 +1810,6 @@ function EvidenceWorkspace() {
       </div>
       {isCapturing && (
         <div className="fixed inset-x-4 bottom-5 z-50 mx-auto max-w-lg rounded-2xl border border-[#dfe6ee] bg-white p-4 shadow-[0_20px_60px_rgba(16,36,63,0.18)] sm:inset-x-auto sm:right-8">
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            accept={
-              captureType === "photo"
-                ? "image/*"
-                : "image/*,application/pdf,.doc,.docx"
-            }
-            onChange={handleCapture}
-          />
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#fff0ea] text-[#e45e3b]">
               <Camera className="h-5 w-5" />
@@ -1839,10 +1833,7 @@ function EvidenceWorkspace() {
             <Button
               variant="outline"
               disabled={uploadMutation.isPending}
-              onClick={() => {
-                setCaptureType("photo");
-                fileInputRef.current?.click();
-              }}
+              onClick={() => void handleCapture("photo")}
               className="h-9 rounded-lg border-[#dfe6ee] bg-white text-xs"
             >
               <Camera className="mr-1.5 h-3.5 w-3.5" />
@@ -1851,10 +1842,7 @@ function EvidenceWorkspace() {
             <Button
               variant="outline"
               disabled={uploadMutation.isPending}
-              onClick={() => {
-                setCaptureType("document");
-                fileInputRef.current?.click();
-              }}
+              onClick={() => void handleCapture("document")}
               className="h-9 rounded-lg border-[#dfe6ee] bg-white text-xs"
             >
               <Upload className="mr-1.5 h-3.5 w-3.5" />

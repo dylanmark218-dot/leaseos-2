@@ -31,13 +31,9 @@
  * intent out of anything below the authority line.
  */
 
-/** What a capability may cost the company if it is wrong. */
-export type RiskLevel =
-  | "read"                 // L0 — observes
-  | "prepare"              // L1 — drafts, commits nothing
-  | "low_risk_action"      // L2 — acts, cheaply reversible
-  | "approval_required"    // L3 — a person says yes first
-  | "restricted";          // L4 — more than one person, or nobody
+/** What a capability may cost the company if it is wrong. Defined in `shared/riskLevel.ts` (one ladder for both runtimes). */
+import type { RiskLevel } from "../../shared/riskLevel";
+export type { RiskLevel };
 
 export type CapabilityDefinition = {
   key: string;

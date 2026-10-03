@@ -16,8 +16,8 @@ here can be added rather than read.
 | Permissions | **427** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **172** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **21** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **486 / 6642** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
-| Native-only runtime bindings | **7 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
+| Test files / cases | **488 / 6681** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Native-only runtime bindings | **9 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
 

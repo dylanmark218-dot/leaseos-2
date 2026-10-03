@@ -335,3 +335,61 @@ d("a driver starts the day offline", () => {
     expect((await store.listCaptures()).length).toBe(2); // nothing deleted
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* SPINE item 3 — the server re-derives the offline policy at sync      */
+/* ------------------------------------------------------------------ */
+
+d("the server does not take the device's word that an operation was allowed offline", () => {
+  it("refuses a queued operation the policy does not know, even though the device queued and sealed it, and keeps the good item", async () => {
+    const driver = await withRole("driver");
+    const { clock, keystore, vault, store, outbox } = rig(new Date());
+    const net = new FlagConnectivity(true);
+    const engine = new SyncEngine({ store, vault, keystore, transport: transportFor(driver), connectivity: net, clock, platform: "android" });
+    await engine.enroll(); await engine.activate();
+
+    const good = await outbox.saveDraft({ kind: "photo", formKey: null, title: "ok", category: "photo", fields: {}, files: [{ bytes: jpeg(700), fileName: "ok.jpg", mimeType: "image/jpeg" }], unitId: 142 });
+    await outbox.queue(good.localId);
+    // A stale or modified client: the capture is written straight into the queue, past the outbox's
+    // policy check, with fields claiming it was allowed. Nothing on the device stops it now.
+    const rogue = await outbox.saveDraft({ kind: "oos_release" as never, formKey: null, title: "Release OOS", category: "enforcement", fields: { offlineClass: "local_capture", offlineAllowed: true }, unitId: 142 });
+    await store.putCapture({ ...(await store.getCapture(rogue.localId))!, syncState: "queued" });
+
+    clock.set(new Date());
+    const r = await engine.syncOnce();
+    expect(r.synchronized).toBe(1);
+    expect(r.failed).toBe(1);
+    const refused = (await store.getCapture(rogue.localId))!;
+    expect(refused.syncState).toBe("failed");
+    expect(refused.lastError).toMatch(/offline field policy/i);
+    expect((await store.getCapture(good.localId))!.syncState).toBe("synchronized");
+
+    // The refusal is a row the office can see, with the reason, not a log line.
+    const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+      "SELECT r.matched, r.failureDetail FROM syncReceipts r JOIN syncPackages p ON p.id = r.syncPackageId WHERE p.packageRef = ? ORDER BY r.id",
+      [r.packageRef]);
+    expect(rows.map(x => Number(x.matched)).sort()).toEqual([0, 1]);
+    expect(rows.find(x => Number(x.matched) === 0)!.failureDetail).toMatch(/offline field policy/i);
+  });
+
+  it("lets actor and scope refusals win over a policy-allowed operation", async () => {
+    const driver = await withRole("driver");
+    const other = await withRole("driver");
+    const { clock, keystore, vault, store, outbox } = rig(new Date());
+    const net = new FlagConnectivity(true);
+    const mine = new SyncEngine({ store, vault, keystore, transport: transportFor(driver), connectivity: net, clock, platform: "android" });
+    await mine.enroll(); await mine.activate();
+
+    // A photo is as offline-safe as anything gets. Pushed by someone this device is not enrolled to,
+    // it is still refused: offline eligibility never stood in for who may act.
+    const c = await outbox.saveDraft({ kind: "photo", formKey: null, title: "p", category: "photo", fields: {}, files: [{ bytes: jpeg(300), fileName: "p.jpg", mimeType: "image/jpeg" }], unitId: 142 });
+    await outbox.queue(c.localId);
+    const theirs = new SyncEngine({ store, vault, keystore, transport: transportFor(other), connectivity: net, clock, platform: "android" });
+    clock.set(new Date());
+    const r = await theirs.syncOnce();
+    expect(r.synchronized).toBe(0);
+    const after = (await store.getCapture(c.localId))!;
+    expect(after.syncState).toBe("failed");
+    expect(after.lastError).toMatch(/enrolled to another user/);
+  });
+});

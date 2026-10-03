@@ -8,12 +8,28 @@
  * the same rule the server's storage plan applies.
  */
 
-import { isDirectCapture, type CaptureAuthorizationClaim, type CaptureKind, type GpsFix, type LocalCapture, type LocalStore, type FileVault, type Clock } from "./contracts";
+import { isDirectCapture, type CaptureAuthorizationClaim, type CaptureKind, type GpsFix, type LocalCapture, type LocalStore, type FileVault, type Clock, type Connectivity } from "./contracts";
+import { FIELD_OPERATIONS, decideFieldOperation, type FieldOperation } from "../../../shared/offlinePolicy";
+
+/**
+ * SPINE item 3 — every capture kind has a row in the shared offline policy. A kind added to
+ * `contracts.ts` without one fails to compile here, rather than being refused at the outbox.
+ */
+void (FIELD_OPERATIONS satisfies Record<CaptureKind, FieldOperation>);
+
+/** The offline policy would not queue this. The draft stays on the device, saved_locally. */
+export class FieldOperationRefused extends Error {
+  constructor(readonly localId: string, readonly kind: string, note: string) { super(note); this.name = "FieldOperationRefused"; }
+}
 
 const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 export class Outbox {
-  constructor(private store: LocalStore, private vault: FileVault, private clock: Clock) {}
+  /**
+   * `connectivity` feeds the offline policy. Without one the outbox assumes it is offline — the
+   * stricter answer — because an outbox that cannot tell must not behave as though a server is there.
+   */
+  constructor(private store: LocalStore, private vault: FileVault, private clock: Clock, private connectivity?: Connectivity) {}
 
   /** Save a draft locally. It is on the device and nowhere else. */
   async saveDraft(args: { kind: CaptureKind; formKey: string | null; title: string; category: string; fields: Record<string, unknown>; files?: { bytes: Uint8Array; fileName: string; mimeType: string }[]; gps?: GpsFix | null; jobId?: number | null; unitId?: number | null; capturedAt?: Date; captureAuthorizationClaim?: CaptureAuthorizationClaim; captureAuthorizationReason?: string | null }): Promise<LocalCapture> {
@@ -37,6 +53,12 @@ export class Outbox {
   async queue(localId: string): Promise<LocalCapture> {
     const c = await this.must(localId);
     if (c.syncState !== "saved_locally" && c.syncState !== "failed") throw new Error(`Capture ${localId} is ${c.syncState}; only a draft or a failed capture can be queued`);
+    // SPINE item 3: the shared offline policy decides whether this kind may run or queue now. The
+    // key is the capture's kind — never a class or flag in its fields — and an unknown kind is
+    // refused online or off. This is the device keeping itself correct offline; the server runs
+    // the same policy again on arrival, because this check is not authority.
+    const decision = decideFieldOperation(c.kind, { online: this.connectivity ? await this.connectivity.online() : false });
+    if (decision.outcome === "refused" || decision.outcome === "unavailable") throw new FieldOperationRefused(localId, c.kind, decision.note);
     // The vault refuses to seal a record that relates to nothing. Better the
     // worker hears it now — "which job or unit is this for?" — than the sync
     // engine hears it hours later.

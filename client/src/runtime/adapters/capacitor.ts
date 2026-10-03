@@ -97,4 +97,22 @@ export function capacitorBarcodeScanner(): { available: () => Promise<boolean>; 
   };
 }
 
+/**
+ * HS1 — camera and location probes, so `capabilities()` can aggregate them like the rest. Probe and
+ * refusal only: no capture or fix is implemented here, and `open` throws until a device binding is.
+ */
+export function capacitorCamera(): { available: () => Promise<boolean>; open: PluginLoader<never> } {
+  return {
+    available: async () => (await load("@capacitor/camera")) != null,
+    open: async () => { throw new NotOnDeviceError("Camera"); },
+  };
+}
+
+export function capacitorGeolocation(): { available: () => Promise<boolean>; open: PluginLoader<never> } {
+  return {
+    available: async () => (await load("@capacitor/geolocation")) != null,
+    open: async () => { throw new NotOnDeviceError("Location"); },
+  };
+}
+
 export const NATIVE_ONLY_CAPABILITIES = ["encrypted_sqlite", "encrypted_file_vault", "hardware_keystore", "camera", "gps", "biometric_signing", "local_notifications", "document_scanner", "on_device_ocr", "barcode_scanner"] as const;

@@ -295,8 +295,15 @@ d("enrol, activate, push, rotate, revoke — and the refusals between", () => {
     const bytesText = key("bytes");
     const c = sha(bytesText), m = sha(key("manifest"));
     // Four real uploads whose stored bytes hash to `c`, and one whose stored bytes do not.
+    // SPINE item 3: the server classifies a packaged item by the kind on its own seal, so every item
+    // here is sealed the way a device seals it — as a `photo` capture, declaring the content hash `c`.
+    // Each item then declares its own seal's manifest hash, as the sync engine does.
     const up = async (data: string) => Number((await callerFor(driver).fieldRoute.evidence.upload({ title: "e", category: "photo", fileName: "e.bin", mimeType: "application/octet-stream", dataBase64: Buffer.from(data).toString("base64"), clientCaptureRef: key("cap-________") })).id);
-    const ev1 = await up(bytesText), ev2 = await up("tampered on the way in"), ev3 = await up(bytesText), ev4 = await up(bytesText);
+    const sealAsPhoto = async (id: number) => String((await callerFor(driver).records.evidence.seal({ evidenceId: id, contentHash: c, recordType: "photo", relationships: [{ entityType: "unit", entityId: 142 }] as never }) as { manifestHash: string }).manifestHash);
+    const ev1 = await up(bytesText), ev2 = await up("tampered on the way in"), ev3 = await up(bytesText), ev4 = await up(bytesText), ev5 = await up(bytesText);
+    const mOf = new Map<number, string>();
+    for (const id of [ev1, ev2, ev3, ev4]) mOf.set(id, await sealAsPhoto(id));
+    void m;
 
     // Enrol. A failed attestation is refused outright.
     await expect(callerFor(driver).device.enroll({ platform: "android", publicKeySpkiBase64: A.spki, keystoreAttestation: "failed" })).rejects.toThrow(/cannot hold LeaseOS keys/);
@@ -317,12 +324,12 @@ d("enrol, activate, push, rotate, revoke — and the refusals between", () => {
     await callerFor(driver).device.activate({ deviceRef: en.deviceRef });
 
     // A clean push verifies.
-    const ok = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev1, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] }));
+    const ok = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev1, declaredContentHash: c, declaredManifestHash: mOf.get(ev1)!, computedContentHash: c, computedManifestHash: mOf.get(ev1)!, captureAuthorizationClaim: "unknown" }] }));
     expect(ok.state).toBe("hash_verified");
     expect(ok.verified).toBe(1);
 
     // A tampered push is received — the device is fine — but the item is rejected.
-    const bad = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev2, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] })); // the device claims c; the server finds otherwise in storage
+    const bad = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev2, declaredContentHash: c, declaredManifestHash: mOf.get(ev2)!, computedContentHash: c, computedManifestHash: mOf.get(ev2)!, captureAuthorizationClaim: "unknown" }] })); // the device claims c; the server finds otherwise in storage
     expect(bad.state).toBe("failed");
     expect(bad.rejected).toBe(1);
     const [receipt] = await pool.execute<mysql.RowDataPacket[]>("SELECT matched, failureDetail FROM syncReceipts WHERE evidenceRecordId = ? AND syncPackageId = (SELECT id FROM syncPackages WHERE packageRef = ?)", [ev2, bad.packageRef]);
@@ -331,17 +338,26 @@ d("enrol, activate, push, rotate, revoke — and the refusals between", () => {
     // value; now it compares the declaration with what it stored, and the reason says so.
     expect(receipt[0].failureDetail).toMatch(/altered|differs/);
 
+    // SPINE item 3: an item with no seal carries no operation the server can classify. It is refused
+    // by the offline field policy rather than verified on the device's say-so — fail closed.
+    const unsealed = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev5, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] }));
+    expect(unsealed.state).toBe("failed");
+    expect(unsealed.rejected).toBe(1);
+    const [unsealedReceipt] = await pool.execute<mysql.RowDataPacket[]>("SELECT matched, failureDetail FROM syncReceipts WHERE evidenceRecordId = ? AND syncPackageId = (SELECT id FROM syncPackages WHERE packageRef = ?)", [ev5, unsealed.packageRef]);
+    expect(Number(unsealedReceipt[0].matched)).toBe(0);
+    expect(unsealedReceipt[0].failureDetail).toMatch(/offline field policy/i);
+
     // Rotate. The old key works inside the grace window; a stranger's key never does.
     const rot = await callerFor(driver).device.rotateKey({ deviceRef: en.deviceRef, newPublicKeySpkiBase64: B.spki });
     expect(rot.retiredFingerprint).toBe(kA);
-    const graced = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev3, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] }));
+    const graced = await callerFor(driver).sync.receivePackage(signedPackage(A, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev3, declaredContentHash: c, declaredManifestHash: mOf.get(ev3)!, computedContentHash: c, computedManifestHash: mOf.get(ev3)!, captureAuthorizationClaim: "unknown" }] }));
     // Narrowed rather than asserted loosely: `note` lives on one branch of the result union, and
     // reading it off the union was the type error. The runtime behaviour is unchanged.
     if (graced.state !== "hash_verified") throw new Error(`expected hash_verified, got ${graced.state}`);
     expect(graced.note).toContain("grace window");
     // A package signed by a key the device never held is refused — and, as with
     // every other refusal, the refusal is a row the office can see.
-    const stranger = await callerFor(driver).sync.receivePackage(signedPackage(STRANGER, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev3, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] }));
+    const stranger = await callerFor(driver).sync.receivePackage(signedPackage(STRANGER, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev3, declaredContentHash: c, declaredManifestHash: mOf.get(ev3)!, computedContentHash: c, computedManifestHash: mOf.get(ev3)!, captureAuthorizationClaim: "unknown" }] }));
     expect(stranger.state).toBe("rejected");
     expect(stranger.reason).toContain("never enrolled");
     const [strangerRow] = await pool.execute<mysql.RowDataPacket[]>("SELECT state, refusalReason FROM syncPackages WHERE packageRef = ?", [stranger.packageRef]);
@@ -351,7 +367,7 @@ d("enrol, activate, push, rotate, revoke — and the refusals between", () => {
     await expect(callerFor(driver).device.revoke({ deviceRef: en.deviceRef, reason: "lost" })).rejects.toBeTruthy();
     const rv = await callerFor(safety).device.revoke({ deviceRef: en.deviceRef, reason: "Tablet reported lost", keyCompromised: true });
     expect(rv.status).toBe("revoked");
-    const after = await callerFor(driver).sync.receivePackage(signedPackage(B, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev4, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "unknown" }] }));
+    const after = await callerFor(driver).sync.receivePackage(signedPackage(B, { deviceRef: en.deviceRef, packageRef: key("PKG"), queuedAt: new Date(), items: [{ evidenceRecordId: ev4, declaredContentHash: c, declaredManifestHash: mOf.get(ev4)!, computedContentHash: c, computedManifestHash: mOf.get(ev4)!, captureAuthorizationClaim: "unknown" }] }));
     expect(after.state).toBe("rejected");
     expect(after.reason).toContain("revoked");
     await expect(callerFor(driver).device.rotateKey({ deviceRef: en.deviceRef, newPublicKeySpkiBase64: deviceKey().spki })).rejects.toThrow(/revoked device/);
@@ -392,8 +408,10 @@ d("0142 — exact-wire verification and the tablet's clock", () => {
   it("verifies the bytes the device signed (an extra key survives the signature and is stripped only at parse), refuses one flipped byte as a row, admits a 15-minute-off tablet with its skew recorded, and refuses a day-off clock", async () => {
     const driver = await withRole("driver");
     const A = deviceKey();
-    const bytesText = key("bytes"), c = sha(bytesText), m = sha(key("manifest"));
+    const bytesText = key("bytes"), c = sha(bytesText);
     const ev = Number((await callerFor(driver).fieldRoute.evidence.upload({ title: "e", category: "photo", fileName: "e.bin", mimeType: "application/octet-stream", dataBase64: Buffer.from(bytesText).toString("base64") } as never)).id);
+    // SPINE item 3: sealed as the device seals a photo, so the server can classify the item it receives.
+    const m = String((await callerFor(driver).records.evidence.seal({ evidenceId: ev, contentHash: c, recordType: "photo", relationships: [{ entityType: "unit", entityId: 142 }] as never }) as { manifestHash: string }).manifestHash);
     const en = await callerFor(driver).device.enroll({ platform: "android", publicKeySpkiBase64: A.spki, keystoreAttestation: "hardware", encryptedStorageAttested: true });
     await callerFor(driver).device.activate({ deviceRef: en.deviceRef });
     const item = { evidenceRecordId: ev, declaredContentHash: c, declaredManifestHash: m, computedContentHash: c, computedManifestHash: m, captureAuthorizationClaim: "authorized", captureAuthorizationReason: null, tabletOnlyKey: "the schema does not know this key; the tablet signed it anyway" };
