@@ -17,7 +17,9 @@ layer) **has merged**. `server/_core/ai/` is on `main`, and so is
 `server/_core/ai/workerBoundary.test.ts`, along with the moratorium document it cites
 (`docs/register/SECRETARY_SPINE_MORATORIUM.md`). F1's request-handler guard has also landed, as
 `server/aiRequestBoundary.test.ts`. **Merged is not wired.** Every `server/_core/ai/` module is
-still listed in `DECLARED_UNWIRED` in `server/engineReachability.test.ts` (30 `ai/*` entries). No
+still listed in `DECLARED_UNWIRED` in `server/engineReachability.test.ts` (21 `ai/*` keys; corrected
+2026-10-03 from "30", which counted every `"ai/` string in that file, including the nine-module
+internal-cluster list). No
 non-test file outside `server/_core/ai/` imports one. `productionWorker.ts` does not dispatch
 `secretary.narration.captured`, and no composition root supplies `createCaller`. Where the body
 below writes `(PR #7)`, read it as "arrived with PR #7, now in-tree, still unwired unless the row
