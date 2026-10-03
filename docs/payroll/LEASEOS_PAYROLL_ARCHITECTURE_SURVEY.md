@@ -1299,7 +1299,8 @@ Ad-hoc periods move through the same `payrollSchedule.period*` procedures (they 
 
 ## 26. P3 — Payroll Time, Operational Candidates, Earning Approval & Exceptions (implemented 2026-10-03)
 
-**Base:** `main` = `b36f43a` (P2 merged as #131). **Checkpoints in its history:** P0 `2552380`; P1 `84f2554`,
+**Base:** `main` = `b36f43a` (P2 merged as #131); `main` moved to `48a64e1` (driver portfolio, #16) during the work
+and was merged into the branch before the full suite, combining the shared procedure and path pins. **Checkpoints in its history:** P0 `2552380`; P1 `84f2554`,
 `67dbbfc` (#130); P2 `459543e` (#131). **Branch:** `claude/payroll-p3-time-candidates`.
 **Migration:** **`0228_payroll_time_candidates_exceptions.sql`** — one migration, allocated immediately before it was
 written (scan of `origin/main` and all 131 remote refs: open claims `0220`–`0225`, nothing at or above `0228`) and
@@ -1340,7 +1341,7 @@ No floating-point money was added (the only new number is `workedMinutes`); no f
 | Source | Read from | Authority | What it can show | P3 time-eligible | Version used for change detection |
 |---|---|---|---|---|---|
 | `hos_duty` | `dutyRecords` (driving / on_duty only), the worker's operator, `coreRecordOwnership` | regulatory duty | a regulatory duty window — **not paid time** | yes, if the interval is closed | none (insert-only table); material facts |
-| `dispatch_booking` | `resourceBookings` (operator), its job in the organization | planned assignment | the **planned** window — not proof of work | yes, if `confirmed` | none (insert-only); material facts |
+| `dispatch_booking` | `resourceBookings` of the operator that hold them over the window — read through SPINE item 2's one rule (`conflictingBookingsWhere`), never a second window/state query — and whose job is in the organization | planned assignment | the **planned** window — not proof of work | yes, if `confirmed` (a `tentative` one is shown, not submittable) | none (insert-only); material facts |
 | `field_ticket` | `fieldTickets` (operator, job in the organization), latest `fieldTicketRevisions` | actual operational | an actual window | yes, if closed or sealed | the latest sealed revision (`revN:snapshotHash`) + material facts |
 | `trip` | `trips` (operator, `orgRef`) | actual operational | distance, completion | **no** — quantity evidence | `updatedAt` + material facts |
 | `load` | `loads` (operator, job in the organization) | measured quantity | a measured quantity | **no** — quantity evidence | material facts (no version column) |
@@ -1470,6 +1471,8 @@ permissions; driver, mechanic and shop_lead the exception and earning permission
 
 ### Hardening of existing paths
 
+- Unit ids on every new mutation are checked by the canonical `requireCallerUnits` (the unit-scope guard), and a
+  refusal is recorded as `cross_tenant_reference`; job and trip ids by `jobInScope` / `tripInScope`.
 - `payroll.submitTime` now goes through the same submission path (period lock, overlap, work date, ref) and proves
   `jobId`/`tripId` in the organization — it accepted any id before (T13). One P0 test passed `jobId: 1`, a job of no
   organization; it now creates a job in its own organization.

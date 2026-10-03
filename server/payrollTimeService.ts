@@ -12,6 +12,7 @@
  * behind that if anything slips past.
  */
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { conflictingBookingsWhere } from "./_core/bookingConflict";
 import { getDb, jobInScope, operatorForUserInScope, operatorInScope, orgScopeWhere, ownershipScopeWhere, type TenantScope } from "./db";
 import {
   compensationAgreements,
@@ -298,9 +299,11 @@ export async function sourceFactsFor(args: { operatorId: number; scope: TenantSc
     .where(and(eq(dutyRecords.operatorId, operatorId), ownershipScopeWhere("operator", dutyRecords.operatorId, scope), gte(dutyRecords.startedAt, from), lt(dutyRecords.startedAt, to), inArray(dutyRecords.dutyStatus, ["driving", "on_duty"])))
     .orderBy(asc(dutyRecords.startedAt)).limit(500);
   facts.push(...duty.map(hosFact));
+  // SPINE item 2: a booking's window and state are read only through the one booking rule. The operator's bookings
+  // that hold them over the window are exactly the bookings that are candidates (released and cancelled ones are not work).
   const bookings = await db.select().from(resourceBookings)
-    .where(and(eq(resourceBookings.resourceType, "operator"), eq(resourceBookings.resourceRef, String(operatorId)), gte(resourceBookings.startsAt, from), lt(resourceBookings.startsAt, to)))
-    .orderBy(asc(resourceBookings.startsAt)).limit(500);
+    .where(conflictingBookingsWhere({ type: "operator", ref: String(operatorId) }, { startsAt: from, endsAt: to }))
+    .limit(500);
   for (const b of bookings) {
     // A booking names the operator by id; its job, when it has one, must be the caller's organization's too.
     if (b.jobId != null && !(await jobInScope(b.jobId, scope))) continue;

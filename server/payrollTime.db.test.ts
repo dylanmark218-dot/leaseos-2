@@ -148,9 +148,14 @@ d("P3 — tenant boundary on entries and on operational ids (4, 21)", () => {
     const before = await n("SELECT COUNT(*) AS n FROM payrollTimeEntries WHERE employeePayrollProfileId = ?", [b.profileId]);
     expect((await refusal(() => callerFor(b.worker).payrollTime.myEntryCreate({ activity: "driving", startedAt: START, endedAt: END, jobId: a.jobId }))).code).toBe("NOT_FOUND");
     expect((await refusal(() => callerFor(b.worker).payroll.submitTime({ activity: "driving", startedAt: START, endedAt: END, jobId: a.jobId }))).code).toBe("NOT_FOUND");
+    // A's unit, through the canonical unit-scope check.
+    const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, inspectionStatus, maintenanceStatus, createdAt) VALUES (?, 'vac truck', 'current', 'clear', NOW())", [`U-${rnd()}`]);
+    await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'unit', ?, 1)", [a.orgRef, u.insertId]);
+    expect((await refusal(() => callerFor(b.worker).payrollTime.myEntryCreate({ activity: "driving", startedAt: START, endedAt: END, unitId: u.insertId }))).code).toBe("NOT_FOUND");
+    expect((await own(a, { unitId: u.insertId })).status).toBe("submitted");
     expect(await n("SELECT COUNT(*) AS n FROM payrollTimeEntries WHERE employeePayrollProfileId = ?", [b.profileId])).toBe(before);
     const xs = await callerFor(b.admin).payrollTime.exceptionsList({ kind: "cross_tenant_reference" });
-    expect(xs.length).toBe(1);
+    expect(xs.length).toBe(2);
     expect(xs[0]).toMatchObject({ financialEntityId: b.entityId, severity: "blocking" });
     expect((await callerFor(a.admin).payrollTime.exceptionsList({ kind: "cross_tenant_reference" })).length).toBe(0);
   }, 60_000);

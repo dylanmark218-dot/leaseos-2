@@ -16,7 +16,8 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { moneyScoped, roleProcedure, router } from "./_core/trpc";
 import { ownsEntity } from "./_core/entityScope";
-import { getDb, jobInScope, tripInScope, unitInScope } from "./db";
+import { getDb, jobInScope, tripInScope } from "./db";
+import { requireCallerUnits } from "./unitScope";
 import type { Db } from "./_core/dbTypes";
 import { DATE_TEXT } from "./_core/payrollSchedule";
 import { PAYROLL_ACTIVITIES, PAYROLL_EXCEPTION_KINDS, isPayable, localDate, minutesBetween, serverStateForCapture, sourceFingerprint, type PayrollActivity, type TimeEntryStatus } from "./_core/payrollTime";
@@ -46,11 +47,10 @@ async function ownProfile(userId: number, money: Money) {
 }
 
 /** Prove each operational id in the caller's organization; a foreign id is not found, and the attempt is recorded. */
-async function proveRefs(args: { money: Money; profile: t.ProfileRow; actorUserId: number; jobId?: number | null; unitId?: number | null; tripId?: number | null }) {
+async function proveRefs(args: { money: Money; profile: t.ProfileRow; actorUserId: number; jobId?: number | null; tripId?: number | null }) {
   const scope = { tenantId: args.money.tenantId };
   const checks: Array<[string, number | null | undefined, (id: number) => Promise<unknown>]> = [
     ["job", args.jobId, id => jobInScope(id, scope)],
-    ["unit", args.unitId, id => unitInScope(id, scope)],
     ["trip", args.tripId, id => tripInScope(id, scope)],
   ];
   for (const [kind, id, inScope] of checks) {
@@ -60,6 +60,13 @@ async function proveRefs(args: { money: Money; profile: t.ProfileRow; actorUserI
       throw notFound(`${kind[0]!.toUpperCase()}${kind.slice(1)} ${id} not found`);
     }
   }
+}
+/** A unit the canonical check refused is recorded like any other foreign id, then the refusal stands. */
+async function recordForeignUnit(profile: t.ProfileRow, actorUserId: number, unitId: number | undefined, e: unknown): Promise<never> {
+  if (unitId != null && e instanceof TRPCError && e.code === "NOT_FOUND") {
+    await t.raiseException(await dbOrThrow(), { kind: "cross_tenant_reference", financialEntityId: profile.financialEntityId, employeePayrollProfileId: profile.id, subjectType: "submission", subjectRef: `profile:${profile.id}`, discriminator: `unit:${unitId}`, detail: `A time submission named unit ${unitId}, which is not this organization's`, raisedByUserId: actorUserId });
+  }
+  throw e;
 }
 async function dbOrThrow(): Promise<Db> {
   const db = await getDb();
@@ -170,7 +177,9 @@ export const payrollTimeRouter = router({
       if (!state.ok) throw badRequest(state.reason);
       if (input.endedAt && input.endedAt <= input.startedAt) throw badRequest("The end is not after the start");
       const me = await ownProfile(ctx.user.id, ctx.money);
-      await proveRefs({ money: ctx.money, profile: me, actorUserId: ctx.user.id, jobId: input.jobId, unitId: input.unitId, tripId: input.tripId });
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId }).catch(e => recordForeignUnit(me, ctx.user.id, input.unitId, e));   // the canonical unit scope
+
+      await proveRefs({ money: ctx.money, profile: me, actorUserId: ctx.user.id, jobId: input.jobId, tripId: input.tripId });
       const { timezone } = await t.zoneFor(await dbOrThrow(), me);
       const earningCode = await requireCode(input.earningCode, me.financialEntityId, localDate(input.startedAt, timezone));
       return unwrapSubmit(await t.submitEntry({
@@ -188,7 +197,9 @@ export const payrollTimeRouter = router({
       const me = await ownProfile(ctx.user.id, ctx.money);
       const e = await ownEntry(input.entryRef, me.id);
       if (e.status !== "open") throw precondition(`The entry is ${e.status}; a submitted entry is corrected, not edited`);
-      await proveRefs({ money: ctx.money, profile: me, actorUserId: ctx.user.id, jobId: input.jobId, unitId: input.unitId, tripId: input.tripId });
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId }).catch(e => recordForeignUnit(me, ctx.user.id, input.unitId, e));   // the canonical unit scope
+
+      await proveRefs({ money: ctx.money, profile: me, actorUserId: ctx.user.id, jobId: input.jobId, tripId: input.tripId });
       const startedAt = input.startedAt ?? e.startedAt;
       const endedAt = input.endedAt ?? e.endedAt;
       if (endedAt && endedAt <= startedAt) throw badRequest("The end is not after the start");
@@ -264,7 +275,9 @@ export const payrollTimeRouter = router({
       const me = await ownProfile(ctx.user.id, ctx.money);
       const e = await ownEntry(input.entryRef, me.id);
       if (e.status !== "submitted" || e.supersededByEntryId != null) throw precondition(`The entry is ${statusLabel(e)}; only a submitted, current entry is corrected (approved time is changed by adjustment)`);
-      await proveRefs({ money: ctx.money, profile: me, actorUserId: ctx.user.id, jobId: input.jobId, unitId: input.unitId, tripId: input.tripId });
+      await requireCallerUnits(ctx.user.id, { unitId: input.unitId }).catch(e => recordForeignUnit(me, ctx.user.id, input.unitId, e));   // the canonical unit scope
+
+      await proveRefs({ money: ctx.money, profile: me, actorUserId: ctx.user.id, jobId: input.jobId, tripId: input.tripId });
       const startedAt = input.startedAt ?? e.startedAt;
       const endedAt = input.endedAt ?? e.endedAt;
       if (!endedAt || endedAt <= startedAt) throw badRequest("A correction needs an end after its start");
