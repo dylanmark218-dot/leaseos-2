@@ -13,6 +13,7 @@
  * REVIEW REQUIRED until the rule is configured — never a made-up answer.
  */
 
+import type { SignatureVerdict } from "./fieldTicketSignature";
 import { createHash } from "node:crypto";
 
 export type Clock = "duty" | "payroll" | "job" | "customer_billing" | "equipment" | "standby" | "travel" | "disposal" | "internal_service";
@@ -210,22 +211,25 @@ export type CloseoutState = {
   blockers: string[];
 };
 
-export function closeoutState(args: { events: readonly TicketEvent[]; lines: readonly TicketLine[]; siteWorkCompleteAt: Date | null; signature: { signedAt: Date; signerName: string; result: string } | null; supplement: Supplement | null; postSiteRequired: boolean; loadsWithDisposalEvidence: number; loads: number }): CloseoutState {
+export function closeoutState(args: { events: readonly TicketEvent[]; lines: readonly TicketLine[]; siteWorkCompleteAt: Date | null; signature: SignatureVerdict; supplement: Supplement | null; postSiteRequired: boolean; loadsWithDisposalEvidence: number; loads: number }): CloseoutState {
   const blockers: string[] = [];
   const site = args.events.filter(e => EVENT_CLOCK[e.eventType].phase === "site");
   const internal = args.events.filter(e => EVENT_CLOCK[e.eventType].phase === "internal");
   const postSite = args.events.filter(e => EVENT_CLOCK[e.eventType].phase === "post_site");
   const disputed = args.lines.filter(l => l.disposition === "disputed");
   const opClosedAt = args.siteWorkCompleteAt && [...postSite, ...internal].every(e => e.endedAt) && (internal.length || !args.postSiteRequired) ? new Date(Math.max(args.siteWorkCompleteAt.getTime(), ...[...postSite, ...internal].map(e => e.endedAt!.getTime()))) : null;
-  if (!args.signature) blockers.push("Site ticket not signed");
-  if (args.signature?.result === "refused") blockers.push("Customer refused the site ticket");
+  // SPINE item 2 — the signature prerequisite is the canonical verdict; a signature row is never read as one here.
+  const sig = args.signature;
+  if (sig.state === "unsigned") blockers.push("Site ticket not signed");
+  else if (sig.state === "refused") blockers.push("Customer refused the site ticket");
+  else if (!sig.satisfied) blockers.push(`Site signature not established — ${sig.reason}`);
   for (const l of disputed) blockers.push(`Line disputed: ${l.description} — office resolves`);
   if (args.postSiteRequired && !args.supplement) blockers.push("Post-site supplement not prepared");
   if (args.supplement && args.supplement.determination === "blocked") blockers.push(...args.supplement.reasons);
   if (args.loads > args.loadsWithDisposalEvidence) blockers.push(`${args.loads - args.loadsWithDisposalEvidence} load(s) without disposal evidence`);
   const financiallyReady = blockers.length === 0;
-  const state: CloseoutState["state"] = !site.length ? "OPEN" : !args.siteWorkCompleteAt ? "WORK_ACTIVE" : !args.signature ? "SITE_CLOSE_PENDING" : disputed.length ? "SITE_DISPUTED" : args.postSiteRequired && postSite.some(e => !e.endedAt) ? "POST_SITE_ACTIVE" : args.postSiteRequired && !args.supplement ? "POST_SITE_COMPLETE" : !financiallyReady ? "BILLING_RECONCILIATION" : "BILLING_READY";
-  return { fieldClosed: { at: args.signature?.signedAt.toISOString() ?? null, by: args.signature?.signerName ?? null }, operationallyClosed: { at: opClosedAt?.toISOString() ?? null }, financiallyReady, invoiceReady: financiallyReady && (args.supplement?.determination ?? "ready") === "ready", state, blockers };
+  const state: CloseoutState["state"] = !site.length ? "OPEN" : !args.siteWorkCompleteAt ? "WORK_ACTIVE" : sig.state === "unsigned" ? "SITE_CLOSE_PENDING" : disputed.length ? "SITE_DISPUTED" : args.postSiteRequired && postSite.some(e => !e.endedAt) ? "POST_SITE_ACTIVE" : args.postSiteRequired && !args.supplement ? "POST_SITE_COMPLETE" : !financiallyReady ? "BILLING_RECONCILIATION" : "BILLING_READY";
+  return { fieldClosed: { at: sig.signature?.capturedAt.toISOString() ?? null, by: sig.signature ? sig.signature.signerName ?? "unknown signer" : null }, operationallyClosed: { at: opClosedAt?.toISOString() ?? null }, financiallyReady, invoiceReady: financiallyReady && (args.supplement?.determination ?? "ready") === "ready", state, blockers };
 }
 
 /* ------------------------------------------------------------------ */

@@ -26,7 +26,7 @@ not duplicated, and item 2 does not delete it.
 | `openShifts` | shift eligibility, interest | `openShiftsRouter.ts` inline | **router copy deleted**; the engine's `shiftEligibility` is the one rule (owner's ruling: the union of both), and the router enforces it |
 | `complianceDocumentValidity` | document validity | `readinessComposer` / `dispatchReadiness` / tile and other readers | **resolved by #52** (rulings B and C); every reader now takes the canonical verdict |
 
-**All four pairs are resolved** (2026-10-01). Each has one implementation; the last two were settled by the owner's rulings and applied on `claude/spine-item2-openshifts-fieldticket` (§2, §3 and "Item 2 — completion" below). Item 2 is recorded **COMPLETE** only once that branch is merged and CI on the resulting `main` commit is green; that record follows the merge.
+**Item 2 is COMPLETE** (2026-10-01). All four pairs have one implementation. The last two were settled by the owner's rulings in dylanmark218-dot/leaseos-2#89, merged as `3f2bcec`. That commit's own main run was cancelled when the next merge superseded it. The next main commit, `c3f088b` (#90), contains it and is green (CI run 36912636248). See §2, §3 and "Item 2 — completion" below.
 
 ---
 
@@ -68,6 +68,29 @@ imports it.
   - Each was checked against a mutation: dropping the overlap push, or dropping the state filter, fails the matching test.
   - Tenant refusal was already pinned by the C1a tenant-scope test ("another organization's dispatcher cannot … award").
 - **Known limit, not introduced here:** the posting-row lock serializes awards on one posting, not two awards on different postings that race for the same unit.
+
+**Follow-up (2026-10-01): the rule itself, not just the removed copy.** Deleting `detectBookingConflicts`
+left the rule written out twice in live code and once more in memory, agreeing only by coincidence:
+the award's SQL (`dispatchTransaction.awardAssignment`), the open-shift read's SQL
+(`personFacts`, added by #89 in the router and moved to `openShiftsService.ts` by #59) and an `overlaps` helper in `_core/openShifts.ts`. The
+names guard could not see them because they were new names, not re-declared ones.
+
+- **One rule:** `server/_core/bookingConflict.ts` — `ACTIVE_BOOKING_STATES` (tentative, confirmed),
+  half-open `windowsOverlap`, resource identity by type and ref, as a function (`bookingConflicts`)
+  and as a query predicate (`conflictingBookingsWhere`).
+- **Callers:** the award's re-check and open-shift eligibility both query through
+  `conflictingBookingsWhere`; `shiftEligibility` judges a commitment through `windowsOverlap`.
+- **The award's check stays.** It is the final revalidation inside the transaction, immediately before
+  the booking is written: state can change between eligibility and award. It keeps its own decision of
+  which conflicts to ignore (a booking on the posting being awarded), which is the caller's business,
+  not the rule's.
+- **No behaviour changed:** the three copies already agreed; this makes them unable to drift.
+- **Tests:** `server/bookingConflict.db.test.ts` writes every state × window × resource combination
+  and requires the predicate and the function to select the same rows (10 of 64 per resource).
+- **Guard** (`server/spineItem2Duplicates.test.ts`, "a booking conflict has one definition"): only
+  `bookingConflict.ts` reads `resourceBookings`' window or state columns or names the holding states;
+  the award and `openShiftsService.personFacts` must call `conflictingBookingsWhere`; the open-shift engine compares no
+  window with a window and declares no `overlaps`. Each of main's three copies, restored, fails it.
 
 **Concepts C1/C2, suitability match and posting visibility: not duplicated.**
 
@@ -112,6 +135,24 @@ The engine is `server/_core/fieldTicket.ts`. It has no production importer; only
 - **Behaviour retained.** `draftFromTicket` already refused an undecided line (`not_presented` blocks), a disputed line unless the contract allows partial invoices, an unsigned ticket and a ticket amended after signature. `invoicingRouter`'s "signed" input was never treated as sufficient, so no invoicing logic changed; the ruling is pinned rather than implemented.
 - **Tests** (`server/fieldTicketSignatureSemantics.db.test.ts`, through the real `closeout.siteSign` / `closeout.lineDecide` / `invoicing.draftFromTicket`): signed stays signed — signer, time, payload hash, statement and ticket status byte-for-byte — after every line is disputed and after the decisions are corrected; an unsigned ticket's lines cannot be decided and lines accepted underneath it manufacture no signature; undecided lines block readiness; a disputed line blocks where the contract refuses partial invoices while the signature still reads `accepted`; all lines accepted and priced → ready, and drafting leaves the signature unchanged. Mutation: recomputing `signatureStatus` in `decideLine`, or dropping the `not_presented` blocker, fails 3 of the 5.
 - **Guard:** `deriveSignatureStatus` is a removed name in `server/spineItem2Duplicates.test.ts`. `_core/billing.ts` and `LEASEOS_BILLING_RECORDS_CHAIN.md` no longer describe a roll-up.
+
+**Follow-up (2026-10-02): "is the signature established?" had three answers. Now it has one.**
+
+The ruling above kept the writer; it left each consumer deciding "signed" for itself, from a different fact:
+
+| consumer | rule before | where |
+|---|---|---|
+| invoicing | any signature row whose `result` is accepted / partially_accepted, on any revision | `invoicingRouter.ticketForInvoice` |
+| closeout (internal + portal job board) | the newest signature row exists and is not `refused` | `closeoutRouter.loadTicket` → `closeoutState` |
+| portal daily report | the denormalized `fieldTickets.signatureStatus` column | `portalRouter.dailyReport` |
+| line decisions, supplement, completion package, portal adjustment | the newest signature row exists | `closeoutRouter`, `portalRouter` |
+
+- **Characterized first** (`server/fieldTicketSignatureVerdict.db.test.ts`, 11 records shaped through the real `invoicing.draftFromTicket` and `closeout.state`). On main, before the change, **an invoice drafted** for: a signature on a revision that was never frozen; a signature whose payload hash no longer matched the frozen snapshot; an `amendment` revision after signing; two signatures on one ticket; a signature row while the ticket's own record said `unsigned`. Closeout reported **no signature blocker** for an `amended_after_signature` ticket and for `no_representative`. A ticket whose column said signed with no row on file was "not signed" to billing and closeout but counted signed by the daily report.
+- **Canonical:** `fieldTicketSignatureVerdict` (`server/_core/fieldTicketSignature.ts`), owned by the site sign-off. It reads every signature row, every revision and the ticket record. States are the ones the workflow records: `signed`, `signed_with_refusals` (both satisfy), `unsigned`, `refused`, `no_representative`, `stale` (not on a frozen `site_signed` revision, payload hash ≠ snapshot hash, ticket amended after signature, or a later revision of a kind the signer did not pre-authorize — only `post_site_supplement` is), `unknown` (records disagree: two signatures, column ≠ row, column claims a result with no row). No "signature not required" state exists: no workflow here produces one, and none was invented.
+- **Consumers now:** `draftFromTicket` and `closeoutState` take the verdict (`signature: SignatureVerdict`), not a boolean or a row. `ticketForInvoice` and `loadTicket` compute it once each; `dailyReport` counts satisfied verdicts. Line decisions, the supplement, the completion package and the portal adjustment require a satisfied verdict; their refusal text is unchanged for an unsigned ticket and names the reason otherwise. Row-existence checks that lock the workflow (no second signature, no edit or snapshot re-present after signing, site events frozen) stay row-level — they are locks, not the verdict. Display of the signer stays the row (evidence).
+- **Billing messages:** unsigned → "Ticket is not signed — …" (unchanged); refused / no representative named; stale → "Signature does not cover the current revision — {reason}" (amended keeps "amended after signature"); unknown → "Signature not established — {reason}". Closeout: "Site ticket not signed", "Customer refused the site ticket" (unchanged), otherwise "Site signature not established — {reason}".
+- **Not wired:** `_core/billing.ts` `evaluateBillingReadiness` takes a `fieldTicketStatus` input and has no production caller; it is left as it is (reachability unchanged).
+- **Guard:** `server/spineItem2Duplicates.test.ts` "a field ticket's signature has one verdict" — no file that reads signatures compares a signature `result` or ticket `signatureStatus` to a signature outcome outside `_core/fieldTicketSignature.ts`; invoicing, closeout and the portal call the verdict; the draft and closeout state take it; the function is declared once. Mutation: restoring invoicing's `sigs.some(s => s.result === "accepted")` fails it.
 
 **Scope validation and job reconciliation: not duplicated.**
 
@@ -174,7 +215,42 @@ A mutation that bypasses `shiftEligibility` in `expressInterest` fails the guard
 
 **Fixtures** in four older suites now give workers a roster and a linked operator record, which the stricter rule requires. `engineReachability`: `openShifts` is wired, and the unwired pin goes 86 → 85.
 
-**Not resolved here.** dylanmark218-dot/leaseos-2#59 (open, design checkpoint) rewrites `openShiftsRouter.ts`, and it must rebase onto this one rule rather than reintroduce inline eligibility. The guard will refuse the latter.
+**After the merge.** dylanmark218-dot/leaseos-2#59 (Open Work) was merged after #89 and adapted around the one rule:
+- `openShiftsRouter.ts` calls `shiftEligibility` in `shifts.eligibility` and in `shifts.expressInterest`;
+- the fact reader moved to `openShiftsService.personFacts`, which still resolves the licence through `operatorForUserInScope` (`operators.userId`).
+
+#59 also brought a census that forbids open-work files from importing a validity engine (`documentValidityCanonical.test.ts`). That collided with the rule's `readExpiry` licence check and turned main red. dylanmark218-dot/leaseos-2#117 gave the census exactly one exception: `_core/openShifts.ts` may import `readExpiry` from `./documentValidity` and nothing else. That keeps one licence-date classifier rather than adding a second.
+
+**Follow-up (2026-10-01): the licence, read through the canonical verdict.** #89 made the licence
+part of the one open-shift rule, but the rule judged it from `operators.licenseExpiresAt` itself
+(`readExpiry`), and so did shift readiness (`readinessRouter`). That legacy date is an unverified
+claim under #52's ruling, so a worker dispatch held at "licence unknown" was shown an open shift as
+eligible, and shift readiness read it as satisfied. Shift readiness also read the operator whose id
+equalled the user id rather than the person's own record. `documentValidityCanonical.test.ts`
+(added by #59) forbids the open-work files from importing a validity engine, so `main` failed it.
+#117 then restored green with a single census exception for that `readExpiry` import; this follow-up
+removes the import, and with it the exception.
+
+- **One verdict:** `driverLicenceVerdict` (`_core/complianceDocumentValidity.ts`): structured
+  `driver_licence` documents first; the legacy date only when they establish nothing, and then as
+  an unverified claim. The dispatch composer's inline legacy rule moved here unchanged.
+- **One read:** `server/licenceReads.ts` `driverLicenceStanding(operator, at)` reads the person's
+  own operator record (`operators.userId`, in scope), its licence documents and legacy date, and
+  narrows the verdict to a `LicenceStanding` by table: in force, lapsed (expired, or an unverified
+  claim already past), not established (unverified, no expiry, rejected, not yet effective), none,
+  ambiguous. It is asked at the shift's start.
+- **Callers:** `openShiftsService.personFacts` and `readinessRouter.checksFor` read the standing;
+  `shiftEligibility` maps it and imports no validity module. A new refusal,
+  `licence_not_established`, says which unknown it is; the preview counts it as not established.
+- **Behaviour change (intended):** a worker with only the legacy date is no longer open-shift
+  eligible or shift-ready on the licence; a verified `driver_licence` document is needed, as
+  dispatch already required. Fixtures in four suites now file one.
+- **Tests:** `openShiftsEligibility.db.test.ts` files seven licence shapes and asks the open-shift
+  view, `readiness.forShift` and `composeReadiness`; all three give the same standing. Main's
+  files, restored, fail all seven.
+- **Guard** (`complianceValidityGuard.test.ts`): only `licenceReads.ts` and `readinessComposer.ts`
+  read `operators.licenseExpiresAt`, and both call `driverLicenceVerdict`; open shifts and shift
+  readiness call `driverLicenceStanding`; `shiftEligibility` compares no document date.
 
 ## 4. `complianceDocumentValidity`: resolved by #52
 
