@@ -2,14 +2,14 @@
  * Workforce lifecycle — the API.
  */
 import { TRPCError } from "@trpc/server";
-import { actingScopeFor, orgScopeWhere, ownershipScopeWhere, userInScope, type TenantScope } from "./db";
+import { actingScopeFor, createOperator, operatorForUserInScope, orgScopeWhere, userInScope, type TenantScope } from "./db";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
 import { z } from "zod";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
 import { getDb, revokeUserRole } from "./db";
 import { resolveActingScope } from "./_core/actingScope";
-import { applicantScreenings, applicants, competencySignoffs, complianceDocuments, fieldDevices, offboardings, onboardingPlans, onboardingTasks, operators, probationReviews, serializedTools, toolCheckouts, trainingRecords, userRoleAssignments } from "../drizzle/schema";
+import { applicantScreenings, applicants, competencySignoffs, complianceDocuments, fieldDevices, offboardings, onboardingPlans, onboardingTasks, probationReviews, serializedTools, toolCheckouts, trainingRecords, userRoleAssignments } from "../drizzle/schema";
 import { COURSE_CREDENTIALS, competencyDecision, hireReadiness, offboardingClose, onboardingGaps, probationDecision, screeningRecordDecision, trainingVerification } from "./_core/workforce";
 import { assertMayDecide } from "./credentialVerificationService";
 import { recordPortfolioEvent } from "./driverPortfolioService";
@@ -59,9 +59,10 @@ type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
  * ambiguous and refused rather than guessed.
  */
 async function ownerFor(db: Db | Tx, userId: number, scope: TenantScope): Promise<{ ownerType: "operator" | "user"; ownerId: number }> {
-  const ops = await db.select({ id: operators.id }).from(operators).where(and(eq(operators.userId, userId), ownershipScopeWhere("operator", operators.id, scope))).limit(2);
-  if (ops.length > 1) throw new TRPCError({ code: "CONFLICT", message: "This person has more than one operator record in this organization; resolve that before verifying" });
-  return ops[0] ? { ownerType: "operator", ownerId: ops[0].id } : { ownerType: "user", ownerId: userId };
+  // The one lookup of a person's operator record (operatorIdentityGuard), read inside the caller's transaction.
+  const op = await operatorForUserInScope(userId, scope, db);
+  if (op.kind === "ambiguous") throw new TRPCError({ code: "CONFLICT", message: "This person has more than one operator record in this organization; resolve that before verifying" });
+  return op.kind === "resolved" ? { ownerType: "operator", ownerId: op.operatorId } : { ownerType: "user", ownerId: userId };
 }
 
 /**
@@ -134,7 +135,11 @@ export const workforceRouter = router({
       const existing = (await db.select({ id: onboardingPlans.id }).from(onboardingPlans).where(eq(onboardingPlans.userId, input.userId)).limit(1))[0];
       if (existing) throw new TRPCError({ code: "CONFLICT", message: "This user already has an onboarding plan" });
       const isDriver = /driver|operator/i.test(a.roleApplied);
-      if (isDriver && !(await db.select({ id: operators.id }).from(operators).where(eq(operators.userId, input.userId)).limit(1))[0]) await db.insert(operators).values({ userId: input.userId, name: a.fullName, licenseExpiresAt: input.licenseExpiresAt ?? null } as never);
+      // The driver's operator record belongs to the hiring organization: one there already counts, one elsewhere does not.
+      if (isDriver) {
+        const scope = await actingScopeFor(ctx.user.id);
+        if ((await operatorForUserInScope(input.userId, scope)).kind === "none") await createOperator({ userId: input.userId, name: a.fullName, licenseExpiresAt: input.licenseExpiresAt ?? null } as never, scope, ctx.user.id);
+      }
       const planRef = ref("ONB");
       const probationEndsAt = new Date(input.startDate.getTime() + input.probationDays * 86_400_000);
       const ins = await db.insert(onboardingPlans).values({ planRef, userId: input.userId, applicantId: a.id, position: a.roleApplied, startDate: input.startDate, probationEndsAt, createdByUserId: ctx.user.id });
