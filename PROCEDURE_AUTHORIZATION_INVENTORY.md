@@ -27,6 +27,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/recordsRouter.ts` | `ROLE_AUTHORIZED` | **23** |
 | `server/payrollRouter.ts` | `ROLE_AUTHORIZED` | **43** |
 | `server/payrollCompensationRouter.ts` | `ROLE_AUTHORIZED` | **11** |
+| `server/payrollScheduleRouter.ts` | `ROLE_AUTHORIZED` | **12** |
 | `server/portalFundingRouter.ts` | `ROLE_AUTHORIZED` | **10** |
 | `server/purchasingRouter.ts` | `ROLE_AUTHORIZED` | **9** |
 | `server/deviceRouter.ts` | `ROLE_AUTHORIZED` | **7** |
@@ -57,10 +58,12 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/documentControlRouter.ts` | `ROLE_AUTHORIZED` | **23** (DC-A: definitions list/get, catalog seed, overlay/create/retire, source artifacts; DC-B: intake, register rendered, confirm, issue, void, supersede, withdraw, amend, get, list; DC-C: series list, gap report, blocks, allocate/retire device block, void number) |
 | `server/attestRouter.ts` | `ROLE_AUTHORIZED` — SA1 Sign & Attest (`docs/sign-attest/SA1_OWNER_RULING.md`); `attest.sign` and `attest.decline` are universal and self-scoped (the signer row must name `ctx.user.id`); every other write is sensitive | **14** |
 | `server/portalRouter.ts` | `EXTERNAL_IDENTITY` (`externalProcedure`; the count is generated into `LEASEOS_CURRENT_STATE.md` and never written here) | **0** |
+| `server/driverPortfolioRouter.ts` | `ROLE_AUTHORIZED` (0212; the three `portfolio.*_own` permissions are universal and self-scoped to the operator linked to the session) | **17** |
 | `server/routers.ts` | `PUBLIC` | 2 (auth entry points) |
+| `server/driverPortfolioRouter.ts` | `PUBLIC` | 1 (`shareRedeem`: one credential behind a 256-bit token, only its hash stored; re-read on every redemption; revocable; at most 7 days) |
 | Anywhere | bare `protectedProcedure` | **0** |
 
-**507 role-authorized procedures across the surfaces listed above.** Zero on bare `protectedProcedure`.
+**536 role-authorized procedures across the surfaces listed above.** Zero on bare `protectedProcedure`.
 The table lists the surfaces reviewed here, not every router; the system-wide count is generated into
 `LEASEOS_CURRENT_STATE.md`. The numbers in this table are written by `node scripts/procedure-inventory.mjs`,
 which reads them from the routers (CP1.5: nine rows had drifted below their routers and the total said 356).
