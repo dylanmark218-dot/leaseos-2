@@ -136,7 +136,7 @@ No state means both "hardware unavailable" and "server refused". Both kinds of `
 
 ## Structural guard: `server/spineItem3Structure.test.ts` (AST, not text)
 
-1. Hardware is reached only through `client/src/runtime/adapters/`. That rules out Capacitor imports, computed `import()`, `navigator.mediaDevices`/`geolocation`, `getUserMedia` and `<input type="file">` anywhere else. This is HS0 criterion (b).
+1. Hardware is reached only through `client/src/runtime/adapters/`. That rules out Capacitor imports, computed `import()`, `navigator.mediaDevices`/`geolocation`, `getUserMedia` and `<input type="file">` anywhere else, with no exception (HS0 criteria (b) and (c)).
 2. `requiresOnline` is read (`.requiresOnline`) only in `actionGateway.ts`.
 3. Each seam function is declared once, in its canonical file. `offlineOutcome` is gone, and no production code declares an `offlineClass`.
 4. No server code other than the composition imports HS1 or the composition, so authorization cannot depend on them.
@@ -150,7 +150,7 @@ Mutation checks: a direct `navigator.geolocation` in the runtime, a second `requ
 |---|---|---|
 | (a) | `capabilities()` matrix aggregating the per-binding probes | **done**: `capabilities(probes)`, with `memoryProbes` and `capacitorProbes` |
 | (b) | a test proving no direct hardware call site outside the adapter | **done**: guard 1 |
-| (c) | a decision on `client/src/showcase/Home.tsx`'s file input | **owner's decision, pinned**. The showcase is now mounted under `/showcase/*`, so deleting it is a product decision. The guard allows exactly that one input and fails on a second. |
+| (c) | a decision on `client/src/showcase/Home.tsx`'s file input | **resolved (owner's ruling: no production hardware bypass)**. The showcase is routed and statically bundled (`App.tsx` `/showcase/*`), so it is production code. Its private `<input type="file">` + `fieldRoute.evidence.upload` (already refused by `showcaseGuardLink`) is gone; its Photo/Document buttons call `QuickCapture.startQuickCapture` — the field runtime's HS1-gated outbox, or the authoritative `/evidence` surface. The guard allows **zero** exceptions. |
 
 ## Engine reachability: contract wired, runtime not activated
 

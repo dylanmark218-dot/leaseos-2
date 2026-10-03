@@ -4,8 +4,8 @@
  *   1. Hardware is reached only through the adapters (HS1, HS0 criterion (b)): no client code outside
  *      `client/src/runtime/adapters/` imports a Capacitor plugin, imports a module by a computed
  *      name, touches `navigator.mediaDevices`/`navigator.geolocation`, calls `getUserMedia`, or
- *      renders `<input type="file">` — except the one showcase input, pinned (HS0 criterion (c) is
- *      the owner's product decision; see SPINE_ITEM3_OFFLINE_HS1.md).
+ *      renders `<input type="file">`. No exception: the showcase is routed and bundled in production
+ *      (App.tsx), so it starts captures through Quick Capture like every other surface (HS0 (c)).
  *   2. One offline policy: `requiresOnline` is read only in `server/_core/actionGateway.ts`.
  *   3. One evaluator: the seam's functions are declared once, in their canonical files, and no
  *      production code declares an `offlineClass` — it is derived.
@@ -52,12 +52,8 @@ function reachesIn(sf: ts.SourceFile): string[] {
 
 describe("1. hardware is reached only through the adapters", () => {
   const reaches = CLIENT.filter(f => !f.startsWith("client/src/runtime/adapters/")).flatMap(hardwareReaches);
-  const SHOWCASE = reaches.filter(r => r.startsWith("client/src/showcase/"));
-  it("no client code outside the adapters reaches hardware directly", () => {
-    expect(reaches.filter(r => !r.startsWith("client/src/showcase/"))).toEqual([]);
-  });
-  it("the showcase keeps exactly its one file input, pinned until the owner decides its fate", () => {
-    expect(SHOWCASE.map(r => r.replace(/:\d+ /, " "))).toEqual(["client/src/showcase/Home.tsx <input type=\"file\">"]);
+  it("no client code outside the adapters reaches hardware directly — production has no exception", () => {
+    expect(reaches).toEqual([]);
   });
   it("the scanner catches each form it claims to, and ignores comments and strings (fixtures)", () => {
     const run = (src: string) => reachesIn(ts.createSourceFile("fx.tsx", src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)).map(r => r.replace(/^fx\.tsx:\d+ /, ""));
