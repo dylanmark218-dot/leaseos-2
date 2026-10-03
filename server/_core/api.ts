@@ -14,12 +14,21 @@ import { TRPC_MOUNT_PATH } from "@shared/const";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { registerOAuthRoutes } from "./oauth";
+import { allowedOriginsFromEnv, crossSiteGuard, rateLimit } from "./httpHardening";
 import { organizationSelectionMiddleware } from "./organizationSelection";
 
 export function registerApi(app: Express): void {
-  // Configure body parser with larger size limit for file uploads
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  // #19: a cross-site write to the API is refused before any parser or procedure runs.
+  app.use("/api", crossSiteGuard({ allowedOrigins: allowedOriginsFromEnv(process.env) }));
+  // Body limits by route. Only tRPC carries files, and the largest is an
+  // evidence upload: 15 MB of bytes is 20 MB of base64, and the procedure
+  // refuses anything longer. Everything else is kilobytes. The limit used to
+  // be 50 MB everywhere.
+  app.use(TRPC_MOUNT_PATH, express.json({ limit: "25mb" }));
+  app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ limit: "100kb", extended: true }));
+  // A floor against one client hammering sign-in, per process. See rateLimit.
+  app.use("/api/oauth", rateLimit({ windowMs: 60_000, max: 60 }));
   registerOAuthRoutes(app);
   // v23.26 (#64) — the request's claimed organization, in scope for the whole handler. It carries a
   // claim and never an authority: `resolveActingScope` checks it against the membership table on

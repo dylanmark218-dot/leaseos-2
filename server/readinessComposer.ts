@@ -325,12 +325,19 @@ export function academyBindingMatches(binding: Pick<AcademyBindingRow, "subjectT
 
 type LoadClassificationRow = Pick<typeof loadProfiles.$inferSelect, "id" | "unNumber" | "dgClass" | "packingGroup" | "classificationStatus" | "verifiedAt">;
 
+/** One load's standing in the dangerous-goods determination. */
+export type LoadDangerousGoodsState = "dg" | "not_dg" | "unverified" | "blocked";
+
 export type DangerousGoodsAuthority = {
-  /** dg: verified DG on a load · not_dg: every load verified and none carries a UN number or class ·
-   *  unknown: a load may be DG and its classification is not verified, or there is no load record
-   *  and something says it may be DG · blocked: a load's classification was refused ·
-   *  not_applicable: no load recorded and no DG signal at all. */
-  state: "dg" | "not_dg" | "unknown" | "blocked" | "not_applicable";
+  /** dg: at least one verified DG load · not_dg: every load verified and none carries a UN number or class ·
+   *  unknown: no load is recorded, or a load is unverified and none is verified DG · blocked: a load's
+   *  classification was refused (and DG requirements still apply if another load is verified DG). */
+  state: "dg" | "not_dg" | "unknown" | "blocked";
+  /** Whether dangerous-goods requirements apply: true iff a verified DG load exists, whatever else is unresolved. */
+  dangerousGoods: boolean;
+  /** Why the state is what it is — the readiness explanation carries this verbatim. */
+  reason: "verified_dg" | "verified_not_dg" | "no_load" | "classification_unverified" | "classification_blocked";
+  loads: { loadId: number; state: LoadDangerousGoodsState }[];
   blockers: DispatchBlocker[];
   version: string;
   explanation: string;
@@ -338,43 +345,50 @@ export type DangerousGoodsAuthority = {
 
 /**
  * Whether a job moves dangerous goods, from the loads' STRUCTURED classification — `loadProfiles`,
- * whose `classificationStatus` a person verifies. Before C1a the composer decided this with
- * `/tdg|dangerous|hazard/i` over the job's free-text type and mode, so "Hazard tree removal" was a
- * TDG shipment and a verified UN1203 load under a job typed "water_haul" was not.
+ * whose `classificationStatus` a person verifies — and from nothing else.
  *
- * Free text is now only ever a reason for suspicion: `freeTextSuggestsDg` can turn "no load
- * recorded" into UNKNOWN, but it can never establish that a load is, or is not, dangerous goods.
- * No language model is asked either.
+ * Before C1a the composer decided this with a regular expression over hazard-looking words in the
+ * job's free-text type and mode, so a tree-removal job read as a TDG shipment and a verified UN1203
+ * load under a job typed "water_haul" did not. C1a moved the decision to the loads but kept the regex as a "suspicion"
+ * signal that turned "no load recorded" into UNKNOWN only when the wording looked hazardous — which
+ * meant a job with no load record and innocent wording read as not applicable, with its TDG
+ * document and emergency plan taken as prepared. RI-0.6 removes the text entirely: the absence of
+ * a hazardous-looking word is not evidence that a load is not dangerous goods, so no load record is
+ * UNKNOWN, always, with the reason on the record.
+ *
+ * Multiple loads: any verified DG load makes the job DG. A verified DG load beside an unverified
+ * one still applies DG requirements, and the unverified one is reported rather than absorbed. A
+ * verified non-DG load cannot vouch for an unverified neighbour, so that pair is UNKNOWN. A refused
+ * classification blocks outright and is reported first.
  */
-export function dangerousGoodsAuthority(loads: readonly LoadClassificationRow[], freeTextSuggestsDg: boolean): DangerousGoodsAuthority {
+export function dangerousGoodsAuthority(loads: readonly LoadClassificationRow[]): DangerousGoodsAuthority {
   const version = sha256(canonicalJson(loads.map(l => [l.id, l.classificationStatus, l.unNumber ?? null, l.dgClass ?? null, l.packingGroup ?? null, l.verifiedAt ?? null]).sort()));
+  const stateOf = (l: LoadClassificationRow): LoadDangerousGoodsState =>
+    l.classificationStatus === "blocked" ? "blocked"
+    : l.classificationStatus !== "verified" ? "unverified"
+    : (l.unNumber ?? "").trim() !== "" || (l.dgClass ?? "").trim() !== "" ? "dg"
+    : "not_dg";
+  const perLoad = loads.map(l => ({ loadId: l.id, state: stateOf(l) }));
   if (loads.length === 0) {
-    return freeTextSuggestsDg
-      ? {
-          state: "unknown", version,
-          explanation: "No load is recorded for this job, and its description suggests dangerous goods — classification is missing",
-          blockers: [{ code: "dg_classification_missing", label: "The job's description suggests dangerous goods and no load classification is on record", severity: "unknown", subject: "job", overridable: true }],
-        }
-      : { state: "not_applicable", version, blockers: [], explanation: "No load recorded for this job and no dangerous-goods signal" };
-  }
-  const refused = loads.filter(l => l.classificationStatus === "blocked");
-  if (refused.length) {
     return {
-      state: "blocked", version, explanation: `${refused.length} load classification(s) were refused`,
-      blockers: [{ code: "dg_classification_blocked", label: `${refused.length} load classification(s) refused — the material cannot be moved until it is classified`, severity: "blocking", subject: "job", overridable: false }],
+      state: "unknown", dangerousGoods: false, reason: "no_load", loads: perLoad, version,
+      explanation: "No load is recorded for this job — whether it moves dangerous goods is unknown, and the job's wording is not evidence either way",
+      blockers: [{ code: "dg_classification_missing", label: "No load classification is on record for this job — whether it moves dangerous goods is unknown", severity: "unknown", subject: "job", overridable: true }],
     };
   }
-  const unverified = loads.filter(l => l.classificationStatus !== "verified");
-  if (unverified.length) {
-    return {
-      state: "unknown", version, explanation: `${unverified.length} load classification(s) not verified`,
-      blockers: [{ code: "dg_classification_unverified", label: `${unverified.length} load(s) on this job have no verified classification — whether they are dangerous goods is unknown`, severity: "unknown", subject: "job", overridable: true }],
-    };
-  }
-  const dg = loads.filter(l => (l.unNumber ?? "").trim() !== "" || (l.dgClass ?? "").trim() !== "");
-  return dg.length
-    ? { state: "dg", version, blockers: [], explanation: `${dg.length} verified dangerous-goods load(s): ${dg.map(l => l.unNumber ?? l.dgClass).join(", ")}` }
-    : { state: "not_dg", version, blockers: [], explanation: `${loads.length} load(s), all verified, none classified as dangerous goods` };
+  const dg = loads.filter((_, i) => perLoad[i]!.state === "dg");
+  const refused = loads.filter((_, i) => perLoad[i]!.state === "blocked");
+  const unverified = loads.filter((_, i) => perLoad[i]!.state === "unverified");
+  const blockers: DispatchBlocker[] = [];
+  if (refused.length) blockers.push({ code: "dg_classification_blocked", label: `${refused.length} load classification(s) refused — the material cannot be moved until it is classified`, severity: "blocking", subject: "job", overridable: false });
+  if (unverified.length) blockers.push({ code: "dg_classification_unverified", label: `${unverified.length} load(s) on this job have no verified classification — whether they are dangerous goods is unknown`, severity: "unknown", subject: "job", overridable: true });
+  const dangerousGoods = dg.length > 0;
+  const dgText = dangerousGoods ? `${dg.length} verified dangerous-goods load(s): ${dg.map(l => l.unNumber ?? l.dgClass).join(", ")}` : "";
+  const tail = [dgText, unverified.length ? `${unverified.length} load classification(s) not verified` : "", refused.length ? `${refused.length} load classification(s) were refused` : ""].filter(Boolean).join("; ");
+  if (refused.length) return { state: "blocked", dangerousGoods, reason: "classification_blocked", loads: perLoad, version, blockers, explanation: tail };
+  if (dangerousGoods) return { state: "dg", dangerousGoods, reason: "verified_dg", loads: perLoad, version, blockers, explanation: tail };
+  if (unverified.length) return { state: "unknown", dangerousGoods, reason: "classification_unverified", loads: perLoad, version, blockers, explanation: tail };
+  return { state: "not_dg", dangerousGoods, reason: "verified_not_dg", loads: perLoad, version, blockers, explanation: `${loads.length} load(s), all verified, none classified as dangerous goods` };
 }
 
 function bindingHasUnevaluatedConditions(conditionsJson: string | null): boolean {
@@ -475,15 +489,18 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   }
   const job = subject.jobId ? (await db.select().from(jobs).where(eq(jobs.id, subject.jobId)).limit(1))[0] ?? null : null;
   /*
-   * C1a-7 — dangerous goods from the loads' verified classification, never from the job's wording.
-   * The regex survives only as a suspicion signal (see dangerousGoodsAuthority).
+   * C1a-7 / RI-0.6 — dangerous goods from the loads' verified classification and from nothing else.
+   * The job's wording reaches no part of this: not the decision, not a suspicion, not a suppression.
+   * Without a job there is nothing to classify and the job axis is already "not evaluated" below;
+   * with a job and no load record the answer is UNKNOWN with its reason.
    */
   const jobLoads = job ? await db.select({
     id: loadProfiles.id, unNumber: loadProfiles.unNumber, dgClass: loadProfiles.dgClass, packingGroup: loadProfiles.packingGroup,
     classificationStatus: loadProfiles.classificationStatus, verifiedAt: loadProfiles.verifiedAt,
   }).from(loadProfiles).where(eq(loadProfiles.jobId, job.id)) : [];
-  const dgAuthority = dangerousGoodsAuthority(jobLoads, job ? /tdg|dangerous|hazard/i.test(`${job.type ?? ""} ${job.mode ?? ""}`) : false);
-  const dangerousGoods = dgAuthority.state === "dg";
+  const dgAuthority = dangerousGoodsAuthority(jobLoads);
+  /** DG requirements apply: a verified DG load exists, whatever else is unresolved. */
+  const dangerousGoods = dgAuthority.dangerousGoods;
   /*
    * v23.31 — the job's commercial basis: customer on hold, contract not usable, a required PO/AFE
    * absent, no governing rate sheet version, no snapshot yet. Company policy, never safety; an
@@ -493,9 +510,11 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   extra.push(...commercial.blockers);
   if (job) contributions.push({ engine: "commercial", finding: commercial.blockers.length ? commercial.blockers.map(b => b.code).join(", ") : "commercial basis in order" });
   /** For rules that only tighten (communications): a load that may be DG is treated as DG there. */
-  const possiblyDangerousGoods = dgAuthority.state === "dg" || dgAuthority.state === "unknown";
-  extra.push(...dgAuthority.blockers);
-  if (job) contributions.push({ engine: "dangerous_goods", finding: `${dgAuthority.state}: ${dgAuthority.explanation}` });
+  const possiblyDangerousGoods = dangerousGoods || dgAuthority.state === "unknown" || dgAuthority.state === "blocked";
+  if (job) {
+    extra.push(...dgAuthority.blockers);
+    contributions.push({ engine: "dangerous_goods", finding: `${dgAuthority.state} (${dgAuthority.reason}): ${dgAuthority.explanation}` });
+  }
   const required: CredentialState[] = [];
 
   /* ---- Training Academy bindings ----
@@ -813,13 +832,14 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
   const jobInput: ReadinessInput["job"] = {
     classificationComplete: job ? Boolean(job.type && job.mode) : false,
     dangerousGoods,
-    tdgDocumentPrepared: dangerousGoods ? null : true,
+    // Only an authoritative not-DG answer may read the shipping document as not needed. Unknown stays null.
+    tdgDocumentPrepared: dangerousGoods ? null : dgAuthority.state === "not_dg" ? true : null,
     requiredDocumentsPresent: job ? true : false,
     permitRequired: false,
     permitOnFile: null,
     destinationAcceptanceVerified: destination.verified,
     destinationAssessments: destination.assessments,
-    emergencyPlanOnFile: dangerousGoods ? null : true,
+    emergencyPlanOnFile: dangerousGoods ? null : dgAuthority.state === "not_dg" ? true : null,
   };
   if (!job) contributions.push({ engine: "dispatch", finding: "No job supplied — job requirements not evaluated" });
 
