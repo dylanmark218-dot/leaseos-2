@@ -37,7 +37,8 @@ table is created (`billingBoundary.test.ts` reads the migration and fails if one
   **`9ec123a`** (#99 Safety Program Builder) → **`9895188`** (#132, two DB test assertions made independent of other
   suites' data; no migration, no overlap with this checkpoint). The branch was re-based onto each before its first
   commit and merged with `9895188` (merge commit `56def0c`, no history rewritten); nothing here stands on a stale `main`.
-- **Final dependency SHA: `9895188`.**
+- **Final dependency SHA: `9895188`** for code. `main` then took `c9e3b46` (#136: two files under `docs/register/`,
+  no code); it is merged as well (`04d9e4e`), so the branch contains the current `main`.
 - Baseline gate on the untouched dependency — see §17.
 
 ## 3. Collision scan
@@ -310,7 +311,8 @@ Earlier evidence on the way (each superseded by `main` moving): baseline on `b36
 
 The implementation is commit **`13847b9`**; `9900d63` filled this document's evidence; **`56def0c`** merged `main`
 `9895188` (the gate in §17 ran on `13847b9` and again on `56def0c`). The commit that carries this paragraph is
-documentation-only (`git diff 56def0c..HEAD` touches only this file). Branch `claude/leaseos-billing-invoicing-ar`,
+documentation-only: `git diff 56def0c..HEAD` touches only this file and #136's two `docs/register/` files, so no code
+or test differs from the head the gate passed on. Branch `claude/leaseos-billing-invoicing-ar`,
 pushed; no pull request opened.
 
 ## 19. Known limitations (named, not hidden)
