@@ -174,11 +174,20 @@ describe("F1.2 — every compliance procedure is classified, and the ones that n
   it("proves the subject, or the book, in every procedure classified that way", () => {
     for (const [name, cls] of Object.entries(COMPLIANCE)) {
       const src = source(procs[`compliance.${name}`]!);
-      if (cls === "subject_scoped") expect(src.includes("requireSubjectInScope"), name).toBe(true);
+      // A procedure proves its subject itself, or decides through the one verification service, which does
+      // (pinned by the next test, so delegating to it can never be delegating to nothing).
+      if (cls === "subject_scoped") expect(src.includes("requireSubjectInScope") || src.includes("decideComplianceCredential"), name).toBe(true);
       if (cls === "book_scoped") expect(SELF_SCOPED.test(src), name).toBe(true);
       // The organization comes from server scope, and nothing in the input can name another one.
       if (cls === "organization_registry") { expect(src.includes("actingScopeFor"), name).toBe(true); expect(/input\.(orgRef|tenantId|organization)/.test(src), name).toBe(false); }
     }
+  });
+
+  it("the verification service a procedure may delegate to proves the subject before it decides anything", () => {
+    const svc = readFileSync("server/credentialVerificationService.ts", "utf8");
+    const body = svc.slice(svc.indexOf("export async function decideComplianceCredential"));
+    expect(body.indexOf("await requireSubjectInScope(")).toBeGreaterThan(-1);
+    expect(body.indexOf("await requireSubjectInScope(")).toBeLessThan(body.indexOf("tx.update(complianceDocuments)"));
   });
 
   it("reads no table in the pure evaluators", () => {
