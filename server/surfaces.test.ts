@@ -156,6 +156,19 @@ describe("exceptions are derived from state, never stored", () => {
     expect(xs.find(x => x.key === "conflict:1")!.severity).toBe("high");
   });
 
+  it("raises an Integration Hub dead letter, a failing critical connector, and a pending conflict — none of them silently", () => {
+    const xs = deriveExceptions({ ...empty(), integrationHub: {
+      deadLetters: [{ deadLetterRef: "DL-1", kind: "outbound_delivery", eventType: "ticket.received", reason: "dead_exhausted", deadLetteredAt: days(-1), connectorName: "ERP webhook" }],
+      connectors: [{ connectorRef: "CONN-1", name: "ERP webhook", healthState: "authentication_required", lastError: "authentication_or_configuration", critical: true, since: days(-2) }],
+      conflicts: [{ conflictRef: "CFL-1", entityType: "integration_observation", entityRef: "T-9", detectedAt: days(0) }],
+    } });
+    expect(xs.map(x => x.key).sort()).toEqual(["integration-conflict:CFL-1", "integration-connector:CONN-1", "integration-dl:DL-1"]);
+    expect(xs.every(x => x.category === "integration")).toBe(true);
+    expect(xs.find(x => x.key === "integration-dl:DL-1")!.severity).toBe("high");
+    expect(xs.find(x => x.key === "integration-connector:CONN-1")!.severity).toBe("high"); // critical + authentication_required
+    expect(xs.find(x => x.key === "integration-conflict:CFL-1")!.severity).toBe("medium");
+  });
+
   it("dedupes by key and sorts critical → high → medium → low, then by due date", () => {
     const xs = deriveExceptions({ ...empty(),
       purchaseRequests: [{ id: 1, authorizationRef: "PA", estimatedAmount: 1, emergency: false, requestedAt: days(0), expiresAt: days(3), status: "requested" }],

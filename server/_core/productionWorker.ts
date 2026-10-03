@@ -7,6 +7,8 @@ import { BOARD_AGGREGATE_TYPES, handleClaimedBoardEvent } from "./boardOutbox";
 import { getDb } from "../db";
 import { sweepLiveAssist } from "../liveAssistService";
 import { createSweepTicker, withSweepOnHeartbeat } from "./liveAssist/sweepTicker";
+import { handleClaimedIntegrationInbound, sweepIntegrationHub } from "../integrationHubService";
+import type { DomainEventHandler } from "./workerLifecycle";
 
 export type ProductionWorker = { lifecycle: Lifecycle; close: () => Promise<void> };
 
@@ -25,7 +27,15 @@ export async function startProductionWorker(): Promise<ProductionWorker | null> 
     run: at => sweepLiveAssist(db, at),
     log: (level, line) => (level === "warn" ? console.warn(line) : console.info(line)),
   });
-  const ports = withHandlers(withSweepOnHeartbeat(base, liveAssistSweep), [{
+  // Integration Hub — the same sweep-ticker pattern as Live Assist: dead-letter scan, sync
+  // scheduling and execution, rate-limited and non-overlapping, added to the heartbeat without
+  // disturbing what it already does.
+  const integrationHubSweep = createSweepTicker({
+    run: at => sweepIntegrationHub(db, at),
+    intervalMs: 5_000,
+    log: (level, line) => (level === "warn" ? console.warn(line) : console.info(line)),
+  });
+  const handlers: DomainEventHandler[] = [{
     name: "enforcement",
     matches: event => event.aggregateType === "enforcementEvent",
     handle: async event => {
@@ -45,7 +55,14 @@ export async function startProductionWorker(): Promise<ProductionWorker | null> 
       });
       return { tasksCreated: 0 };
     },
-  }]);
+  }, {
+    // Integration Hub — an accepted inbound event is processed under its connector's contract
+    // here, on the one claimer.
+    name: "integrationInbound",
+    matches: event => event.aggregateType === "integrationInbound",
+    handle: event => handleClaimedIntegrationInbound(db, { aggregateId: event.aggregateId, tenantId: event.tenantId, now: new Date() }),
+  }];
+  const ports = withHandlers(withSweepOnHeartbeat(withSweepOnHeartbeat(base, liveAssistSweep), integrationHubSweep), handlers);
   const workerId = process.env.WORKFLOW_WORKER_ID ?? `leaseos-${process.pid}`;
   const lifecycle = startOnce({
     workerId,
