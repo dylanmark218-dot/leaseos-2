@@ -80,7 +80,8 @@ import {
   users,
   externalIdentities,
   integrationClients,
-  coreRecordOwnership, organizationInvitationRoles, organizationInvitations, organizationMemberships, organizations, fieldTickets, incidentReports, loads } from "../drizzle/schema";
+  coreRecordOwnership, organizationInvitationRoles, organizationInvitations, organizationMemberships, organizations, fieldTickets, incidentReports, loads, financialEntities } from "../drizzle/schema";
+import { projectComplianceDocument } from "./_core/complianceProjection";
 import { ENV } from "./_core/env";
 import { membershipIsLive, type MembershipFact } from "./_core/workspaceAccess";
 import { grantsInOrganization, type RoleGrant } from "./_core/recordsAuthorization";
@@ -205,7 +206,7 @@ export async function listEvidenceRecords(scope: TenantScope) {
 export async function findEvidenceByClientCaptureRef(clientCaptureRef: string) {
   const db = await getDb();
   if (!db) return undefined;
-  const rows = await db.select({ id: evidenceRecords.id, storageKey: evidenceRecords.storageKey, storageUrl: evidenceRecords.storageUrl }).from(evidenceRecords).where(eq(evidenceRecords.clientCaptureRef, clientCaptureRef)).limit(1);
+  const rows = await db.select({ id: evidenceRecords.id, storageKey: evidenceRecords.storageKey, storageUrl: evidenceRecords.storageUrl, capturedBy: evidenceRecords.capturedBy }).from(evidenceRecords).where(eq(evidenceRecords.clientCaptureRef, clientCaptureRef)).limit(1);
   return rows[0];
 }
 
@@ -678,16 +679,23 @@ const documentOwnerOrg = sql<string | null>`(
 /** An organization's list is its newest hundred; one owner's is up to this many, and a caller that receives this many must not assume it has them all. */
 export const OWNER_DOCUMENT_LIST_CAP = 500;
 
+/** WHERE clause: compliance documents whose subject the scope's organization owns (the single tenant: owned by nobody). */
+export function complianceDocumentScopeWhere(scope: TenantScope) {
+  return scope.tenantId === SINGLE_TENANT_ID ? isNull(documentOwnerOrg) : eq(documentOwnerOrg, scope.tenantId);
+}
+
 export async function listComplianceDocuments(scope: TenantScope, owner?: { ownerType: InsertComplianceDocument["ownerType"]; ownerId: number }) {
   const db = await getDb();
   if (!db) return [];
-  const inScope = scope.tenantId === SINGLE_TENANT_ID ? isNull(documentOwnerOrg) : eq(documentOwnerOrg, scope.tenantId);
+  const inScope = complianceDocumentScopeWhere(scope);
   return db
     .select()
     .from(complianceDocuments)
     .where(owner ? and(inScope, eq(complianceDocuments.ownerType, owner.ownerType), eq(complianceDocuments.ownerId, owner.ownerId)) : inScope)
     .orderBy(desc(complianceDocuments.createdAt))
-    .limit(owner ? OWNER_DOCUMENT_LIST_CAP : 100);
+    .limit(owner ? OWNER_DOCUMENT_LIST_CAP : 100)
+    // SEC-1: a private credential's detail never leaves through the list (see complianceProjection.ts).
+    .then(rows => rows.map(projectComplianceDocument));
 }
 
 /** The organization that owns a document's subject record, or null when nobody does. */
@@ -830,9 +838,17 @@ export async function evidenceInScope(evidenceId: number, scope: TenantScope): P
 }
 /** An incident report the scope may see, or null: through its job, else its unit, else its operator, else the single tenant only. */
 export async function incidentInScope(incidentNumber: string, scope: TenantScope): Promise<{ id: number } | null> {
+  return incidentWhereInScope(eq(incidentReports.incidentNumber, incidentNumber), scope);
+}
+/** SEC-1: the same chain keyed by id — the restricted vault names incidents by id. */
+export async function incidentIdInScope(incidentReportId: number, scope: TenantScope): Promise<{ id: number } | null> {
+  return incidentWhereInScope(eq(incidentReports.id, incidentReportId), scope);
+}
+/** An incident is owned through its job, else its unit, else its operator; one with none stays with the single tenant. */
+async function incidentWhereInScope(where: ReturnType<typeof eq>, scope: TenantScope): Promise<{ id: number } | null> {
   const db = await getDb();
   if (!db) return null;
-  const i = (await db.select({ id: incidentReports.id, jobId: incidentReports.jobId, unitId: incidentReports.unitId, operatorId: incidentReports.operatorId }).from(incidentReports).where(eq(incidentReports.incidentNumber, incidentNumber)).limit(1))[0];
+  const i = (await db.select({ id: incidentReports.id, jobId: incidentReports.jobId, unitId: incidentReports.unitId, operatorId: incidentReports.operatorId }).from(incidentReports).where(where).limit(1))[0];
   if (!i) return null;
   if (i.jobId != null) return (await jobInScope(i.jobId, scope)) ? { id: i.id } : null;
   if (i.unitId != null) return (await unitInScope(i.unitId, scope)) ? { id: i.id } : null;
@@ -880,16 +896,72 @@ function tripRefScope(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, refCol
   return or(inScope, and(notInArray(refColumn, anyNumber), notInArray(asNumber, anyId)));
 }
 
-/** An assistant proposal the scope may see, or null: through its job, else its trip, else its unit, else the single tenant only. */
+/**
+ * What a proposal's `targetRecordId` names, by form. `commit` writes into exactly these rows: the
+ * trip stop of an unload, the books an expense or fuel receipt is recorded in. A form not listed
+ * here carries no target the server reads (a defect is anchored by its unit; a disposal ticket's
+ * load and facility are resolved by the server, never taken from the draft).
+ */
+const PROPOSAL_TARGET_KIND: Readonly<Record<string, "trip_stop" | "financial_entity">> = {
+  unload_stop: "trip_stop",
+  expense_receipt: "financial_entity",
+  fuel_receipt: "financial_entity",
+};
+
+/** SEC-1 — every job, trip and unit a record is anchored to is in scope (an absent anchor is no claim). */
+export async function recordAnchorsInScope(t: { jobId?: number | null; tripId?: number | null; unitId?: number | null }, scope: TenantScope): Promise<boolean> {
+  if (t.jobId != null && !(await jobInScope(t.jobId, scope))) return false;
+  if (t.tripId != null && !(await tripInScope(t.tripId, scope))) return false;
+  if (t.unitId != null && !(await unitInScope(t.unitId, scope))) return false;
+  return true;
+}
+
+/**
+ * SEC-1 — every record an assistant proposal names is in the caller's organization.
+ *
+ * All of them, not the first one present: these ids are authority the moment they are stored,
+ * because `commit` writes to what they name. A foreign trip stop is reached through its trip, so a
+ * stop on another organization's trip is out of scope even when the proposal's own trip is not.
+ */
+export async function assistantTargetsInScope(
+  t: { formKey?: string | null; jobId?: number | null; tripId?: number | null; unitId?: number | null; targetRecordId?: number | null },
+  scope: TenantScope,
+): Promise<boolean> {
+  if (!(await recordAnchorsInScope(t, scope))) return false;
+  const kind = t.formKey ? PROPOSAL_TARGET_KIND[t.formKey] : undefined;
+  if (t.targetRecordId == null || !kind) return true;
+  const db = await getDb();
+  if (!db) return false;
+  if (kind === "trip_stop") {
+    const stop = (await db.select({ tripId: tripStops.tripId }).from(tripStops).where(eq(tripStops.id, t.targetRecordId)).limit(1))[0];
+    return !!stop && !!(await tripInScope(stop.tripId, scope));
+  }
+  // The books predicate — entityScopeWhere is this exact clause; importing it from entityScope would put @trpc/server in the worker graph.
+  const book = (await db.select({ id: financialEntities.id }).from(financialEntities).where(and(eq(financialEntities.id, t.targetRecordId), orgScopeWhere(financialEntities, scope))).limit(1))[0];
+  return !!book;
+}
+
+/**
+ * An assistant proposal the scope may see. Every id it carries must be in scope
+ * (`assistantTargetsInScope`); a proposal anchored to no job, trip or unit stays with the single
+ * tenant, as before. This used to stop at the first id present — job, else trip, else unit — so an
+ * in-scope job beside another organization's trip was admitted, and commit then wrote to that
+ * trip's stop. Rows drafted before the draft was guarded still exist; this check is what holds for
+ * them.
+ */
 export async function proposalInScope(proposalId: string, scope: TenantScope): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
-  const p = (await db.select({ jobId: assistantProposals.jobId, tripId: assistantProposals.tripId, unitId: assistantProposals.unitId }).from(assistantProposals).where(eq(assistantProposals.proposalId, proposalId)).limit(1))[0];
+  const p = (await db.select({ formKey: assistantProposals.formKey, jobId: assistantProposals.jobId, tripId: assistantProposals.tripId, unitId: assistantProposals.unitId, targetRecordId: assistantProposals.targetRecordId }).from(assistantProposals).where(eq(assistantProposals.proposalId, proposalId)).limit(1))[0];
   if (!p) return true;   // nothing to hide; the procedure answers its own not-found
-  if (p.jobId != null) return !!(await jobInScope(p.jobId, scope));
-  if (p.tripId != null) return !!(await tripInScope(p.tripId, scope));
-  if (p.unitId != null) return !!(await unitInScope(p.unitId, scope));
-  return scope.tenantId === SINGLE_TENANT_ID;
+  const anchored = p.jobId != null || p.tripId != null || p.unitId != null;
+  if (!anchored && scope.tenantId !== SINGLE_TENANT_ID) return false;
+  // A trip-stop target is not re-read here: commit refuses a stop that is not on the proposal's
+  // trip (`applyIntent`), and that trip has just been put in scope. Reading it here as well would
+  // hide a proposal from its own organization over a stop id that commit would refuse anyway. A
+  // financial-entity target has no such tie — nothing but this check binds it to the caller's books.
+  const target = PROPOSAL_TARGET_KIND[p.formKey] === "financial_entity" ? p.targetRecordId : null;
+  return assistantTargetsInScope({ ...p, targetRecordId: target }, scope);
 }
 
 /** A billing rate card the scope may see, or null. */
