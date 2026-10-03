@@ -1,8 +1,8 @@
 # LeaseOS — v23.32 Checkpoint: Billing, Invoicing, Accounts Receivable & Financial Reconciliation
 
-| | Before (`main` 9ec123a) | **v23.32** |
+| | Before (`main` 9ec123a / 9895188) | **v23.32** |
 |---|---|---|
-| Dependency SHA | — | **`9ec123a`** (main after #99, which carries the commercial checkpoint #98 `b35bac4`) |
+| Dependency SHA | — | **`9895188`** (current `main`: #132, two test-isolation fixes, over `9ec123a`, #99, which carries the commercial checkpoint #98 `b35bac4`) |
 | Release | v23.31 | **v23.32** — `LEASEOS_RELEASE` read `v23.31` at the dependency SHA (set by the previous numbered checkpoint, B23.3); this checkpoint increments it by one. Payroll P1/P2 and the Safety Program Builder did not move it. |
 | Migration | head `0228` | **`0233_billing_invoicing_ar.sql`** (first slot free on main and all 133 refs; see the register) |
 | Tables | 479 | **484** (+5: `billingWorkspaces`, `billableCharges`, `invoiceJobLinks`, `invoiceAdjustments`, `accountingSyncRecords`) |
@@ -34,9 +34,10 @@ table is created (`billingBoundary.test.ts` reads the migration and fails if one
 - The commercial checkpoint (`19e3db1`) was already an ancestor of `main`: merged as **#98 (`b35bac4`)** by the owner,
   migrations `0217–0219` and every module unchanged on `main`; `readinessComposer` still wires `commercialReadinessForJob`.
 - `main` moved twice while this checkpoint was built: `b36f43a` (payroll P2) → `48a64e1` (#16 driver portfolio) →
-  **`9ec123a`** (#99 Safety Program Builder). The branch was re-based onto each before any commit; nothing here was
-  built against a stale `main`.
-- **Final dependency SHA: `9ec123a`.**
+  **`9ec123a`** (#99 Safety Program Builder) → **`9895188`** (#132, two DB test assertions made independent of other
+  suites' data; no migration, no overlap with this checkpoint). The branch was re-based onto each before its first
+  commit and merged with `9895188` (merge commit `56def0c`, no history rewritten); nothing here stands on a stale `main`.
+- **Final dependency SHA: `9895188`.**
 - Baseline gate on the untouched dependency — see §17.
 
 ## 3. Collision scan
@@ -296,14 +297,21 @@ The difference in tests is exactly this checkpoint's: +24 (`billingEngine.test.t
 (`billingBoundary.test.ts`), +36 (axe: 12 billing states × 3 widths) = **+79**. There is no pre-existing failure to
 prove against the baseline: both are green. The 3 skipped tests are the same three on both sides.
 
+**After merging `main` `9895188`** (merge commit `56def0c`), the full gate was run again on the merged head: **PASS**
+(exit 0) — 206 migrations, `parity OK`, 484 tables, typecheck, 0 bare `protectedProcedure` / 13 ungated sites pinned,
+488 files **7,477 passed, 3 skipped** (7,480), 4 files 67 passed, `FIXTURE ISOLATION VERIFIED`, production build,
+production-only boot PASS, 40 / 2 external / machine gates, current-state `current`. The baseline was not re-run for
+`9895188`: its delta over `9ec123a` is two test assertions, and no failure exists to attribute.
+
 Earlier evidence on the way (each superseded by `main` moving): baseline on `b36f43a` PASS (480 files, 7,285 passed,
 3 skipped, 462 tables, 201 migrations); baseline on `48a64e1` PASS (483 files, 7,347 passed, 3 skipped, 465 tables).
 
 ## 18. Final commit
 
-The implementation is commit **`13847b9`** (the gate in §17 ran on it). This document's evidence is filled in by a
-following documentation-only commit; `git diff 13847b9..HEAD` touches only this file. Branch
-`claude/leaseos-billing-invoicing-ar`, pushed; no pull request opened.
+The implementation is commit **`13847b9`**; `9900d63` filled this document's evidence; **`56def0c`** merged `main`
+`9895188` (the gate in §17 ran on `13847b9` and again on `56def0c`). The commit that carries this paragraph is
+documentation-only (`git diff 56def0c..HEAD` touches only this file). Branch `claude/leaseos-billing-invoicing-ar`,
+pushed; no pull request opened.
 
 ## 19. Known limitations (named, not hidden)
 
