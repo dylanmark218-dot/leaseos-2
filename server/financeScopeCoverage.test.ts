@@ -112,7 +112,14 @@ function inputKeys(p: Proc): string[] {
   for (let i = 0; i < 5 && z && !z.shape; i++) z = z._def?.innerType ?? z._def?.schema ?? (typeof z.unwrap === "function" ? z.unwrap() : undefined);
   return Object.keys(z?.shape ?? {});
 }
-const source = (p: Proc) => String(p._def.resolver);
+/**
+ * A resolver's source as written. Vite's SSR transform rewrites every imported binding: vitest 2 as
+ * `__vite_ssr_import_N__.name`, vitest 3 as `(0,__vite_ssr_import_N__.name)`, values and calls alike.
+ * Both are mapped back to `name`, so the structural checks below read the code, not the transform.
+ */
+const source = (p: Proc) => String(p._def.resolver)
+  .replace(/\(0,\s*__vite_ssr_import_\d+__\.([\w$]+)\)/g, "$1")
+  .replace(/__vite_ssr_import_\d+__\./g, "");
 
 describe("F1 / F1.1 — every money procedure is money-scoped, structurally", () => {
   const money = Object.entries(procs).filter(([k]) => MONEY_NAMESPACES.includes(k.split(".")[0]!));
