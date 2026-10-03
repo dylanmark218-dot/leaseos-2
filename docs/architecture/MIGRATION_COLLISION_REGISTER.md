@@ -435,6 +435,11 @@ every slot in use, so it moved to `0228`. The migration creates only new tables 
   "0197 unused" is about `main`, where it is indeed absent). It now sits below `main`'s head (`0219`), the
   same position as LA-1a's `0202`/`0203`: `migrationLedger` applies any unapplied file by name, and no
   migration on `main` touches the columns or the table 0197 adds, so it keeps `0197` rather than moving.
+* **2026-10-03 (Integration Hub renumber, PR #116)**: `0220`–`0223` → `0229`–`0232`, contents unchanged.
+  Scan of `main` (`48a64e1`) and every remote ref: `main` holds `0221`/`0222` (defect lifecycle) and
+  `0226`/`0227` (payroll P1/P2); `claude/eld-compliance-intelligence-ramlrd` holds `0220` and `0224`; an
+  offline-capture branch holds `0224`/`0225`; a payroll branch holds `0228`. As the later, unmerged claimant
+  the Hub moved to the first four numbers free everywhere. Next free after it: `0233`.
 
 ## State at the Driver Portfolio security hardening (2026-10-03, `main` = `60de8c2`)
 

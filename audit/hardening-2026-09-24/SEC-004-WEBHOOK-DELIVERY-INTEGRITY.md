@@ -214,13 +214,51 @@ can merge first.
 **Dependency audit** on this branch reads `main`'s numbers (2 critical, 39 high). SEC-004 does not
 touch dependencies; PR #19 is where they are fixed.
 
-## Relationship to PR #19
+## Relationship to PR #19 — superseded; see "After landing" below
 
-- **Independent.** This branch compiles and passes without PR #19.
-- **Overlap in `webhookDispatchService.ts`.** PR #19 changes the one line that defines the default
-  poster (to route it through `outboundRequest`, the SSRF-guarded client). That line is rewritten
-  here too. Whichever merges second resolves it by keeping PR #19's `outboundRequest` call with
-  `timeoutMs: WEBHOOK_ATTEMPT_TIMEOUT_MS`. The claim logic is unaffected.
+Written before either PR merged, this section expected PR #19's `outboundRequest` to become the
+webhook transport. That is not what happened: `main` landed its own egress guard first, and the
+webhook transport is `main`'s `egressPost`. The record of what happened follows.
+
+## After landing (reconciliation record, 2026-10-01)
+
+**Order.** PR #20 landed first, on 2026-09-25 (head `843d36a`, base `e291f28`), after another
+session merged `main` into it (82 commits of drift; two bookkeeping conflicts; one duplicate
+`calendarFixtures` key fixed; its comment on PR #20 has the detail). PR #19 stayed open and was
+merged up to `main` three times: `791406d`, `5b2d8a0`, and `4c6a12d` (`main` = `b35bac4`).
+
+**The combined transport, as it stands on `main` and on PR #19's head:**
+
+| Invariant | State | Where |
+|---|---|---|
+| Only one worker claims an attempt | holds | `claimNewAttempt`; the unique `(subscriptionId, eventId, attempt)` |
+| No send without the claim | holds | `dispatchWebhooks` continues past a `null` claim before calling the poster |
+| Only the claim holder records | holds | `finishClaimedAttempt`, guarded by `claimedBy` |
+| A live claim is not stolen; a stale one is recovered | holds | `reclaimExpiredAttempt`, `claimIsLive`, lease clock `leaseNow` |
+| Attempt timeout | **10 s** | `WEBHOOK_ATTEMPT_TIMEOUT_MS`, passed as `timeoutMs` to `egressPost` |
+| Lease | **5 min** | `WEBHOOK_CLAIM_LEASE_MS`; no evidence in the combined code argues for another value |
+| SSRF guard on the send | `main`'s `egressPost` | resolves, checks every address, pins the socket to them; no redirects |
+| SSRF check when the URL is saved | PR #19 (pending) | `checkEgressUrl` in `integration.webhookSubscribe` |
+| Retries keep legitimate attempt numbers | holds | failed → `claimNewAttempt(attempt + 1)` |
+| Tenant isolation | holds | `ev.tenantId === s.orgRef`; `orgRef` on every row and scoped sweep |
+| Delivery semantics | **at-least-once** | one active sender per attempt; a crash after the consumer accepted a POST but before it was recorded re-sends the same `x-leaseos-delivery` id. Never "exactly-once". |
+
+There is no direct `fetch` in the webhook path, and no second guard inside the webhook service.
+PR #19's `outboundHttp.ts` was removed in its merge with `main`.
+
+**Evidence on the combined tree** (`4c6a12d`): `scripts/ci-gate.sh`, full, fresh MariaDB 10.11,
+Node 22.23.3: **PASS, gates 0a–8**. That's 442 files, **6,783 passed, 3 skipped**, with the
+SEC-004 suite 15/15 inside the concurrent run. `pnpm audit`: 0 critical, 0 high, 3 moderate.
+
+**Migration 0185**, rescanned 2026-10-01 across `main` and 116 remote refs: on `main` as
+`0185_webhook_delivery_claim.sql`. One open PR still carries a conflicting
+`0185_assistant_proposal_tenancy.sql`: **#93** (`copilot/fix-github-actions-job`, based on the old
+`6f52b57`). Under the register's rule (first to merge keeps it), #93 must renumber before it lands;
+`main`'s migration head is `0219`. `claude/relaxed-carson-qfcopf` no longer adds a 0185 file.
+
+**Production preflight: not executed — no production database/log access.** It remains a human
+deployment prerequisite: run `scripts/preflight/sec004-webhook-delivery-duplicates.sql` read-only,
+and search worker logs for `webhook dispatch failed … Duplicate entry` from before 0185 deployed.
 
 ## Relationship to the Integration Hub branch
 
@@ -242,6 +280,23 @@ implementation the Hub consumes. The Hub branch is untouched.
 | enqueue-then-attempt (`queued` rows written at enqueue, claimed later) | compatible model | may keep: a queued row with `claimedAt` NULL is exactly what `reclaimExpiredAttempt` accepts. But the failed→retry path should insert attempt+1 through `claimNewAttempt` |
 | poster path with no attempt timeout | lease has no bound | bound it by `WEBHOOK_ATTEMPT_TIMEOUT_MS` |
 | its claim test ("two concurrent workers send each attempt once; crashed claim ages out") | overlaps tests 1–4, 9, 14 | keep as Hub-level coverage once it calls the canonical primitives |
-| destination policy, circuit breaker, dead letters, connector health, `x-leaseos-event-id` header | additional | keep. Destination policy should then be reconciled with PR #19's `outboundHttp.ts` so there is one SSRF policy |
+| destination policy (`assessDestination`), its own transport (`hubTransport`) | **second SSRF guard** | drop; use `main`'s `egressGuard` (`checkEgressUrl`) and `egressHttp` (`egressPost`) |
+| circuit breaker, dead letters, connector health, sync contracts, retry policy per connector, `x-leaseos-event-id` header | additional | keep |
 
 The result should be one claim implementation, here, and a Hub that calls it.
+
+**Rebase plan as of 2026-10-01.** The Hub branch is still at `e430c0b` (2026-09-24), with no PR,
+and does not contain `main`'s SEC-004. When it is next taken forward:
+
+1. Merge `main` into it; do not rebuild it.
+2. From its `0183`, delete the `claimedAt`/`claimedBy` columns (now from `0185`). Keep the rest.
+3. Renumber `0182`–`0184` if needed: they are still free on `main`, but open **PR #99** also
+   claims `0182`. Whichever lands second takes the next free number on `main` and every open branch.
+4. In `webhookDispatchService.ts`, keep `main`'s file as the base. Re-add the Hub's enqueue step,
+   dead-lettering, connector gating and health updates on top of `claimNewAttempt`,
+   `reclaimExpiredAttempt` and `finishClaimedAttempt`. Remove `claimDue`, its unguarded `finish`,
+   `DELIVERY_LEASE_SECONDS`, the claim timing taken from the scheduling `now`, and its
+   timeout-less poster path.
+5. Replace `assessDestination`/`hubTransport` with `main`'s egress guard.
+6. Keep its claim test as Hub-level coverage, now exercising the canonical functions, and run
+   `webhookDeliveryClaim.db.test.ts` unchanged as the contract.
