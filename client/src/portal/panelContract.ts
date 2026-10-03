@@ -41,6 +41,18 @@ export const PANEL_CONTRACTS: readonly PanelContract[] = [
   { file: "panels/ExceptionsPanel.tsx", procedures: [], portals: "every_portal" },
   { file: "panels/InboxPanel.tsx", procedures: [], portals: "every_portal" },
   { file: "panels/TimelinePanel.tsx", procedures: ["surfaces.timeline"], portals: "every_portal" },
+  // 0205/0206 — the Board. Conversations and open work are every portal's: a dispatcher, a
+  // mechanic and a driver all message and all see work. The server decides what each may open,
+  // post or answer; nothing here is office work.
+  {
+    file: "panels/BoardPanel.tsx",
+    procedures: [
+      "auth.me", "board.mine", "board.read", "board.post", "board.acknowledge",
+      "shifts.list", "shifts.get", "shifts.respond", "shifts.offerRespond",
+    ],
+    portals: "every_portal",
+  },
+  { file: "panels/BoardPanelView.tsx", procedures: [], portals: "every_portal" },
   {
     file: "panels/PeopleAccessPanel.tsx",
     procedures: [

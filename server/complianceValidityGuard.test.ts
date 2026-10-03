@@ -195,6 +195,8 @@ const READERS: Record<string, string> = {
   "server/trainingAcademyRouter.ts": "foreign TDG recognition requires the named document in force by complianceRequirementValidity",
   // C1b-3's D-05 read adapter (#57), added on merging main.
   "server/qualificationReads.ts": "an Academy grant's evidence document through complianceDocumentValidity; the grant itself through academyVerdict (qualificationValidity)",
+  // 0221 — the Fleet portfolio's asset detail.
+  "server/fleetAssetService.ts": "the asset detail's Documents tab: the unit's documents per type through complianceDocumentValidity, shown with the engine's verdict; unit-side readiness reads them through the composer's own credentialState; decides nothing itself",
 };
 
 function readdirTs(dir: string): string[] {

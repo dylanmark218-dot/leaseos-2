@@ -102,7 +102,7 @@ describe("the external gate is wired like the role gate", () => {
     // which is the most consequential thing this gate does, and it was the one
     // credential operation outside the set while `portal.credential.manage` —
     // governing the lesser token rotation — was already inside it.
-    expect([...EXTERNAL_SENSITIVE_PERMISSIONS].sort()).toEqual(["portal.credential.manage", "portal.customer.adjust", "portal.customer.commit", "portal.customer.decide", "portal.customer.dispute", "portal.customer.documents", "portal.customer.sign", "portal.facility.submit", "portal.invitation.accept", "portal.vendor.submit"]);
+    expect([...EXTERNAL_SENSITIVE_PERMISSIONS].sort()).toEqual(["portal.attest.sign", "portal.credential.manage", "portal.customer.adjust", "portal.customer.commit", "portal.customer.decide", "portal.customer.dispute", "portal.customer.documents", "portal.customer.sign", "portal.facility.submit", "portal.invitation.accept", "portal.vendor.submit"]);
   });
 
   it("keeps the inside roles that touch the outside narrow", () => {

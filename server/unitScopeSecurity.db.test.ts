@@ -169,6 +169,9 @@ const CASES: Case[] = [
   { name: "(new) integration.loadSenseBindGateway", procedure: "integration.loadSenseBindGateway", role: "management",
     call: (c, u) => c.integration.loadSenseBindGateway({ gatewayDeviceRef: `GW-${rnd()}`, measurementDeviceId: 1, unitId: u, tareKg: 0 }),
     writes: rowsNaming("loadSenseGatewayBindings", "unitId") },
+  { name: "(0206) shifts.post", procedure: "shifts.post", role: "dispatcher",
+    call: (c, u) => c.shifts.post({ title: "Night haul", startsAt: new Date(AT.getTime() + 3_600_000), endsAt: new Date(AT.getTime() + 7_200_000), requiredRole: "driver", unitId: u, publish: false }),
+    writes: rowsNaming("shiftPosts", "unitId") },
 ];
 
 d("another organization's unit is indistinguishable from a unit that does not exist, and nothing is written", () => {

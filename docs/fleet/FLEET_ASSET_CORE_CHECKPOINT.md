@@ -1,6 +1,6 @@
 # Fleet & Equipment Portfolio — asset core checkpoint (2026-10-01)
 
-Branch `claude/fleet-equipment-portfolio-design-3d13d5`. Two commits:
+Branch `claude/fleet-equipment-portfolio-design-3d13d5`. Three commits:
 
 1. **`82df3d6` — the foundation, carried onto today's main.** The foundation slice built on this
    design by the mechanic-portal branch (`unitHolds`, the meter ledger and its read-in-place union,
@@ -13,6 +13,15 @@ Branch `claude/fleet-equipment-portfolio-design-3d13d5`. Two commits:
 2. **This checkpoint — the asset core.** What the foundation's reconciliation deferred as R-7:
    identity and lifecycle on `units`, components, the fleet list and the asset detail (API and
    screen), the unit-side readiness answer, and the driver's own assigned units.
+3. **`main` `240b2dd` merged in while the asset core was being gated** (#108, the AI sales
+   architecture; Sign & Attest SA1; the company board and open-work offers, `0205`/`0206`,
+   `0214`–`0216`). Nine files conflicted, all of them pins and registers: the permission union, grants,
+   universal list and procedure map take both sides; the portal shell draws main's Board tab and the
+   Fleet tab; the authorization, path and inventory pins are main's plus this branch's 22. One
+   security finding came out of it: CP1.5's structural guard (`server/unitScopeGuard.test.ts`)
+   caught main's new `shifts.post` and `shifts.award` writing a unit id they never checked; both now
+   call `requireUnitInScope`, and `shifts.post` joined the refusal table in
+   `server/unitScopeSecurity.db.test.ts`.
 
 Design: `docs/fleet/FLEET_EQUIPMENT_PORTFOLIO_SURVEY_AND_DESIGN.md` (§A.14, §B.2–B.5, §B.13).
 Foundation: `docs/fleet/FLEET_PORTFOLIO_FOUNDATION_CHECKPOINT.md`,
@@ -20,18 +29,22 @@ Foundation: `docs/fleet/FLEET_PORTFOLIO_FOUNDATION_CHECKPOINT.md`,
 
 ## Counts
 
-| | `main` `b35bac4` | + foundation (`82df3d6`) | + this checkpoint |
-|---|---|---|---|
-| Tables | 440 | 443 | **444** (`unitComponents`) |
-| Migrations | 190 | 193 | **195** (`0221_fleet_asset_identity.sql`, `0222_fleet_component_guards.sql`) |
-| Role-authorized procedures | 743 | 755 | **765** (+10, `server/fleetAssetRouter.ts`, spread into `fleet`) |
-| Operational procedure map | 723 | 735 | **745** |
-| Mounted server paths | 793 | 805 | **815** |
-| Permissions | 384 | 388 | **392** |
-| Sensitive (fail-closed) | 143 | 146 | **149** |
-| Universal (self-scoped) | 13 | 13 | **14** (`fleet.read_own`) |
-| Classification | `c1a.3` | `c1a.4` | **`c1a.5`** |
-| Unwired `_core` engines | — | unchanged | **unchanged** — `fleetAssets` is reached from its router |
+| | `main` `b35bac4` | + foundation (`82df3d6`) | + this checkpoint | `main` `240b2dd` | merged |
+|---|---|---|---|---|---|
+| Tables | 440 | 443 | **444** (`unitComponents`) | 451 | **456** |
+| Migrations | 190 | 193 | **195** (`0221_fleet_asset_identity.sql`, `0222_fleet_component_guards.sql`) | 194 | **199** |
+| Role-authorized procedures | 743 | 755 | **765** (+10, `server/fleetAssetRouter.ts`, spread into `fleet`) | 778 | **800** |
+| Operational procedure map | 723 | 735 | **745** | 758 | **780** |
+| Mounted server paths | 793 | 805 | **815** | 832 | **854** |
+| Permissions | 384 | 388 | **392** | 396 | **406** |
+| Sensitive (fail-closed) | 143 | 146 | **149** | 153 | **160** |
+| Universal (self-scoped) | 13 | 13 | **14** (`fleet.read_own`) | 16 | **17** |
+| Classification | `c1a.3` | `c1a.4` | **`c1a.5`** | `c1a.3` | **`c1a.5`** |
+| Unwired `_core` engines | — | unchanged | **unchanged** — `fleetAssets` is reached from its router | — | unchanged |
+
+The two right-hand columns are the second merge: every `merged` count is main's plus exactly this
+branch's delta over `b35bac4` (+5 tables, +5 migrations, +22 procedures and paths, +10 permissions,
++7 sensitive, +1 universal).
 
 Every count is read from the source by `scripts/current-state.sh`.
 
@@ -104,6 +117,7 @@ axe rules in the accessibility suite in seven states. The former demonstration s
 | `client/src/fleet/*.dom.test.tsx` | 11 | the presentation contract; the list's ordering, words and empty answer; the detail's reasons, refused controls, lifecycle form and unrecognised state |
 | `client/src/a11y/a11y.dom.test.tsx` | +21 | seven Fleet states at three viewports |
 | existing pins | — | `fleetPortfolio.test.ts` updated (lifecycle is evaluated now); census, path and inventory pins moved by exactly this checkpoint's deltas |
+| `server/unitScopeSecurity.db.test.ts` | +1 case | `shifts.post` (main, `0206`) refuses another organization's unit as not found and writes nothing — found by the structural guard at the second merge |
 
 ## Known gaps, named
 
@@ -122,3 +136,20 @@ axe rules in the accessibility suite in seven states. The former demonstration s
 
 `DATABASE_URL=… bash scripts/ci-gate.sh` from a dropped and recreated MariaDB 10.11 on Node 22.23.3
 (`.nvmrc`), recorded in the commit that carries this document.
+
+After the second merge the gate ran to the end: migrations, parity, both typechecks at zero, no bare
+`protectedProcedure`, the build, and the suite — every suite green except one, and that one is red
+on `main` `240b2dd` untouched, reproduced on a clean checkout of `main` alone:
+
+- `server/documentValidityCanonical.test.ts` › "open work consumes the adapter's verdict and decides
+  no qualification itself" — `server/_core/openShifts.ts` (#59) imports `readExpiry` from
+  `./documentValidity`, which the census it ships with forbids. Nothing in this branch touches either
+  file. The licence it classifies is `operators.licenseExpiresAt`, a column, not a compliance
+  document; the smallest fix on `main` is to list `_core/openShifts.ts`'s `readExpiry` as a
+  permitted date classifier in that census (with the reason) rather than to copy the expiry rule
+  into open work, which is what the census exists to prevent. Not fixed here: it is `main`'s, and
+  the fix is a ruling on `main`'s own test.
+- `server/calendarFixtures.test.ts` went red on the re-run a day later: `server/cash.test.ts` (`main`,
+  untouched here) carries fixture dates from `2026-10-10` that the real clock now reaches within its
+  three-week window. It is a clock guard on `main`'s own fixtures and fails on `main` from the same
+  date; the fix is `main`'s (make the fixtures clock-relative or record them as reviewed).

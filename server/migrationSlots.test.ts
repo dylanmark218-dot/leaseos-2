@@ -54,10 +54,15 @@ describe("the real tree", () => {
     expect(files).toContain("0208_organization_invitations.sql");   // renumbered from 0175 on merging main, which took 0175
     // Main has since taken 0209 (0209_operating_zone_scope, P0-A2.1), above this checkpoint's two; the
     // ledger applies by name, so 0207/0208 still run on a database that already has 0209.
+    // SA1 (Sign & Attest) holds 0214–0216 on this branch, below v23.31's 0217–0219, which were renumbered
+    // around them; both lineages apply by name.
     // v23.31 took 0217–0219 (Customer, Contract and Rate Management): 0210–0216 are claimed by open
     // branches, so head+1 would have collided; the register records the scan.
     expect(files).toContain("0219_job_commercial_context.sql");
-    expect(headSlot(files)).toBe("0219");
+    // The Fleet & Equipment Portfolio asset core took 0221–0222: 0220 was claimed by an open branch
+    // (eld-compliance-intelligence) while the checkpoint was being gated; the register records the scan.
+    expect(files).toContain("0221_fleet_asset_identity.sql");
+    expect(headSlot(files)).toBe("0222");
   });
 
   it("keeps the reserved slots empty", () => {
@@ -108,8 +113,8 @@ describe("the guard catches what it exists to catch", () => {
   });
 
   it("accepts a correctly allocated next migration", () => {
-    expect(auditMigrationSlots([...files, "0220_the_next_one.sql"])).toEqual([]);
-    expect(headSlot([...files, "0220_the_next_one.sql"])).toBe("0220");
+    expect(auditMigrationSlots([...files, "0223_the_next_one.sql"])).toEqual([]);
+    expect(headSlot([...files, "0223_the_next_one.sql"])).toBe("0223");
   });
 
   it("gives every tolerated duplicate a reason that says something", () => {

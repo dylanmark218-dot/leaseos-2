@@ -1,8 +1,10 @@
 /**
  * v22.20 (0092) — a ticket on record is not a ticket in force.
  *
- * Exercises the new store through the open-shifts eligibility read, since that
- * is the thing the store exists to make answerable.
+ * Exercises the store through the open-shifts eligibility read (0206: the board's service), which
+ * reaches it through the D-05 read adapter (`qualificationReads`, C1b-3). Reconciling #59 with main,
+ * the owner ruled that adapter governs: with no Academy grant for a code, a `workerQualifications`
+ * row is read as a marked legacy fallback, so these fixtures seed exactly that.
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
@@ -28,11 +30,17 @@ async function onRoster(userId: number) {
   await pool.execute("INSERT INTO crews (crewRef, tenantId, name, createdByUserId) VALUES (?, 'default', ?, 1)", [crewRef, crewRef]);
   await pool.execute("INSERT INTO crewMembers (crewRef, userId, crewRole, joinedAt) VALUES (?, ?, 'driver', NOW())", [crewRef, userId]);
 }
+/** The operator record the board reads through `operators.userId`; it also owns the documents. */
 async function operatorWithLicence(userId: number) {
   await pool.execute("INSERT INTO operators (id, userId, name, licenseClass, licenseExpiresAt, createdAt) VALUES (?,?,?,?,?,NOW())",
     [userId, userId, `Op ${rnd()}`, "1", new Date("2028-01-01T00:00:00Z")]);
+  // #52 (on main): the legacy operators.licenseExpiresAt date alone is an unverified licence, so a ready
+  // driver also needs a verified driver_licence document. Same expiry, so an expired fixture stays expired.
+  await pool.execute("INSERT INTO complianceDocuments (ownerType, ownerId, docType, title, capturedAt, expiresAt, verificationStatus) VALUES ('operator', ?, 'driver_licence', 'Driver licence', NOW(), ?, 'verified')", [userId, new Date("2028-01-01T00:00:00Z")]);
   await onRoster(userId);
 }
+
+/** A legacy holding. No Academy grant exists in these cases, so the adapter's fallback reads it. */
 async function holding(userId: number, code: string, o: { state?: string; expiresAt?: Date | null; recordedAt?: Date } = {}) {
   const holdingRef = `WQ-${rnd()}${rnd()}`;
   await pool.execute(

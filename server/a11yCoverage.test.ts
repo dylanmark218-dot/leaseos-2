@@ -36,6 +36,7 @@ const NOT_A_SURFACE: Record<string, string> = {
   "client/src/portal/panels/FleetPanel.tsx": "the fleet list's container: a live tRPC caller for fleet.list; the screen it renders, FleetListView, is a surface in the suite in three states",
   "client/src/fleet/FleetAssetDetail.tsx": "the asset detail's container: a live tRPC caller that reads one unit and its unit-side readiness and drives holds, lifecycle and components; FleetAssetDetailView is the surface",
   "client/src/commercial/shared.tsx": "a vocabulary of small parts (StatusBadge, StateBlock, HistoryList, TabBar) rendered only inside the three commercial views, which are surfaces",
+  "client/src/portal/panels/BoardPanel.tsx": "the Board's container: a live tRPC caller that reads conversations and open work and writes through the device's board queue; the panel it renders, BoardPanelView, is a surface in the suite in two states",
 };
 
 describe("the accessibility suite keeps up with the screens", () => {

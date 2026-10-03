@@ -30,12 +30,13 @@ import { TimelinePanel } from "./panels/TimelinePanel";
 import { SetupPanel } from "./panels/SetupPanel";
 import { PeopleAccessPanel } from "./panels/PeopleAccessPanel";
 import { FleetPanel } from "./panels/FleetPanel";
+import { BoardPanel } from "./panels/BoardPanel";
 import { UniversalSearch } from "./UniversalSearch";
 import { SyncIndicator } from "./SyncIndicator";
 import { QuickCapture } from "./QuickCapture";
 import { SessionGate } from "@/session/SessionGate";
 
-export type PanelKey = "myday" | "exceptions" | "inbox" | "timeline" | "setup" | "people" | "fleet";
+export type PanelKey = "myday" | "exceptions" | "inbox" | "board" | "timeline" | "setup" | "people" | "fleet";
 
 /** 0221 — the portals that work units. Drawing the panel elsewhere would only draw a screen that refuses. */
 const FLEET_PORTALS = new Set<PortalKey>(["fleet_maintenance", "dispatch_operations", "safety_compliance", "office_administration", "management"]);
@@ -59,6 +60,9 @@ export function PortalShell(props: { initialPanel?: PanelKey; displayName?: stri
           {...props}
           workspace={workspace as PortalKey}
           held={context.availableWorkspaces.map(w => w.key as PortalKey)}
+          // The Board queue's scope: the organization the server says this session acts for (the
+          // historical single tenant reads "default"). None opens no queue — nothing is written for nobody.
+          orgKey={context.activeOrganization?.orgRef ?? null}
           displayName={props.displayName ?? context.user?.name ?? null}
         />
       )}
@@ -66,7 +70,7 @@ export function PortalShell(props: { initialPanel?: PanelKey; displayName?: stri
   );
 }
 
-function PortalShellBody({ initialPanel = "myday", displayName = null, workspace, held }: { initialPanel?: PanelKey; displayName?: string | null; workspace: PortalKey; held: readonly PortalKey[] }) {
+function PortalShellBody({ initialPanel = "myday", displayName = null, workspace, held, orgKey }: { initialPanel?: PanelKey; displayName?: string | null; workspace: PortalKey; held: readonly PortalKey[]; orgKey: string | null }) {
   const [, navigate] = useLocation();
   const [panel, setPanel] = useState<PanelKey>(initialPanel);
   const [online, setOnline] = useState<boolean>(typeof navigator === "undefined" ? true : navigator.onLine);
@@ -144,7 +148,7 @@ function PortalShellBody({ initialPanel = "myday", displayName = null, workspace
           {/* B23.2 — "People" only in the management workspace. The procedures
               behind it refuse anyone without `roles.grant` regardless, so this
               keeps a door from being drawn rather than being the lock. */}
-          {(["myday", "exceptions", "inbox", "timeline",
+          {(["myday", "exceptions", "inbox", "board", "timeline",
              ...(FLEET_PORTALS.has(portal) ? ["fleet" as PanelKey] : []),
              ...(OFFICE_PORTALS.has(portal) ? ["setup" as PanelKey] : []),
              ...(portal === "management" ? ["people" as PanelKey] : [])] as PanelKey[]).map(p => (
@@ -154,6 +158,8 @@ function PortalShellBody({ initialPanel = "myday", displayName = null, workspace
         {panel === "myday" && view && (OFFICE_PORTALS.has(portal) ? <MyDayPanel view={view} office={officeView} onGo={go} /> : <MyDayPanel view={view} onGo={go} />)}
         {panel === "exceptions" && <ExceptionsPanel items={(exceptions.data?.items ?? []) as never} summary={myDay.data?.attention as never} onGo={go} />}
         {panel === "inbox" && <InboxPanel items={(inbox.data?.items ?? []) as never} counts={inbox.data?.counts ?? {}} onGo={go} />}
+        {/* 0205/0206 — conversations and open work; writes go through the device's board queue. */}
+        {panel === "board" && <BoardPanel online={online} orgKey={orgKey} />}
         {panel === "timeline" && <TimelinePanel />}
         {panel === "setup" && OFFICE_PORTALS.has(portal) && <SetupPanel />}
         {panel === "people" && portal === "management" && <PeopleAccessPanel />}
