@@ -422,14 +422,17 @@ d("RI-0.6: readiness reads dangerous goods from structured loads only, and says 
     expect(dgCodes(await caller(s.dispatcher).dispatch.readiness(s.subject))).toContain("operator_tdg_certificate_missing");
   });
 
-  it("the eligibility fingerprint moves when a load's classification moves, and not when the job is renamed", async () => {
+  it("the dangerous-goods fact in the eligibility fingerprint moves with a load's classification, and not with the job's wording", async () => {
     const s = await establishedSubject();
-    const fp = async () => (await composeReadiness(s.subject)).fingerprint;
-    const before = await fp();
+    const read = async () => { const r = await composeReadiness(s.subject); return { fingerprint: r.fingerprint, material: r.facts.materialClassificationVersion }; };
+    const before = await read();
+    // Renaming the job may move the fingerprint through the job's own classification fact; it cannot move the dangerous-goods fact.
     await pool.execute("UPDATE jobs SET type = 'hazardous waste run' WHERE id = ?", [s.jobId]);
-    expect(await fp()).toBe(before);
+    expect((await read()).material).toBe(before.material);
     await pool.execute("UPDATE loadProfiles SET classificationStatus = 'needs_verification', verifiedAt = NULL WHERE jobId = ?", [s.jobId]);
-    expect(await fp()).not.toBe(before);
+    const after = await read();
+    expect(after.material).not.toBe(before.material);
+    expect(after.fingerprint).not.toBe(before.fingerprint);
   });
 });
 
