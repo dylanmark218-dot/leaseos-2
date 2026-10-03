@@ -27,6 +27,7 @@
 
 import { TRPCError } from "@trpc/server";
 import { requireCallerUnits } from "./unitScope";
+import { requireEvidence, requireJob } from "./financeScope";
 import { z } from "zod";
 import { moneyScoped, roleProcedure, router } from "./_core/trpc";
 import * as svc from "./payrollService";
@@ -825,7 +826,8 @@ export const financeRouter = router({
     .mutation(async ({ ctx, input }) => {
       await requireCallerUnits(ctx.user.id, { unitId: input.unitId });   // CP1.5
       // F1 — the book must be the caller's organization's; any other id is "not found".
-      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); }
+      // P4 — and so must the job and the receipt (they were written unchecked), through the canonical helpers.
+      { const m = await moneyScope(ctx.user.id); await assertEntityInScope(m.db, input.financialEntityId, m.scope); const fs = { ...m.scope, entityIds: [] as number[] }; await requireJob(fs, input.jobId); await requireEvidence(fs, input.evidenceRecordId); }
       const allocations = buildAllocations({
         total: input.total,
         businessUsePercent: input.businessUsePercent,

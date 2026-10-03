@@ -339,6 +339,8 @@ export const PAYROLL_EXCEPTION_KINDS = [
   "earning_rule_mismatch", "outside_employment", "long_shift", "job_reference_missing", "source_changed_after_preparation",
   "clock_variance", "cross_tenant_reference", "self_approval_blocked", "no_valid_approver", "no_pay_schedule",
   "no_matching_pay_period", "locked_pay_period",
+  // P4 (0235) — employee expense review signals.
+  "duplicate_expense", "receipt_required", "reimbursement_currency_mismatch", "evidence_changed_after_submission",
 ] as const;
 export type PayrollExceptionKind = (typeof PAYROLL_EXCEPTION_KINDS)[number];
 
@@ -372,10 +374,22 @@ export const EXCEPTION_POLICY: Readonly<Record<PayrollExceptionKind, { severity:
   clock_variance: { severity: "review", blocks: null, clearedBy: "person" },
   long_shift: { severity: "review", blocks: null, clearedBy: "person" },
   missing_approval: { severity: "review", blocks: null, clearedBy: "person" },
+  // P4 — expense claims. A person resolves a duplicate or a missing receipt (a declared lost receipt, a confirmed
+  // second purchase); a currency mismatch or a changed receipt is re-checked by approval itself, so the claim is
+  // corrected and resubmitted, never approved past it.
+  duplicate_expense: { severity: "blocking", blocks: "approval", clearedBy: "person" },
+  receipt_required: { severity: "blocking", blocks: "approval", clearedBy: "person" },
+  reimbursement_currency_mismatch: { severity: "blocking", blocks: "approval", clearedBy: "condition" },
+  evidence_changed_after_submission: { severity: "blocking", blocks: "approval", clearedBy: "person" },
 };
 
+/** The kinds that belong to expense claims (subject `expense`), not to time entries. */
+export const EXPENSE_EXCEPTION_KINDS: readonly PayrollExceptionKind[] = ["duplicate_expense", "receipt_required", "reimbursement_currency_mismatch", "evidence_changed_after_submission"];
+
 /** The open exceptions on a time entry that stop its approval until a person resolves them. */
-export const APPROVAL_GATE_KINDS: readonly PayrollExceptionKind[] = PAYROLL_EXCEPTION_KINDS.filter(k => EXCEPTION_POLICY[k].blocks === "approval" && EXCEPTION_POLICY[k].clearedBy === "person");
+export const APPROVAL_GATE_KINDS: readonly PayrollExceptionKind[] = PAYROLL_EXCEPTION_KINDS.filter(k => EXCEPTION_POLICY[k].blocks === "approval" && EXCEPTION_POLICY[k].clearedBy === "person" && !EXPENSE_EXCEPTION_KINDS.includes(k));
+/** The open exceptions on an expense claim that stop its approval until a person resolves them. */
+export const EXPENSE_APPROVAL_GATE_KINDS: readonly PayrollExceptionKind[] = EXPENSE_EXCEPTION_KINDS.filter(k => EXCEPTION_POLICY[k].blocks === "approval" && EXCEPTION_POLICY[k].clearedBy === "person");
 /** The exceptions a successful earning generation closes. */
 export const EARNING_STAGE_KINDS: readonly PayrollExceptionKind[] = PAYROLL_EXCEPTION_KINDS.filter(k => EXCEPTION_POLICY[k].blocks === "earning");
 

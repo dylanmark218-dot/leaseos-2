@@ -108,6 +108,19 @@ Next free number at that time: `0191` (superseded above).
   `0189`, the first number no branch holds, rather than `0175` (named free on 2026-09-23 and claimed by
   four branches since). No other branch renumbered.
 
+## Claim: 0235 (payroll P4 — employee expenses and payroll reimbursements, 2026-10-03)
+
+`main` = `9ec123a` at allocation (then `9895188`, a test-only fix, merged in before the commit). Scan over `origin/main`
+and all 135 remote refs immediately before the file was written and again before the commit: 0228 (safety, main),
+0229–0232 (integration hub), 0233 (three open branches), 0234 (payroll P3, carried by this branch); nothing at or above
+`0235`.
+
+| Number | Migration file | Branch | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|
+| **0235** | **`0235_payroll_expense_reimbursements.sql`** | **`claude/payroll-p4-expenses-reimbursements`** | **claiming** | **none** | **keeps 0235** |
+
+**Next free number for new work: `0236`** (re-check with the scan before committing).
+
 ## Move: payroll P3 0228 → 0234 (on merging main into payroll P4, 2026-10-03)
 
 P3 (`claude/payroll-p3-time-candidates`, head `507ec9a`) claimed `0228` and was gated there, but it had not merged when

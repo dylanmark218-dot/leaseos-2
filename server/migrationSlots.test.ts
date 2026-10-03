@@ -77,7 +77,9 @@ describe("the real tree", () => {
     // integration hub holds 0229–0232 and three open branches hold 0233. No environment had applied it.
     expect(files).toContain("0234_payroll_time_candidates_exceptions.sql");
     expect(files.filter(f => f.startsWith("0228_payroll"))).toEqual([]);
-    expect(headSlot(files)).toBe("0234");
+    // Payroll P4 took 0235 (employee expenses and reimbursements): scanned immediately before it was written.
+    expect(files).toContain("0235_payroll_expense_reimbursements.sql");
+    expect(headSlot(files)).toBe("0235");
   });
 
   it("keeps the reserved slots empty", () => {

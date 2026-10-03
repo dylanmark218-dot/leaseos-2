@@ -177,6 +177,13 @@ export type Permission =
   | "payroll.exception.read"
   | "payroll.exception.resolve"
   | "payroll.earning.approve"
+  // Payroll P4 (0235) — employee expense claims. Submitting and reading one's own are the employee's; reading, approving
+  // and rejecting others' are the payroll office's financial decision (never D10's crew supervisor).
+  | "payroll.expense.submit_own"
+  | "payroll.expense.read_own"
+  | "payroll.expense.read"
+  | "payroll.expense.approve"
+  | "payroll.expense.reject"
   // Contractor settlement is its own ledger, never employee payroll.
   | "contractor.read" | "contractor.write" | "contractor.approve"
   | "finance.entity.write"
@@ -425,6 +432,9 @@ export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
  */
 const GRANTS: Record<DomainRole, readonly Permission[]> = {
   driver: [
+    // P4 (0235) — one's own employee expense claims.
+    "payroll.expense.submit_own",
+    "payroll.expense.read_own",
     // SA1 — Sign & Attest
     "attest.read",
     "attest.document.open",
@@ -524,6 +534,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   dispatcher: [
+    // P4 (0235) — one's own employee expense claims.
+    "payroll.expense.submit_own",
+    "payroll.expense.read_own",
     // 0221 — opening a work order from a defect.
     "maintenance.defect.send_to_shop",
     // SA1 — Sign & Attest
@@ -653,6 +666,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   mechanic: [
+    // P4 (0235) — one's own employee expense claims.
+    "payroll.expense.submit_own",
+    "payroll.expense.read_own",
     "live_assist.use",
     "document.read",
     "document.intake",
@@ -739,6 +755,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "fleet.meter.verify",
   ],
   shop_lead: [
+    // P4 (0235) — one's own employee expense claims.
+    "payroll.expense.submit_own",
+    "payroll.expense.read_own",
     "live_assist.use",
     "document.read",
     "document.intake",
@@ -850,6 +869,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "fleet.meter.verify",
   ],
   safety: [
+    // P4 (0235) — one's own employee expense claims.
+    "payroll.expense.submit_own",
+    "payroll.expense.read_own",
     // P3 (0234) — the team view, approval and rejection of payroll time, gated again by the D10 crew-supervisor relationship.
     "payroll.time.read_team",
     "payroll.time.approve",
@@ -1007,6 +1029,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "maintenance.defect.triage",
   ],
   office: [
+    // P4 (0235) — one's own employee expense claims.
+    "payroll.expense.submit_own",
+    "payroll.expense.read_own",
     // SA1 — Sign & Attest
     "attest.read",
     "attest.document.open",
@@ -1200,6 +1225,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "maintenance.defect.send_to_shop",
   ],
   management: [
+    // P4 (0235) — one's own employee expense claims.
+    "payroll.expense.submit_own",
+    "payroll.expense.read_own",
     // P3 (0234) — the team view, approval and rejection of payroll time, gated again by the D10 crew-supervisor relationship.
     "payroll.time.read_team",
     "payroll.time.approve",
@@ -1512,6 +1540,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "fleet.meter.verify",
   ],
   hr: [
+    // P4 (0235) — employee expense claims: one's own, and the payroll office's review and decision.
+    "payroll.expense.submit_own",
+    "payroll.expense.read_own",
+    "payroll.expense.read",
+    "payroll.expense.approve",
+    "payroll.expense.reject",
     "portfolio.read",
     "document.read",
     "safety_program.read",
@@ -1661,6 +1695,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   /* ---- B20.5 finance and payroll functions ---- */
 
   bookkeeper: [
+    // P4 (0235) — one's own employee expense claims.
+    "payroll.expense.submit_own",
+    "payroll.expense.read_own",
     "document.read",
     "document.intake",
     "facility.directory.read",
@@ -1740,6 +1777,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   payroll_admin: [
+    // P4 (0235) — employee expense claims: one's own, and the payroll office's review and decision.
+    "payroll.expense.submit_own",
+    "payroll.expense.read_own",
+    "payroll.expense.read",
+    "payroll.expense.approve",
+    "payroll.expense.reject",
     "payroll.read_own",
     "payroll.read_employee",
     "payroll.read_all",
@@ -1806,6 +1849,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   controller: [
+    // P4 (0235) — employee expense claims: one's own, and the payroll office's review and decision.
+    "payroll.expense.submit_own",
+    "payroll.expense.read_own",
+    "payroll.expense.read",
+    "payroll.expense.approve",
+    "payroll.expense.reject",
     "document.read",
     "document.confirm",
     "document.issue",
@@ -2096,22 +2145,24 @@ const COMPENSATION_PERMISSIONS: readonly Permission[] = ["payroll.compensation.r
  * second role or a broad grant. The bookkeeper and the auditor read books, not timesheets.
  */
 const TIME_AUTHORITY_PERMISSIONS: readonly Permission[] = ["payroll.time.read_team", "payroll.time.approve", "payroll.time.reject", "payroll.exception.read", "payroll.exception.resolve", "payroll.earning.approve"];
+/** P4 — the payroll office's authority over other people's expense claims. A crew supervisor gains none of it through D10. */
+const EXPENSE_OFFICE_PERMISSIONS: readonly Permission[] = ["payroll.expense.read", "payroll.expense.approve", "payroll.expense.reject"];
 /** Field roles approve their crew's time under D10; they do not read exceptions or approve earnings. */
 const PAYROLL_OFFICE_PERMISSIONS: readonly Permission[] = ["payroll.exception.read", "payroll.exception.resolve", "payroll.earning.approve"];
 
 const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
-  mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...PAYROLL_OFFICE_PERMISSIONS],
-  shop_lead: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...PAYROLL_OFFICE_PERMISSIONS],
-  dispatcher: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...TIME_AUTHORITY_PERMISSIONS],
-  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...PAYROLL_OFFICE_PERMISSIONS],
-  auditor: ["payroll.read", "billing.write", "personnel.write", ...COMPENSATION_PERMISSIONS, ...TIME_AUTHORITY_PERMISSIONS],
+  mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...PAYROLL_OFFICE_PERMISSIONS, ...EXPENSE_OFFICE_PERMISSIONS],
+  shop_lead: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...PAYROLL_OFFICE_PERMISSIONS, ...EXPENSE_OFFICE_PERMISSIONS],
+  dispatcher: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...TIME_AUTHORITY_PERMISSIONS, ...EXPENSE_OFFICE_PERMISSIONS],
+  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...PAYROLL_OFFICE_PERMISSIONS, ...EXPENSE_OFFICE_PERMISSIONS],
+  auditor: ["payroll.read", "billing.write", "personnel.write", ...COMPENSATION_PERMISSIONS, ...TIME_AUTHORITY_PERMISSIONS, ...EXPENSE_OFFICE_PERMISSIONS],
 
   // The banking and tax-identifier reads are held by nobody in this model.
   // They exist so the permission has a name to be denied under, and so adding
   // a holder is a deliberate, reviewable act rather than a side effect of a
   // broad grant. Same reason `authority_certified` sits empty in the
   // measurement ladder.
-  bookkeeper: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "payroll.approve", ...COMPENSATION_PERMISSIONS, ...TIME_AUTHORITY_PERMISSIONS],
+  bookkeeper: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "payroll.approve", ...COMPENSATION_PERMISSIONS, ...TIME_AUTHORITY_PERMISSIONS, ...EXPENSE_OFFICE_PERMISSIONS],
   // P1 — the administrator proposes compensation; approving it is the controller's (D4).
   payroll_admin: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.approve", "billing.write", "payroll.compensation.approve", "payroll.void"],
   tax_preparer: ["payroll.bank.read", "payroll.tax_identifier.read", "payroll.read_all", "billing.write", "banking.reconcile"],
@@ -2350,6 +2401,8 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "payroll.time.reject",
   "payroll.exception.resolve",
   "payroll.earning.approve",
+  "payroll.expense.approve",
+  "payroll.expense.reject",
   "contractor.approve",
   "finance.entity.write",
   // B20.13 — a claim ties an expense to a program on the stacking ledger, and
@@ -3117,6 +3170,18 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "payrollTime.exceptionsList": "payroll.exception.read",
   "payrollTime.exceptionsScan": "payroll.exception.resolve",
   "payrollTime.exceptionResolve": "payroll.exception.resolve",
+  // Payroll P4 (0235) — employee expense claims. Own procedures resolve the claimant from the session.
+  "payrollExpense.myExpensesList": "payroll.expense.read_own",
+  "payrollExpense.myExpenseGet": "payroll.expense.read_own",
+  "payrollExpense.myExpenseSubmit": "payroll.expense.submit_own",
+  "payrollExpense.myExpenseClaimDraft": "payroll.expense.submit_own",
+  "payrollExpense.myExpenseWithdraw": "payroll.expense.submit_own",
+  "payrollExpense.pendingList": "payroll.expense.read",
+  "payrollExpense.expenseGet": "payroll.expense.read",
+  "payrollExpense.duplicates": "payroll.expense.read",
+  "payrollExpense.approve": "payroll.expense.approve",
+  "payrollExpense.reject": "payroll.expense.reject",
+  "payrollExpense.returnForCorrection": "payroll.expense.approve",
 
   "contractors.settlementsList": "contractor.read",
   "contractors.settlementCreate": "contractor.write",

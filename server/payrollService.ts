@@ -14,6 +14,8 @@
 import { and, desc, eq, gte, lte, inArray } from "drizzle-orm";
 import { getDb } from "./db";
 import type { Tx } from "./_core/dbTypes";
+import { collectReimbursementsInTx, type ReimbursementCollection } from "./payrollExpenseService";
+import { dateText as dateTextOf } from "./payrollCompensationService";
 import {
   contractorSettlementLines,
   contractorSettlements,
@@ -873,9 +875,12 @@ export async function approveEarning(args: { earningRef: string; approvedByUserI
 
 export type CollectionResult = {
   state: "draft" | "collecting" | "review" | "approved" | "processing" | "paid" | "closed" | "amended";
+  /** Earnings collected (P0); `amountCents` is their total. */
   collected: number;
   skipped: Array<{ id: number; reason: string }>;
   amountCents: number;
+  /** P4 — approved reimbursements scheduled onto the run (never marked paid here). */
+  reimbursements: ReimbursementCollection;
 };
 
 /**
@@ -894,7 +899,7 @@ export async function collectApprovedEarnings(args: { payRunRef: string }): Prom
       throw Object.assign(new Error(`Pay run is ${run.state}; lines may be collected only in draft or collecting`), { code: "PRECONDITION_FAILED" });
     }
     // P2 lock, read under the run's lock: a locked period takes no more lines.
-    const period = (await tx.select({ state: payPeriods.state }).from(payPeriods).where(eq(payPeriods.id, run.payPeriodId)).for("update").limit(1))[0];
+    const period = (await tx.select({ state: payPeriods.state, payScheduleId: payPeriods.payScheduleId, periodEndDate: payPeriods.periodEndDate }).from(payPeriods).where(eq(payPeriods.id, run.payPeriodId)).for("update").limit(1))[0];
     if (!period || !(period.state === "collecting" || period.state === "review")) {
       throw Object.assign(new Error(`Pay period is ${period?.state ?? "missing"}; lines are collected only while the period is open or under review`), { code: "PRECONDITION_FAILED" });
     }
@@ -948,7 +953,10 @@ export async function collectApprovedEarnings(args: { payRunRef: string }): Prom
         ruleStatus: "not_applicable",
       });
     }
-    return { state: run.state === "draft" ? "collecting" : run.state, collected: decision.collect.length, skipped: decision.skipped, amountCents };
+    // P4: approved employee reimbursements, by their own selection, in the same transaction. A reimbursement line is
+    // scheduled, not paid; payment is decided when the payroll is finalized (P5).
+    const reimbursements = await collectReimbursementsInTx(tx, { id: run.id, financialEntityId: run.financialEntityId }, { state: period.state, payScheduleId: period.payScheduleId, periodEndDate: dateTextOf(period.periodEndDate) });
+    return { state: run.state === "draft" ? "collecting" : run.state, collected: decision.collect.length, skipped: decision.skipped, amountCents, reimbursements };
   });
 }
 

@@ -3302,6 +3302,35 @@ export const expenseRecords = mysqlTable("expenseRecords", {
   evidenceRecordId: int("evidenceRecordId"),
   status: mysqlEnum("status", ["draft", "submitted", "review", "approved", "rejected", "posted"]).default("draft").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0235 (P4) — the employee reimbursement claim on this expense. `status` stays the accounting lifecycle. */
+  employeePayrollProfileId: int("employeePayrollProfileId"),
+  reimbursementState: mysqlEnum("reimbursementState", ["not_applicable", "pending_approval", "approved", "scheduled", "reimbursed", "rejected", "withdrawn"]).default("not_applicable").notNull(),
+  reimbursementCents: int("reimbursementCents"),
+  claimNotes: varchar("claimNotes", { length: 1000 }),
+  createdByUserId: int("createdByUserId"),
+  clientCaptureRef: varchar("clientCaptureRef", { length: 80 }),
+  capturedAt: timestamp("capturedAt"),
+  deviceRef: varchar("deviceRef", { length: 120 }),
+  submittedByUserId: int("submittedByUserId"),
+  submittedAt: timestamp("submittedAt"),
+  evidenceFingerprint: varchar("evidenceFingerprint", { length: 64 }),
+  evidenceContentHash: varchar("evidenceContentHash", { length: 64 }),
+  reimbursementApprovedByUserId: int("reimbursementApprovedByUserId"),
+  reimbursementApprovedAt: timestamp("reimbursementApprovedAt"),
+  reimbursementRejectedByUserId: int("reimbursementRejectedByUserId"),
+  reimbursementRejectedAt: timestamp("reimbursementRejectedAt"),
+  reimbursementRejectedReason: varchar("reimbursementRejectedReason", { length: 400 }),
+  reimbursementReturnedByUserId: int("reimbursementReturnedByUserId"),
+  reimbursementReturnedAt: timestamp("reimbursementReturnedAt"),
+  reimbursementReturnReason: varchar("reimbursementReturnReason", { length: 400 }),
+  withdrawnByUserId: int("withdrawnByUserId"),
+  withdrawnAt: timestamp("withdrawnAt"),
+  withdrawReason: varchar("withdrawReason", { length: 400 }),
+  reimbursementPayRunId: int("reimbursementPayRunId"),
+  reimbursementLineId: int("reimbursementLineId").unique(),
+  supersedesExpenseId: int("supersedesExpenseId"),
+  /** PERSISTENT generated (0235): `evidenceRecordId` while the claim is live, else NULL; unique. Never written. */
+  liveClaimEvidenceId: int("liveClaimEvidenceId"),
 });
 
 export const expenseAllocations = mysqlTable("expenseAllocations", {
@@ -3539,6 +3568,8 @@ export const payRunLines = mysqlTable("payRunLines", {
   taxRuleId: int("taxRuleId"),
   ruleStatus: mysqlEnum("ruleStatus", ["verified", "unverified", "not_applicable"]).default("unverified").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0235 (P4) — the expense a reimbursement line pays back; unique, so one expense is never on two lines. */
+  expenseRecordId: int("expenseRecordId").unique(),
 });
 
 export const payrollAdjustments = mysqlTable("payrollAdjustments", {
@@ -10622,6 +10653,8 @@ export const PAYROLL_EXCEPTION_KIND_VALUES = [
   "earning_rule_mismatch", "outside_employment", "long_shift", "job_reference_missing", "source_changed_after_preparation",
   "clock_variance", "cross_tenant_reference", "self_approval_blocked", "no_valid_approver", "no_pay_schedule",
   "no_matching_pay_period", "locked_pay_period",
+  // 0235 (P4) — employee expense review signals.
+  "duplicate_expense", "receipt_required", "reimbursement_currency_mismatch", "evidence_changed_after_submission",
 ] as const;
 
 /** Review signals with a deterministic condition key; one open row per condition. They never alter pay by themselves. */

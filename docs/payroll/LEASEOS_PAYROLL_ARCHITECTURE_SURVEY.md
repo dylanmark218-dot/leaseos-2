@@ -1515,3 +1515,204 @@ permissions; driver, mechanic and shop_lead the exception and earning permission
   `financeScopeCoverage` (+ `payrollTime`, 162 money procedures), `procedureAuthorization` (821 mapped, new router in
   the wiring sources), `operationalApiAuthorization` (821), `crossLayerIntegrity` (898), `migrationSlots` (head
   `0228`), `PROCEDURE_AUTHORIZATION_INVENTORY.md` (537), `LEASEOS_CURRENT_STATE.md`.
+
+## 27. P4 — Employee Expenses & Payroll Reimbursements (implemented 2026-10-03)
+
+**Synchronized base:** branch `claude/payroll-p4-expenses-reimbursements`, created from the final P3 head `507ec9a`;
+`main` = `9ec123a` (Safety & Compliance Program Builder, #99) merged in at `a95bab4`, then `9895188` (a test-only fix,
+#132) merged before the full suite. **Earlier checkpoints:** P0 `2552380`; P1 `84f2554`, `67dbbfc`; P2 `459543e`;
+P3 `9ddc48e`, `68fa514`, `507ec9a`.
+
+**P3's migration moved (0228 → 0234).** P3 was gated on `0228`, but before it merged, main took `0228` for the safety
+program builder, the integration hub renumbered to `0229`–`0232` and three open branches claimed `0233`. On the P4
+synchronization P3's file became `0234_payroll_time_candidates_exceptions.sql` (DDL unchanged; no environment had
+applied it). The P3 branch itself still says `0228` and must not be merged alone — P4 carries P3 with the right number.
+**P4 migration:** **`0235_payroll_expense_reimbursements.sql`** (one migration; claim in the collision register; next
+free `0236`).
+
+### Expense ≠ reimbursement ≠ payment
+
+| | Where | Lifecycle |
+|---|---|---|
+| Expense | `expenseRecords.status` (unchanged) | draft → submitted → review → approved / rejected → posted |
+| Reimbursement | `expenseRecords.reimbursementState` (new) | not_applicable → pending_approval → approved → scheduled → reimbursed (P5); pending → rejected / withdrawn; approved → pending (returned for correction, before scheduling) |
+| Payment | P5 | a finalized, paid payroll — nothing in P4 |
+
+How the two columns move together, enforced by `stateContradiction` on every write:
+- a company-paid expense is `not_applicable` forever (it is an expense, never a claim);
+- submitting a personally paid claim: `submitted` + `pending_approval`;
+- approving: `approved` + `approved` (approving the claim accepts the expense);
+- rejecting: `rejected` + `rejected`; withdrawing: `rejected` + `withdrawn` (the employee retracted it);
+- scheduling: the expense stays `approved`; the reimbursement becomes `scheduled` with its run and line.
+Refused combinations: any live state without a claimant; a claim on an expense not paid personally for
+reimbursement; approved/scheduled/reimbursed on a rejected expense; scheduled/reimbursed without a line; a line on
+anything else. **Nothing in P4 produces `reimbursed`**; `isPaid` is true only for it, and every view returns
+`paid: false` until P5 decides payment.
+
+### Schema changes (0235)
+
+| Change | Purpose |
+|---|---|
+| `expenseRecords` + `employeePayrollProfileId`, `reimbursementState`, `reimbursementCents` (int), `claimNotes`, `createdByUserId` | The claim, on the expense it is about; the amount payroll owes in integer cents. |
+| … + `clientCaptureRef`, `capturedAt`, `deviceRef`, `submittedByUserId`, `submittedAt` | Offline capture identity (device claims, stored as claims) and who submitted. |
+| … + `evidenceFingerprint`, `evidenceContentHash` | The receipt as it was at submission. |
+| … + approved/rejected/returned/withdrawn `…ByUserId`, `…At`, reason | Every decision's actor, time and reason. |
+| … + `reimbursementPayRunId`, `reimbursementLineId` (unique), `supersedesExpenseId` | Scheduling linkage; a corrected claim names the one it replaces. No statement column (P5). |
+| `expenseRecords.liveClaimEvidenceId` | PERSISTENT generated: the evidence id while the claim is live, else NULL; **unique** — one receipt, one live claim. Accounting rows that are not claims never enter it. |
+| UNIQUE `(employeePayrollProfileId, clientCaptureRef)` | One capture, one claim. |
+| `payRunLines.expenseRecordId` (unique) | A reimbursement line names its expense; the database refuses a second line for it. |
+| `payrollExceptions.kind` + `duplicate_expense`, `receipt_required`, `reimbursement_currency_mismatch`, `evidence_changed_after_submission` | Expense review signals. |
+
+No second expense table, no wallet, no floating point (the legacy `total` double is derived from the integer cents,
+as the 0062 shadows already do), no foreign keys.
+
+### Claimant resolution
+
+The claimant is the caller's own payroll profile (`resolveOwnPayrollProfile`) in a book of the caller's organization;
+the expense's book is that profile's book. Own procedures take no user, employee or profile id, and their inputs are
+strict (`employeePayrollProfileId`, `userId`, `status`, `reimbursementState` are refused). An owner-operator is refused
+(contractor settlement), by `organizationWorkers` or the profile's D9 classification.
+
+### Receipt / evidence contract
+
+- A receipt is evidence, never authorization: OCR or an assistant may propose facts, the employee states the amount,
+  a person in the payroll office decides.
+- The receipt must be one the organization can open (`requireEvidence`, the canonical helper) **and** the claimant's
+  own capture (`evidenceRecords.capturedBy`); anything else is "not found" and leaves a `cross_tenant_reference` exception.
+- **Receipt rule (narrow):** every claim needs a receipt; there is no category policy in the schema
+  (`expenseCategories` has no receipt flag), so a claim without one raises `receipt_required` (blocking approval until
+  a person accepts it, e.g. a declared lost receipt). It is never deleted or rejected automatically.
+- **Provenance:** at submission `evidenceFingerprint = sha256({id, currentVersion, sealState, storageKey, contentHash})`
+  is stored. Approval re-reads the receipt `FOR UPDATE`; a different fingerprint refuses approval with
+  `evidence_changed_after_submission` (tested, including an amendment holding the row while approval waits).
+
+### Duplicate and idempotency contract
+
+`duplicateSignals` (pure) over the book's claims and fuel:
+- `same_capture` — the same device capture: **a replay returns the first claim** (sequentially and concurrently);
+- `same_evidence` — the same receipt on a live claim: **refused (CONFLICT)**, and the unique `liveClaimEvidenceId`
+  stands behind it; a rejected or withdrawn claim releases the receipt for a corrected claim;
+- `same_content` — an identical receipt image under another evidence record: `duplicate_expense` review;
+- `similar_claim` — the existing `findDuplicateCandidates` heuristic (vendor, amount, within 3 days) over the
+  claimant's live claims: `duplicate_expense` review;
+- `fuel_receipt` — the same receipt on a fuel transaction, or a personally paid fuel purchase of the same amount within
+  3 days by the claimant: `duplicate_expense` review.
+`duplicate_expense` blocks approval until a person resolves it; it is never an accusation or an automatic rejection.
+The assistant's own commit idempotency (`assistantCommitReceipts.proposalId`) is untouched and remains authoritative
+for proposals.
+
+### Fuel / expense boundary
+
+The assistant's fuel commit writes an `EXP-FUEL-…` expense row and flags the fuel row `reimbursementStatus = pending`;
+nothing in the repository pays fuel. P4 makes the **expense row the single reimbursement path**: a worker may claim
+their own fuel expense draft (`myExpenseClaimDraft`), and a separate claim for the same fuel purchase is flagged
+`fuel_receipt`. `fuelTransactions.reimbursementStatus` stays informational; unifying it is deferred, and P4 never
+writes it.
+
+### Approval authority and separation of duties
+
+Approving or rejecting a reimbursement is a financial decision for the payroll office: `payroll.expense.approve` /
+`.reject` are held by payroll_admin, hr and controller. A crew supervisor gains nothing through D10; dispatcher,
+driver, mechanic, shop_lead, bookkeeper and auditor are denied the office permissions by name. The claimant and the
+submitter are always refused, and a claim whose submitter is not on record is refused (fail closed); the attempt is
+recorded as `self_approval_blocked`. No solo-administrator bypass (P7). Approval also refuses: a non-pending claim, an
+expense not submitted, a currency mismatch, open blocking exceptions, a changed receipt, an invalid amount.
+`returnForCorrection` takes an approved, unscheduled claim back to pending with a reason; a scheduled one is corrected
+by adjustment (P5). Rejected, withdrawn and returned claims stay visible with actor, time and reason; a corrected
+claim is a new submission naming the old (`supersedesExpenseRef`).
+
+### Pay-period selection and approved → scheduled
+
+The rule: **an approved reimbursement goes on the first collecting run of the claimant's own schedule whose period
+ends after the approval date** (in the schedule's zone). The expense date never picks the period; a period that ended
+before approval never takes it (a late 2025 receipt approved today goes on today's payroll, not 2025's); a locked
+period takes nothing (P2's run and period checks are the ones used). A claimant with no schedule stays approved and
+owed, and the claim says so.
+
+`runCollect` collects reimbursements by their own deterministic selection (`selectReimbursements`) inside the same
+transaction as earnings, after the run and period are locked: it locks the book's approved, unlined claims
+`FOR UPDATE`, takes those in the run's book, in the payroll currency, with a positive integer amount, no open blocking
+exception, on the claimant's schedule and due by the rule; for each it writes exactly one `payRunLines` row
+(`lineType = reimbursement`, `amountCents` = the approved cents, `expenseRecordId`), and marks the claim `scheduled`
+with the run and line. It never marks anything reimbursed, creates no statement, exports nothing. Earnings and
+reimbursements stay separate record types; `collected`/`amountCents` still report earnings and `reimbursements`
+reports the rest.
+
+### Concurrency
+
+- Collection: the expense rows are locked inside the collecting transaction and `payRunLines.expenseRecordId` is
+  unique — three runs collecting at once produce exactly one line (tested).
+- Submission: the claimant's profile row is locked, then the capture ref and the receipt are checked; the unique
+  indexes stand behind both (concurrent replays tested).
+- Approval: the expense row and the receipt row are locked; an amendment racing the approval is seen (tested).
+
+### Currency
+
+No conversion anywhere (the repository has no exchange-rate architecture). Payroll pays a claimant in the currency of
+their compensation version in force, else the repository default `CAD`. A claim in another currency is recorded in its
+own currency, flagged `reimbursement_currency_mismatch`, refused at approval and skipped at collection.
+
+### Offline
+
+The server contract only (no typed capture registry exists server-side, and D1 forbids a second sync engine):
+`clientCaptureRef` makes a capture idempotent, `capturedAt`/`deviceRef` are stored as the device's claims, and
+`captureState` may be only `draft` or `submitted` — a capture claiming approved/scheduled/reimbursed is refused.
+
+### Exceptions
+
+| Kind | Severity | Blocks | Cleared by |
+|---|---|---|---|
+| `duplicate_expense`, `receipt_required`, `evidence_changed_after_submission` | blocking | approval (and collection) | a person |
+| `reimbursement_currency_mismatch` | blocking | approval (and collection) | the condition (a corrected claim) |
+| `cross_tenant_reference`, `self_approval_blocked` (reused from P3) | blocking | the act (refused) | as in P3 |
+
+Exceptions on a claim are closed when the claim is withdrawn. Subject type `expense`, subject ref the expense ref.
+
+### Permissions
+
+| Permission | Holders | Sensitive |
+|---|---|---|
+| `payroll.expense.submit_own`, `payroll.expense.read_own` | driver, dispatcher, mechanic, shop_lead, safety, office, management, bookkeeper, hr, payroll_admin, controller | no |
+| `payroll.expense.read` | payroll_admin, hr, controller | no |
+| `payroll.expense.approve`, `payroll.expense.reject` | payroll_admin, hr, controller | yes |
+
+Scheduling uses the existing `payroll.run` (`runCollect`). Eleven procedures in `server/payrollExpenseRouter.ts`
+(`payrollExpense.*`): `myExpensesList`, `myExpenseGet`, `myExpenseSubmit`, `myExpenseClaimDraft`, `myExpenseWithdraw`,
+`pendingList`, `expenseGet`, `duplicates`, `approve`, `reject`, `returnForCorrection`; all `moneyScoped` with point checks.
+
+### Defects found and repaired
+
+- `finance.expenseCreate` wrote `evidenceRecordId` and `jobId` without checking either belonged to the caller's
+  organization; it now uses `requireEvidence` and `requireJob`.
+- The P3 migration's slot collided with main once main took `0228`; moved to `0234` (above).
+
+### Deviations from the architecture, and why
+
+- **`withdrawn` is an explicit reimbursement state** (the brief's list had no withdrawal state); a withdrawal keeps
+  history without pretending to be a rejection by the office.
+- **Receipt policy is a fixed rule**, not per category: the schema has no category policy and P4 adds no policy engine.
+- **No `schedule` procedure**: `runCollect` is the one collection mechanism, now with a reimbursement selection.
+- **Fuel unification deferred**: the expense row is the reimbursement path; fuel's flag is not written.
+- **No statement linkage** (`payStatementId`) until P5 creates statements.
+
+### Tests
+
+- `server/_core/payrollExpense.test.ts` (16, pure): the machine and every refused move; approved/scheduled are not
+  paid and P4 never reaches reimbursed; contradictory combinations; amounts (≤ total, positive, integer); currency;
+  the receipt rule; evidence fingerprint sensitivity; duplicate classification (replay, same receipt, same image,
+  similar, fuel by receipt and by amount/date) and non-duplicates; separation of duties; the contractor boundary;
+  run selection (deterministic; rejected, pending, scheduled, foreign, mismatched, blocked skipped by name); the
+  approval-date period rule; offline claims.
+- `server/payrollExpense.db.test.ts` (18, through `appRouter`): own submission with server-side claimant and book;
+  company-paid is not a claim; no profile/user/state from input; coworker isolation, including a coworker's receipt;
+  owner-operator refused; cross-tenant claims, receipts, jobs and units (and the repaired `finance.expenseCreate`);
+  missing receipt; capture replay (sequential and concurrent), one receipt one claim, probable duplicates, same image,
+  withdrawal releasing a receipt for a correction; fuel double-reimbursement refused; changed receipt (and a racing
+  amendment); payroll office approves with actor and time, claimant/supervisor/dispatch/bookkeeper/management refused;
+  an hr claimant refused their own claim; rejection, withdrawal and return-for-correction history; scheduling as one
+  reimbursement line beside earnings, run and line recorded, not reimbursed, never twice; three racing collectors →
+  one line; past, locked and schedule-less periods take nothing; foreign currency never converted; assistant drafts
+  need the employee's submission and someone's approval; offline claims.
+- Updated: `financeScopeCoverage` (+ `payrollExpense`, 173), `procedureAuthorization` (887, new router in the wiring
+  sources), `operationalApiAuthorization` (887), `crossLayerIntegrity` (965), `migrationSlots` (head `0235`; P3 at
+  `0234`), `PROCEDURE_AUTHORIZATION_INVENTORY.md` (565), `LEASEOS_CURRENT_STATE.md`.
