@@ -15,7 +15,7 @@ disagreement is listed in §8.
 | SPINE plan revision | `docs/register/SPINE_WIRING_PLAN.md` unchanged since `fc35f6f` (restored byte for byte; guarded by `server/spineWiringPlan.test.ts`) | `git log -- docs/register/SPINE_WIRING_PLAN.md` |
 | Engine census | **73** unwired `_core` engines (the pinned count in `server/engineReachability.test.ts`), 72 `DECLARED_UNWIRED` keys | `engineReachability.test.ts` |
 | AI declared-unwired | **21** `ai/*` keys; no production importer of `server/_core/ai/` | census map; import grep |
-| Gate | pending — running at the time of this commit | `scripts/ci-gate.sh` on MariaDB 10.11.14, Node 22.23.3 (`.nvmrc`) |
+| Gate | **PASS** on `main` `c9e3b46`: 485 test files, 7,398 passed, 3 skipped; 479 tables; 205 migrations; 881 role-authorized procedures; 40 external-gated, 2 integration-gated; fixture isolation, production build, production-only boot and current-state regeneration all PASS | `scripts/ci-gate.sh` on MariaDB 10.11.14, Node 22.23.3 (`.nvmrc`) |
 
 ## 1. The SPINE order, exactly as the plan writes it
 
