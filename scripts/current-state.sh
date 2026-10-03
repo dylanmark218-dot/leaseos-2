@@ -28,6 +28,39 @@ list_tests() {
 }
 if [ "${1:-}" = "--list-tests" ]; then list_tests; exit $?; fi
 
+# --metrics [PATH] — the test totals, as a generated artifact rather than a committed line (CI-STATE-1).
+#
+# Until 2026-10-03 the document carried `Test files / cases` as numbers. They were the most
+# volatile thing in it by far: of the 105 commits that had ever changed this document, every one
+# changed that row and 69 changed nothing else. Almost every pull request adds a test, so every open
+# branch rewrote the same committed line and every merge into main put the others in conflict —
+# PR #105 had to be re-synced three times in one morning for that line alone. The architecture rows
+# (tables, migrations, procedures, permissions) stay in the document: they move when the
+# architecture does, and a pull request that changes them should say so where everyone reads it.
+#
+# The measurement is not dropped, it is moved. Same list (the runner's own, fail-closed), same
+# arithmetic, written to a file the gate prints and nothing commits. Deterministic for a given tree:
+# no timestamp, no host, fixed key order — so two runs over one tree are byte-identical and a
+# difference always means the tree differs.
+if [ "${1:-}" = "--metrics" ]; then
+  METRICS_OUT="${2:-artifacts/current-state-metrics.json}"
+  if [ -s LEASEOS_RELEASE ]; then
+    METRICS_RELEASE="$(tr -d '\r\n' < LEASEOS_RELEASE)"
+  else
+    echo "LEASEOS_RELEASE is missing or empty; the metrics name the release they describe" >&2
+    exit 1
+  fi
+  METRICS_LIST=$(list_tests) || exit 1
+  METRICS_FILES=$(printf '%s\n' "$METRICS_LIST" | grep -c . || true)
+  # `it(` occurrences in source: a loop that generates cases counts once here and many at run time,
+  # so the runner reports more. That was the document's caveat and it stays this file's.
+  METRICS_CASES=$(printf '%s\n' "$METRICS_LIST" | xargs cat | grep -cE '^\s*it\(' || true)
+  mkdir -p "$(dirname "$METRICS_OUT")"
+  printf '{\n  "release": "%s",\n  "testFiles": %d,\n  "testCases": %d\n}\n' "$METRICS_RELEASE" "$METRICS_FILES" "$METRICS_CASES" > "$METRICS_OUT"
+  echo "wrote $METRICS_OUT" >&2
+  exit 0
+fi
+
 # Captured before line 23's `set -- $PERMS`, which overwrites the positional
 # parameters to unpack a count triple. Reading $2 after that point returns a
 # permission count, which is how this script briefly tried to write the
@@ -58,10 +91,7 @@ const sensN=arr("SENSITIVE_PERMISSIONS"), uniN=arr("UNIVERSAL_PERMISSIONS");
 console.log(perms.size+" "+sensN+" "+uniN);')
 # This clobbers $1/$2; OUT and RELEASE are captured at the top for that reason.
 set -- $PERMS; PERM_COUNT=$1; SENS_COUNT=$2; UNI_COUNT=$3
-# The runner's own list — see list_tests above for why not a find or a glob.
-TEST_FILE_LIST=$(list_tests)
-TEST_FILES=$(printf '%s\n' "$TEST_FILE_LIST" | grep -c . || true)
-TEST_CASES=$(printf '%s\n' "$TEST_FILE_LIST" | xargs cat | grep -cE '^\s*it\(' || true)
+# No test totals here: they are emitted by `--metrics` (above), not committed. See there for why.
 NATIVE=$(grep -o 'NotOnDeviceError(' client/src/runtime/adapters/capacitor.ts | wc -l | tr -d ' ')
 
 # The document body is a quoted heredoc: bash interprets none of it.
@@ -72,7 +102,7 @@ NATIVE=$(grep -o 'NotOnDeviceError(' client/src/runtime/adapters/capacitor.ts | 
 TEMPLATE="$(mktemp)"
 # Unconditional: the unresolved-placeholder check exits before any later line.
 trap 'rm -f "$TEMPLATE"' EXIT
-export BARE EXT_PROCS INB_PROCS MIGRATIONS NATIVE PERM_COUNT PROCS RELEASE SENS_COUNT TABLES TEST_CASES TEST_FILES UNI_COUNT
+export BARE EXT_PROCS INB_PROCS MIGRATIONS NATIVE PERM_COUNT PROCS RELEASE SENS_COUNT TABLES UNI_COUNT
 cat > "$TEMPLATE" <<'MD'
 # LeaseOS — Current State (generated; do not edit by hand)
 
@@ -92,7 +122,7 @@ here can be added rather than read.
 | Permissions | **@@PERM_COUNT@@** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **@@SENS_COUNT@@** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **@@UNI_COUNT@@** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **@@TEST_FILES@@ / @@TEST_CASES@@** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **computed by the gate, not committed** | `scripts/current-state.sh --metrics` → `artifacts/current-state-metrics.json`, printed by gate 8. Files are the runner's own list; cases are `it(` occurrences in source. Not committed because nearly every pull request changes them |
 | Native-only runtime bindings | **@@NATIVE@@ throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
@@ -1175,7 +1205,7 @@ MD
 # Only the named placeholders may change the document. Anything else that
 # looks like one is a mistake, and this refuses rather than shipping a page
 # with @@SOMETHING@@ printed in the middle of it.
-ALLOWED="BARE EXT_PROCS INB_PROCS MIGRATIONS NATIVE PERM_COUNT PROCS RELEASE SENS_COUNT TABLES TEST_CASES TEST_FILES UNI_COUNT" python3 - "$TEMPLATE" "$OUT" <<'PY'
+ALLOWED="BARE EXT_PROCS INB_PROCS MIGRATIONS NATIVE PERM_COUNT PROCS RELEASE SENS_COUNT TABLES UNI_COUNT" python3 - "$TEMPLATE" "$OUT" <<'PY'
 import os, re, sys
 template, out = sys.argv[1], sys.argv[2]
 text = open(template).read()

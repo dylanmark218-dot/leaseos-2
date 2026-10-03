@@ -16,7 +16,7 @@ here can be added rather than read.
 | Permissions | **431** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **174** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **21** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **497 / 6766** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **computed by the gate, not committed** | `scripts/current-state.sh --metrics` → `artifacts/current-state-metrics.json`, printed by gate 8. Files are the runner's own list; cases are `it(` occurrences in source. Not committed because nearly every pull request changes them |
 | Native-only runtime bindings | **7 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)
