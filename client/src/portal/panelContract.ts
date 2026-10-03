@@ -69,7 +69,7 @@ export const PANEL_CONTRACTS: readonly PanelContract[] = [
     file: "panels/FleetPanel.tsx",
     procedures: ["fleet.list"],
     portals: ["fleet_maintenance", "dispatch_operations", "safety_compliance", "office_administration", "management"],
-    reason: "0237 — the fleet list is read by the portals that work units; a field portal reads its own assigned units through fleet.myAssignedUnits instead, and the server refuses fleet.read to a driver regardless.",
+    reason: "0242 — the fleet list is read by the portals that work units; a field portal reads its own assigned units through fleet.myAssignedUnits instead, and the server refuses fleet.read to a driver regardless.",
   },
   {
     file: "panels/SetupPanel.tsx",

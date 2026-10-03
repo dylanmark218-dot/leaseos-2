@@ -41,7 +41,7 @@ const LEDGER_SOURCE_BY_ROLE: Record<string, readonly ("mechanic" | "inspection" 
 };
 
 export const fleetPortfolioRouter = router({
-  /* 0237 — identity, lifecycle, components, the list, the detail, unit-side readiness, the driver's own units (server/fleetAssetRouter.ts). */
+  /* 0242 — identity, lifecycle, components, the list, the detail, unit-side readiness, the driver's own units (server/fleetAssetRouter.ts). */
   ...fleetAssetProcedures,
   /** May this unit operate? One status, every reason with its source and the act that lifts it, and what was not evaluated. */
   unitState: roleProcedure("fleet.unitState")

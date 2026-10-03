@@ -203,7 +203,7 @@ const READERS: Record<string, string> = {
   "server/credentialVerificationService.ts": "decides verified/rejected on a needs_review row (separation of duties, conditional update); reads the operator's rows only to name what a renewal supersedes, through credentialHistory (complianceDocumentValidity)",
   // C1b-3's D-05 read adapter (#57), added on merging main.
   "server/qualificationReads.ts": "an Academy grant's evidence document through complianceDocumentValidity; the grant itself through academyVerdict (qualificationValidity)",
-  // 0237 — the Fleet portfolio's asset detail.
+  // 0242 — the Fleet portfolio's asset detail.
   "server/fleetAssetService.ts": "the asset detail's Documents tab: the unit's documents per type through complianceDocumentValidity, shown with the engine's verdict; unit-side readiness reads them through the composer's own credentialState; decides nothing itself",
   // 0228 — the Safety & Compliance Program Builder, added on merging main.
   "server/safetyProgramRouter.ts": "the vendor compliance package manifest: the carrier's COR, WCB, insurance and Safety Fitness documents and each unit's CVIP through complianceDocumentValidity; decides nothing itself",

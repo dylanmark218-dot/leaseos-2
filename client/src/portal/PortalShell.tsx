@@ -38,7 +38,7 @@ import { SessionGate } from "@/session/SessionGate";
 
 export type PanelKey = "myday" | "exceptions" | "inbox" | "board" | "timeline" | "setup" | "people" | "fleet";
 
-/** 0237 — the portals that work units. Drawing the panel elsewhere would only draw a screen that refuses. */
+/** 0242 — the portals that work units. Drawing the panel elsewhere would only draw a screen that refuses. */
 const FLEET_PORTALS = new Set<PortalKey>(["fleet_maintenance", "dispatch_operations", "safety_compliance", "office_administration", "management"]);
 
 const OFFICE_PORTALS = new Set<PortalKey>(["office_administration", "finance_billing", "management", "executive", "hr_workforce", "auditor_regulator"]);

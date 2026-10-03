@@ -30,7 +30,7 @@ Branch `claude/fleet-equipment-portfolio-design-3d13d5`. Four steps:
    step 1's edits to the finance, purchasing, payroll and commercial-setup routers are dropped for
    main's (step 1 had lost main's unit check on `roadside.open`; main's version restores it).
    `drizzle/schema.ts` is main's plus the asset core's columns and `unitComponents`. The asset
-   core's migrations move to `0237`/`0238` (below). The classification version is `c1a.5` on
+   core's migrations moved to `0237`/`0238`, and later to `0242`/`0243` (below). The classification version is `c1a.5` on
    main's `c1a.4`. Pins, grants, the procedure map and the human-authorization list take both sides.
 
 Design: `docs/fleet/FLEET_EQUIPMENT_PORTFOLIO_SURVEY_AND_DESIGN.md` (§A.14, §B.2–B.5, §B.13).
@@ -42,7 +42,7 @@ Foundation: `docs/fleet/FLEET_PORTFOLIO_FOUNDATION_CHECKPOINT.md`,
 | | `main` `2864723` | this branch, merged | delta |
 |---|---|---|---|
 | Tables | 482 | **483** | +1 (`unitComponents`) |
-| Migrations | 207 | **209** | +2 (`0237_fleet_asset_identity.sql`, `0238_fleet_component_guards.sql`) |
+| Migrations | 207 | **209** | +2 (`0242_fleet_asset_identity.sql`, `0243_fleet_component_guards.sql`) |
 | Role-authorized procedures | 897 | **907** | +10 (`server/fleetAssetRouter.ts`, spread into `fleet`) |
 | Operational procedure map | 874 | **884** | +10 |
 | Mounted server paths | 952 | **962** | +10 |
@@ -55,15 +55,16 @@ Foundation: `docs/fleet/FLEET_PORTFOLIO_FOUNDATION_CHECKPOINT.md`,
 Every count is read from the source by `scripts/current-state.sh`. The delta is exactly the asset
 core: the foundation is main's now.
 
-## Migrations — 0237 and 0238
+## Migrations — 0242 and 0243
 
 Drafted as `0220`; moved to `0221`/`0222` when `claude/eld-compliance-intelligence-ramlrd` took
-`0220`; moved again on merging `main` `2864723`, which had taken `0221`/`0222` for mechanic portal
-CP2 while `0224`–`0236` were held on main or open branches. `0237` and `0238` were the first two
+`0220`; to `0237`/`0238` on merging `main` `2864723`, which had taken `0221`/`0222` for mechanic
+portal CP2; and to `0242`/`0243` on merging `main` `d93eb13`, when the marketplace branches had
+taken `0237`–`0240` and the safety program branch `0241`. `0242` and `0243` were the first two
 numbers free on main and on every remote branch at the scan. No environment applied them under an
 earlier number. Recorded in `docs/architecture/MIGRATION_COLLISION_REGISTER.md`.
 
-- **`0237`** — additive columns on `units`: `assetClass` (enum, NULL = not classified), `assetType`,
+- **`0242`** — additive columns on `units`: `assetClass` (enum, NULL = not classified), `assetType`,
   `assetSubtype`, `companyAssetNumber`, `serialNumber`, `plateJurisdiction`, `make`, `model`,
   `modelYear`, `manufacturer`, `ownershipType`, `acquiredAt`, `homeTerminal`, `assignedBranchRef`,
   `assignedDivision`, `defaultOperatorId`, `regulatoryClass`, `lifecycleStatus` (default `active`),
@@ -71,7 +72,7 @@ earlier number. Recorded in `docs/architecture/MIGRATION_COLLISION_REGISTER.md`.
   `(lifecycleStatus, assetClass)`. New table `unitComponents` (parent, child, relationship,
   removable, installed/removed with actors and work orders). No existing value changes meaning:
   `vehicleType` stays, and every existing unit reads `lifecycleStatus = active`, unclassified.
-- **`0238`** — triggers: a component installation is never edited and never deleted, and a detached
+- **`0243`** — triggers: a component installation is never edited and never deleted, and a detached
   relation is never changed again; a lifecycle change must carry its own actor, time and reason
   (a raw `UPDATE units SET lifecycleStatus` is refused).
 

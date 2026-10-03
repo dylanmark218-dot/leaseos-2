@@ -45,7 +45,7 @@ export type FindingDomain =
   | "permit" | "destination" | "route" | "communications" | "capability" | "commercial" | "unclassified";
 
 /** Bumped whenever CLASSIFICATION changes meaning. Part of the rule-set hash, so a change stales every check. */
-export const CLASSIFICATION_VERSION = "c1a.5";   // 0237 asset core: + fleet.lifecycle.out/storage, fleet.class.mismatch, fleet.component.critical, on main's c1a.4.   // c1a.3 was taken twice — this branch's fleet hold rules (0200) and main's v23.26 commercial rules; the union of both is c1a.4
+export const CLASSIFICATION_VERSION = "c1a.5";   // 0242 asset core: + fleet.lifecycle.out/storage, fleet.class.mismatch, fleet.component.critical, on main's c1a.4.   // c1a.3 was taken twice — this branch's fleet hold rules (0200) and main's v23.26 commercial rules; the union of both is c1a.4
 
 /**
  * A readiness finding. It IS a `DispatchBlocker` — every existing consumer (the checklist, the
@@ -149,7 +149,7 @@ export const CLASSIFICATION: readonly Rule[] = [
   r("fleet.hold.out_of_service", /^(unit|trailer)_hold_safety$/, "maintenance", "carrier_safety_policy", ...HARD),
   r("fleet.hold.block", /^(unit|trailer)_hold_(maintenance|inspection|compliance|damage|administrative)$/, "maintenance", "carrier_safety_policy", "UNSATISFIED", "BLOCK", "APPROVED_POLICY_ONLY"),
   /*
-   * 0237 — Fleet & Equipment Portfolio asset core. Out of the fleet (retired, sold, transferred) is
+   * 0242 — Fleet & Equipment Portfolio asset core. Out of the fleet (retired, sold, transferred) is
    * nobody's to override; seasonal storage is releasable only under an approved policy; a unit bound
    * where its class does not belong, and a mounted component's critical defect or safety hold, are the
    * truck's own safety state.

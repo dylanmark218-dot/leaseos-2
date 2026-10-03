@@ -388,7 +388,7 @@ export type Permission =
   // unit may move, and verifying a meter reading makes it count; all three are sensitive. Which hold
   // TYPES a role may place or release is decided in `_core/fleetPortfolio.ts`, below the permission.
   | "fleet.hold.place" | "fleet.hold.release" | "fleet.meter.record" | "fleet.meter.verify"
-  // 0237 — asset core. Identity, lifecycle and components are three recorded acts, each sensitive; a
+  // 0242 — asset core. Identity, lifecycle and components are three recorded acts, each sensitive; a
   // lifecycle change returns a unit to service or takes it out, so an agent never performs it.
   // `fleet.read_own` is universal and self-scoped in the router: the driver's own assigned units, from
   // the slot model, with no unit id taken from the driver.
@@ -2055,7 +2055,7 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   // 0228 — your own policies to acknowledge, your own signature. The router resolves the person from ctx.user.id.
   "safety_program.read_own",
   "safety_program.acknowledge_own",
-  // 0237 — the driver's own assigned units, resolved from the slot model; the request names no unit.
+  // 0242 — the driver's own assigned units, resolved from the slot model; the request names no unit.
   "fleet.read_own",
 ] as const;
 
@@ -3795,7 +3795,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "fleet.meterRecord": "fleet.meter.record",
   "fleet.meterDecide": "fleet.meter.verify",
   "fleet.history": "fleet.read",
-  /* ---- 0237: Fleet & Equipment Portfolio asset core ---- */
+  /* ---- 0242: Fleet & Equipment Portfolio asset core ---- */
   "fleet.list": "fleet.read",
   "fleet.get": "fleet.read",
   "fleet.unitReadiness": "fleet.read",

@@ -83,11 +83,11 @@ describe("the real tree", () => {
     // merging main, 0229 was claimed by the integration hub and 0230–0235 by other open branches, so it
     // moved to 0236, the first slot free on main and on all 144 remote branches at the scan.
     expect(files).toContain("0236_compliance_document_recorder.sql");
-    // The Fleet & Equipment Portfolio asset core took 0237–0238 (asset identity and its guards). Drafted as
-    // 0220, it moved to 0221 when the ELD branch took 0220, and to 0237 on merging main, which had taken
-    // 0221–0222 (CP2) while 0224–0236 were held on main or open branches. Never applied under 0220/0221.
-    expect(files).toContain("0237_fleet_asset_identity.sql");
-    expect(headSlot(files)).toBe("0238");
+    // The Fleet & Equipment Portfolio asset core took 0242–0243 (asset identity and its guards). Drafted as
+    // 0220, it moved to 0221 when the ELD branch took 0220, to 0237 when main took 0221–0222 (CP2), and to 0242
+    // when the marketplace branches took 0237–0240 and the safety program branch 0241. Never applied earlier.
+    expect(files).toContain("0242_fleet_asset_identity.sql");
+    expect(headSlot(files)).toBe("0243");
   });
 
   it("keeps the reserved slots empty", () => {

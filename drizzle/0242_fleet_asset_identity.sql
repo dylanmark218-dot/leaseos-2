@@ -1,10 +1,10 @@
--- 0237 — Fleet & Equipment Portfolio, asset core: identity and lifecycle on `units`, and components.
+-- 0242 — Fleet & Equipment Portfolio, asset core: identity and lifecycle on `units`, and components.
 -- Design: docs/fleet/FLEET_EQUIPMENT_PORTFOLIO_SURVEY_AND_DESIGN.md §A.14, §B.2, §B.3 (reconciliation R-7
--- deferred these from the foundation slice, 0200). Trigger DDL is 0238, in its own file.
+-- deferred these from the foundation slice, 0200). Trigger DDL is 0243, in its own file.
 --
--- Numbered 0237: drafted as 0220, moved to 0221 when an open branch took 0220, and moved again before
--- any environment applied it, when main took 0221/0222 (mechanic portal CP2) and open branches held
--- 0224–0236. The register records each scan.
+-- Numbered 0242: drafted as 0220, moved to 0221 when an open branch took 0220, to 0237 when main took
+-- 0221/0222 (mechanic portal CP2), and to 0242 when the marketplace branches took 0237–0240 and the safety
+-- program branch 0241. Never applied under an earlier number. The register records each scan.
 --
 -- Additive. Every new column is NULL or defaulted; no existing value changes meaning. `vehicleType`
 -- stays: every older reader still reads it, and the create path derives it from `assetType`.
@@ -39,7 +39,7 @@ ALTER TABLE `units`
 CREATE INDEX `units_lifecycle_idx` ON `units` (`lifecycleStatus`, `assetClass`);
 --> statement-breakpoint
 -- Parent/child equipment with history. Both ends are `units` rows. Detaching sets `removedAt`; the row
--- is never deleted (0238), so "what was attached during a job" is a temporal query over this table.
+-- is never deleted (0243), so "what was attached during a job" is a temporal query over this table.
 CREATE TABLE `unitComponents` (
   `id` int AUTO_INCREMENT NOT NULL,
   `componentRef` varchar(96) NOT NULL,

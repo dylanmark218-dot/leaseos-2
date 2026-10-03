@@ -175,7 +175,7 @@ export async function portfolioFacts(db: DbOrTx, unitId: number): Promise<Portfo
     // A unit may be a tractor or a trailer; an order may name it either way.
     attempt("outOfServiceOrders", () => loadEnforcementState(db, { unitId, trailerId: unitId, operatorId: null }), null),
     attempt("meters", async () => (await meterSequencesFor(db, unitId)).sequences, []),
-    // 0237 — lifecycle is stored on the unit; components are read with the two facts that hold a parent.
+    // 0242 — lifecycle is stored on the unit; components are read with the two facts that hold a parent.
     attempt("units", async () => (await db.select({ lifecycleStatus: units.lifecycleStatus, lifecycleChangedAt: units.lifecycleChangedAt }).from(units).where(eq(units.id, unitId)).limit(1))[0] ?? null, null),
     attempt("unitComponents", () => componentStatesFor(db, unitId), []),
   ]);

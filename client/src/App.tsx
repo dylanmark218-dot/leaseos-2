@@ -91,7 +91,7 @@ function Router() {
       <Route path="/showcase/billing-safety" component={() => <ShowcaseFrame title="Billing and safety"><BillingSafetyWorkspace /></ShowcaseFrame>} />
       <Route path="/showcase/compliance-engine" component={() => <ShowcaseFrame title="Compliance engine"><ComplianceEngine /></ShowcaseFrame>} />
       <Route path="/showcase/offline-vault" component={() => <ShowcaseFrame title="Offline vault"><OfflineVault /></ShowcaseFrame>} />
-      {/* 0237 — the authoritative Fleet surface: the portal's Fleet panel, and one unit by id. The deep
+      {/* 0242 — the authoritative Fleet surface: the portal's Fleet panel, and one unit by id. The deep
           link the server already emits (`/portal/fleet_maintenance/units/:id`) lands here too. The
           former demonstration stays under /showcase/fleet. */}
       <Route path="/fleet" component={() => <PortalShell initialPanel="fleet" />} />

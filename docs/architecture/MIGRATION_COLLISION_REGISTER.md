@@ -428,20 +428,23 @@ before it was ever applied on main. The ledger runner applies it by name.
 
 * **2026-10-03 (Driver Portfolio hardening)**: drafted `0229`, renumbered to `0236` on merging `main` `60de8c2` (0229–0235 claimed by open branches); next free `0237`.
 
-## Claim: 0237–0238 (Fleet & Equipment Portfolio asset core, 2026-10-03)
+## Claim: 0242–0243 (Fleet & Equipment Portfolio asset core, 2026-10-03)
 
 The asset core (`claude/fleet-equipment-portfolio-design-3d13d5`) was drafted as `0220`, moved to `0221`/`0222`
-when `claude/eld-compliance-intelligence-ramlrd` took `0220`, and moves again on merging `main` `2864723`:
-main took `0221`/`0222` itself (mechanic portal CP2, defect lifecycle), and the scan found `0224`–`0236` held on
-`main` or open branches. `0237` and `0238` are the first two numbers free on `main` and on every remote branch.
-No environment applied the asset-core migrations under an earlier number. The foundation's `0199`–`0201` are
-main's now; this branch carries them unchanged from main.
+when `claude/eld-compliance-intelligence-ramlrd` took `0220`, and to `0237`/`0238` on merging `main` `2864723`,
+which had taken `0221`/`0222` (mechanic portal CP2). It moves once more on merging `main` `d93eb13`: the
+marketplace branches (`claude/leaseos-marketplace-bidding-h3stdw`, `claude/marketplace-main-reconcile`) took
+`0237`–`0240` and `claude/safety-compliance-program-builder-2qnty0` holds `0241`, none of them merged yet. Rather
+than race them, this branch takes `0242` and `0243`, the first two numbers free on `main` and on every remote
+branch at the scan. No environment applied the asset-core migrations under an earlier number. The foundation's
+`0199`–`0201` are main's; this branch carries them unchanged from main.
 
 | Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
 |---|---|---|---|---|---|---|---|
-| 0237 | `0237_fleet_asset_identity.sql` | `claude/fleet-equipment-portfolio-design-3d13d5` | none yet | `2864723` | gated | none | keeps 0237 |
-| 0238 | `0238_fleet_component_guards.sql` | `claude/fleet-equipment-portfolio-design-3d13d5` | none yet | `2864723` | gated | none | keeps 0238 |
+| 0242 | `0242_fleet_asset_identity.sql` | `claude/fleet-equipment-portfolio-design-3d13d5` | none yet | `d93eb13` | gated | none | keeps 0242 |
+| 0243 | `0243_fleet_component_guards.sql` | `claude/fleet-equipment-portfolio-design-3d13d5` | none yet | `d93eb13` | gated | none | keeps 0243 |
 
-**Next free number after this: `0239`** (re-check with the scan before committing).
+**Next free number after this: `0244`** (re-check with the scan before committing).
 
-* **2026-10-03 (Fleet asset core)**: `0221`/`0222` → `0237`/`0238` on merging `main` `2864723`; next free `0239`.
+* **2026-10-03 (Fleet asset core)**: `0221`/`0222` → `0237`/`0238` on merging `main` `2864723`; then → `0242`/`0243`
+  on merging `main` `d93eb13` (0237–0241 held by open branches); next free `0244`.

@@ -1,6 +1,6 @@
 -- Compound bodies: this file contains trigger DDL and nothing else.
 --
--- 0238 — a component relation is history: what was attached, when, by whom, never changes; it is
+-- 0243 — a component relation is history: what was attached, when, by whom, never changes; it is
 -- detached once, and a detached relation is never changed again; nothing is deleted. A unit's lifecycle
 -- is written only by the portfolio's own act, which records who and why: a status that changes with no
 -- actor is refused.
