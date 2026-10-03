@@ -1,21 +1,27 @@
 /**
  * Test fixtures for a bidding organization's CANONICAL records — the rows the marketplace readiness
  * evaluator reads through the registries' own engines. Nothing here is marketplace state: these are
- * financial entities, carrier compliance documents, insurance policies, owned units and worker
- * qualification holdings, written exactly as their own surfaces write them.
+ * financial entities, carrier compliance documents, insurance policies, owned units, worker
+ * memberships and Academy qualifications, written exactly as their own surfaces write them.
+ *
+ * Qualifications follow the production model (D-05) with no test exemption: each is an
+ * `academyQualifications` grant — the Academy's verified `current` record, the shape the qualification
+ * read adapter's own suite writes — and each worker is an active member of the organization, which the
+ * adapter requires before it reads anyone. Nothing here writes `workerQualifications`; that store has no
+ * production writer.
  */
 import type mysql from "mysql2/promise";
 
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
 let assetId = 1_700_000_000 + Math.floor(Math.random() * 40_000_000);
 const nextAssetId = () => assetId++;
-let userSeq = 410_000_000 + Math.floor(Math.random() * 50_000);
+let userSeq = 421_000_000 + Math.floor(Math.random() * 50_000);
 export const nextUserId = () => userSeq++;
 
 const days = (n: number) => new Date(Date.now() + n * 86_400_000);
 
 export type QualifyOptions = {
-  /** Qualification codes each worker holds (verified, expiring in a year). */
+  /** Qualification codes each worker holds: a current, verified Academy grant expiring in a year. */
   workerCodes?: string[];
   workers?: number;
   /** Units owned, of this vehicle type, inspection current and maintenance clear. */
@@ -29,7 +35,32 @@ export type QualifyOptions = {
   contractorProfile?: boolean;
 };
 
-export type Qualified = { financialEntityId: number; policyRef: string | null; unitIds: number[]; userIds: number[]; holdingRefs: string[] };
+export type Qualified = { financialEntityId: number; policyRef: string | null; unitIds: number[]; userIds: number[]; qualificationRefs: string[] };
+
+/** An active membership of `orgRef` — what puts a person in the organization's scope. */
+export async function addMembership(pool: mysql.Pool, orgRef: string, userId: number): Promise<void> {
+  await pool.execute("INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'employee','active','2020-01-01',1)", [`MEM-${rnd()}`, orgRef, userId]);
+}
+
+/**
+ * An Academy qualification grant, in the shape the Academy writes and the adapter's own suite uses.
+ * Defaults to a current, verified academy certificate valid from 100 days ago to a year out.
+ */
+export async function grantAcademyQualification(
+  pool: mysql.Pool, userId: number, code: string,
+  o: { status?: "current" | "pending" | "expired" | "rejected" | "revoked"; validFrom?: Date | null; expiresAt?: Date | null; createdAt?: Date; sourceKind?: string; complianceDocumentId?: number | null; verified?: boolean } = {},
+): Promise<string> {
+  const ref = `AQ-${rnd()}${rnd()}`;
+  const verified = o.verified ?? true;
+  await pool.execute(
+    `INSERT INTO academyQualifications (qualificationRef, userId, qualificationCode, sourceKind, status, complianceDocumentId, validFrom, expiresAt, verifiedByUserId, verifiedAt, createdAt)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    [ref, userId, code, o.sourceKind ?? "academy_certificate", o.status ?? "current", o.complianceDocumentId ?? null,
+      o.validFrom === undefined ? days(-100) : o.validFrom, o.expiresAt === undefined ? days(365) : o.expiresAt,
+      verified ? 1 : null, verified ? days(-100) : null, o.createdAt ?? days(-100)],
+  );
+  return ref;
+}
 
 /** Gives an organization what a compliant contractor has on record. Every piece is optional so a test can leave one out. */
 export async function qualifyOrganization(pool: mysql.Pool, orgRef: string, o: QualifyOptions = {}): Promise<Qualified> {
@@ -79,19 +110,13 @@ export async function qualifyOrganization(pool: mysql.Pool, orgRef: string, o: Q
   }
 
   const userIds: number[] = [];
-  const holdingRefs: string[] = [];
+  const qualificationRefs: string[] = [];
   for (let i = 0; i < workers; i++) {
     const userId = nextUserId();
     await pool.execute("INSERT INTO organizationWorkers (workerRef, orgRef, userId, workerType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'EMPLOYEE_DRIVER','active','2020-01-01',1)", [`WRK-${rnd()}`, orgRef, userId]);
-    for (const code of o.workerCodes ?? []) {
-      const holdingRef = `HLD-${rnd()}`;
-      await pool.execute(
-        "INSERT INTO workerQualifications (holdingRef, tenantId, userId, code, issuedAt, expiresAt, verificationState, verifiedByUserId, verifiedAt, recordedByUserId, recordedAt) VALUES (?,?,?,?,?,?,'verified',1,NOW(),1,NOW())",
-        [holdingRef, orgRef, userId, code, days(-100), days(365)],
-      );
-      holdingRefs.push(holdingRef);
-    }
+    await addMembership(pool, orgRef, userId);
+    for (const code of o.workerCodes ?? []) qualificationRefs.push(await grantAcademyQualification(pool, userId, code));
     userIds.push(userId);
   }
-  return { financialEntityId, policyRef, unitIds, userIds, holdingRefs };
+  return { financialEntityId, policyRef, unitIds, userIds, qualificationRefs };
 }

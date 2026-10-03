@@ -119,6 +119,32 @@ describe("census", () => {
     expect(adapterCalls).toBeGreaterThan(0);
   });
 
+  it("marketplace readiness consumes the adapter's verdict and decides no qualification itself", () => {
+    // The same structural rule as open work, for the tender: the marketplace evaluator and its facts
+    // loader import neither qualification store nor the qualification engine, and the loader calls the
+    // adapter. (They still read carrier `complianceDocuments` — organization credentials, not qualifications.)
+    const ENGINES = ["./qualificationValidity", "../qualificationValidity", "./_core/qualificationValidity"];
+    const STORES = ["academyQualifications", "workerQualifications"];
+    const files = ["_core/marketplaceReadiness.ts", "_core/marketplaceReadinessFacts.ts"];
+    let adapterCalls = 0;
+    for (const f of files) {
+      const src = ts.createSourceFile(f, read(f), ts.ScriptTarget.Latest, true);
+      const visit = (n: ts.Node): void => {
+        if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier)) {
+          const from = n.moduleSpecifier.text;
+          const names = n.importClause?.namedBindings && ts.isNamedImports(n.importClause.namedBindings)
+            ? n.importClause.namedBindings.elements.map(e => (e.propertyName ?? e.name).text) : [];
+          expect(ENGINES, `${f} imports the qualification engine ${from}`).not.toContain(from);
+          if (from.endsWith("drizzle/schema")) for (const t of STORES) expect(names, `${f} reads ${t} directly`).not.toContain(t);
+        }
+        if (f === "_core/marketplaceReadinessFacts.ts" && ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "effectiveQualifications") adapterCalls++;
+        ts.forEachChild(n, visit);
+      };
+      visit(src);
+    }
+    expect(adapterCalls).toBeGreaterThan(0);
+  });
+
   it("24. no production writer of workerQualifications exists, and none was added", () => {
     const writers = productionFiles.filter((f) => /insert\(workerQualifications\)|update\(workerQualifications\)|INTO\s+`?workerQualifications/.test(readFileSync(f, "utf8"))).map(rel);
     expect(writers).toEqual([]);

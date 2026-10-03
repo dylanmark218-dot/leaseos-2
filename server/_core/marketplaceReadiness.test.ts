@@ -15,16 +15,18 @@ import {
   evaluateMarketplaceReadiness,
   normalizeTenderRequirements,
   readinessFingerprint,
+  workerStanding,
   type MarketplaceReadinessFacts,
+  type WorkerQualificationStanding,
 } from "./marketplaceReadiness";
 import { proofFromDocuments, type PolicyRecord } from "./insuranceRisk";
-import type { QualificationHolding } from "./qualificationValidity";
 
 const NOW = new Date("2026-10-02T12:00:00Z");
 const d = (days: number) => new Date(NOW.getTime() + days * 86_400_000);
 
-const holding = (code: string, over: Partial<QualificationHolding> = {}): QualificationHolding => ({
-  holdingRef: `HLD-${code}-${Math.random().toString(36).slice(2, 6)}`, code, verificationState: "verified", issuedAt: d(-100), expiresAt: d(300), recordedAt: d(-100), ...over,
+/** A standing as `qualificationReads.effectiveQualifications` returns it; held by default. */
+const holding = (code: string, over: Partial<WorkerQualificationStanding> = {}): WorkerQualificationStanding => ({
+  code, held: true, notHeld: null, state: "in_force", source: "ACADEMY_QUALIFICATION", sourceRef: `AQ-${code}-${Math.random().toString(36).slice(2, 6)}`, expiresAt: d(300), ...over,
 });
 /** Proof of cover as production builds it: the canonical verdict on a verified, in-force insurance_proof row. */
 const verifiedProof = proofFromDocuments([{ id: 1, docType: "insurance_proof", title: "insurance_proof", issuedAt: d(-30), expiresAt: d(300), verificationStatus: "verified", capturedAt: d(-30) }], NOW);
@@ -49,7 +51,7 @@ const compliant = (over: Partial<MarketplaceReadinessFacts> = {}): MarketplaceRe
   carrierDocuments: [doc("wcb_clearance")],
   policies: [policy(5_000_000)],
   units: [1, 2, 3, 4].map(unitId => ({ unitId, vehicleType: "TRI_DRIVE_VAC", inspectionStatus: "current" as const, maintenanceStatus: "clear" as const })),
-  workers: [101, 102, 103, 104].map(userId => ({ userId, holdings: [holding("H2S_ALIVE"), holding(TDG_QUALIFICATION_CODE)] })),
+  workers: [101, 102, 103, 104].map(userId => ({ userId, qualifications: [holding("H2S_ALIVE"), holding(TDG_QUALIFICATION_CODE)] })),
   unlinkedWorkers: 0,
   activeCarrierOutOfServiceOrders: 0,
   ...over,
@@ -91,7 +93,7 @@ describe("a compliant bidder", () => {
   });
 
   it("carries counts and never a name or an identifier", () => {
-    const r = evaluateMarketplaceReadiness(compliant({ unitsRequired: 1, unitsOffered: 1, workers: [{ userId: 777_001, holdings: [holding("H2S_ALIVE", { holdingRef: "HLD-SECRET-REF" }), holding(TDG_QUALIFICATION_CODE)] }] }), NOW);
+    const r = evaluateMarketplaceReadiness(compliant({ unitsRequired: 1, unitsOffered: 1, workers: [{ userId: 777_001, qualifications: [holding("H2S_ALIVE", { sourceRef: "HLD-SECRET-REF" }), holding(TDG_QUALIFICATION_CODE)] }] }), NOW);
     const text = JSON.stringify(r.checks);
     expect(text).not.toContain("777001");
     expect(text).not.toContain("HLD-SECRET-REF");
@@ -101,24 +103,36 @@ describe("a compliant bidder", () => {
 
 describe("hard requirements fail closed", () => {
   it("blocks when no worker holds a required qualification, and names the gap by code and count", () => {
-    const r = evaluateMarketplaceReadiness(compliant({ workers: [{ userId: 1, holdings: [holding(TDG_QUALIFICATION_CODE)] }] }), NOW);
+    const r = evaluateMarketplaceReadiness(compliant({ workers: [{ userId: 1, qualifications: [holding(TDG_QUALIFICATION_CODE)] }] }), NOW);
     expect(r.verdict).toBe("blocked");
     expect(check(r, "worker_qualifications")).toMatchObject({ result: "BLOCK", blocking: true });
     expect(check(r, "worker_qualifications").detail).toMatch(/H2S_ALIVE: 0\/1/);
   });
 
-  it("treats an unverified holding, a rejected one, one with no expiry, and an expired one as not held — the Academy's rule", () => {
-    const only = (h: QualificationHolding) => compliant({ workers: [{ userId: 1, holdings: [h, holding("H2S_ALIVE")] }] });
+  it("counts only what the adapter called held: unverified, rejected, unknown, expired and not-yet-effective never become held", () => {
+    const only = (h: WorkerQualificationStanding) => compliant({ workers: [{ userId: 1, qualifications: [h, holding("H2S_ALIVE")] }] });
     for (const bad of [
-      holding(TDG_QUALIFICATION_CODE, { verificationState: "unverified" }),
-      holding(TDG_QUALIFICATION_CODE, { verificationState: "rejected" }),
-      holding(TDG_QUALIFICATION_CODE, { expiresAt: null }),
-      holding(TDG_QUALIFICATION_CODE, { expiresAt: d(-1) }),
+      holding(TDG_QUALIFICATION_CODE, { held: false, notHeld: "unverified", state: "unverified" }),
+      holding(TDG_QUALIFICATION_CODE, { held: false, notHeld: "rejected", state: "rejected" }),
+      holding(TDG_QUALIFICATION_CODE, { held: false, notHeld: "unknown", state: "incomplete", expiresAt: null }),
+      holding(TDG_QUALIFICATION_CODE, { held: false, notHeld: "expired", state: "expired", expiresAt: d(-1) }),
+      holding(TDG_QUALIFICATION_CODE, { held: false, notHeld: "unverified", state: "not_yet_effective" }),
+      holding(TDG_QUALIFICATION_CODE, { held: false, notHeld: "unknown", state: "none", source: null, sourceRef: null, expiresAt: null }),
     ]) {
       const r = evaluateMarketplaceReadiness(only(bad), NOW);
-      expect(r.verdict, bad.verificationState + String(bad.expiresAt)).toBe("blocked");
+      expect(r.verdict, bad.state).toBe("blocked");
       expect(check(r, "dangerous_goods").result).toBe("BLOCK");
+      // The adapter's not-held code is carried through, counted, not recomputed.
+      expect(check(r, "worker_qualifications").detail, bad.state).toContain(`${TDG_QUALIFICATION_CODE}: 0/1 [not held: ${bad.notHeld} 1]`);
     }
+  });
+
+  it("fails closed on a code the adapter did not answer, and on a not-held answer with no code", () => {
+    expect(workerStanding({ userId: 1, qualifications: [] }, "H2S_ALIVE")).toEqual({ held: false, notHeld: "unknown" });
+    expect(workerStanding({ userId: 1, qualifications: [holding("H2S_ALIVE", { held: false, notHeld: null })] }, "H2S_ALIVE")).toEqual({ held: false, notHeld: "unknown" });
+    const r = evaluateMarketplaceReadiness(compliant({ workers: [{ userId: 1, qualifications: [holding("H2S_ALIVE")] }] }), NOW);
+    expect(check(r, "dangerous_goods").result).toBe("BLOCK");
+    expect(check(r, "worker_qualifications").detail).toContain(`${TDG_QUALIFICATION_CODE}: 0/1 [not held: unknown 1]`);
   });
 
   it("blocks an insurance gap and fails closed on insurance it cannot verify", () => {
@@ -195,7 +209,7 @@ describe("warnings stay visible and never block", () => {
     const r = evaluateMarketplaceReadiness(compliant({
       contractorProfileStatus: "none",
       units: [{ unitId: 1, vehicleType: "TRI_DRIVE_VAC", inspectionStatus: "current", maintenanceStatus: "clear" }, { unitId: 2, vehicleType: "TRI_DRIVE_VAC", inspectionStatus: "due", maintenanceStatus: "clear" }],
-      workers: [{ userId: 1, holdings: [holding("H2S_ALIVE"), holding(TDG_QUALIFICATION_CODE)] }, { userId: 2, holdings: [holding("H2S_ALIVE")] }],
+      workers: [{ userId: 1, qualifications: [holding("H2S_ALIVE"), holding(TDG_QUALIFICATION_CODE)] }, { userId: 2, qualifications: [holding("H2S_ALIVE")] }],
       unlinkedWorkers: 1,
       unitsOffered: 3,
       carrierDocuments: [doc("wcb_clearance", { expiresAt: d(5) })],
@@ -236,6 +250,12 @@ describe("the fingerprint", () => {
     const lapses = compliant({ policies: [policy(5_000_000, { expiresAt: d(2) })] });
     expect(readinessFingerprint(lapses, NOW)).not.toBe(readinessFingerprint(lapses, d(3)));
     expect(evaluateMarketplaceReadiness(lapses, d(3)).verdict).toBe("blocked");
+  });
+
+  it("moves when the adapter's verdict on a worker's qualification changes", () => {
+    const f = compliant();
+    const changed = compliant({ workers: f.workers.map((w, i) => (i ? w : { ...w, qualifications: w.qualifications.map(q => ({ ...q, held: false, notHeld: "expired" as const, state: "expired" as const })) })) });
+    expect(readinessFingerprint(f, NOW)).not.toBe(readinessFingerprint(changed, NOW));
   });
 });
 

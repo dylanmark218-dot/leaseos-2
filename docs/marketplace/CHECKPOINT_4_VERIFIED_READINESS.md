@@ -31,7 +31,7 @@
 | Carrier credentials (WCB clearance, safety fitness, permits, registrations) | `complianceDocuments`, ownerType `carrier`, ownerId = financial entity; validity by `complianceDocumentValidity` (the document engine) | `organization_document:<docType>`; in force PASS, expiring WARN, expired/rejected/none BLOCK, unverified UNKNOWN-blocking |
 | Insurance | `insurancePolicies` / coverages / covered entities / the carrier's `insurance_proof`, as the insurance engine's `PolicyRecord`s; judged by `matchCustomerRequirements` with the tender as the customer | `insurance`; MATCH PASS, GAP BLOCK, UNKNOWN blocking |
 | Equipment | units the organization owns (`coreRecordOwnership`), `units.vehicleType`, `inspectionStatus`, `maintenanceStatus` | `equipment`; compliant = class matches, inspection `current`, maintenance `clear` |
-| Worker credentials (TDG, H2S, First Aid, WHMIS, licence classes) | `organizationWorkers` and owned operators resolved to users; holdings from `workerQualifications` (recorded) and `academyQualifications` (Academy-issued); held by the Academy's `countsAsHeld` (verified, unexpired, establishable expiry) | `worker_qualifications`, `dangerous_goods`; counts, never names |
+| Worker credentials (TDG, H2S, First Aid, WHMIS, licence classes) | `organizationWorkers` and owned operators resolved to users; each one's standing on the tender's codes from the qualification read adapter (`qualificationReads.effectiveQualifications`, D-05) in the bidding organization's scope — the Academy grant decides, a legacy holding is only a marked fallback where none exists, a person outside the organization reads unknown; the marketplace counts the adapter's `held` and carries its not-held code, it reads neither qualification store itself | `worker_qualifications`, `dangerous_goods`; counts, never names |
 | Enforcement | `outOfServiceOrders`, scope `carrier`, active, in the organization's tenant | `carrier_enforcement` BLOCK |
 | Fingerprint | the dispatch award's convention: `canonicalJson` + `sha256`, with every governing expiry's lapsed state folded in (`expiryStateVersion`) | `MR-<sha256>` on every revision and evaluation |
 | Audit | `marketplaceEvents` + `domainEventOutbox` (checkpoint 1); new `marketplaceReadinessEvaluations` mirroring `dispatchEligibilityChecks` | every decision recorded |
@@ -39,7 +39,7 @@
 | Notifications | the workflow notification inbox (checkpoint 3) | unchanged |
 
 Reused without change: `compliancePassport`'s private-field discipline (`PRIVATE_CREDENTIAL_FIELDS_NEVER_PROJECTED`
-never leave the loader), `insuranceRisk.matchCustomerRequirements`, `qualificationValidity.countsAsHeld`,
+never leave the loader), `insuranceRisk.matchCustomerRequirements`, `qualificationReads.effectiveQualifications`,
 `complianceDocumentValidity`, `auditPackage.canonicalJson/sha256`. The whole-company insurance read
 (`insuranceRouter.policiesFor`) was lifted into `server/_core/insuranceCoverage.ts` so the marketplace
 and the insurance surface read cover through one loader; it now reads the carrier's certificate of

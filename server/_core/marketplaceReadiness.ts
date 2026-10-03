@@ -6,7 +6,8 @@
  * (`complianceDocuments`, ownerType `carrier`, keyed by financial entity exactly as
  * `carrierProfileReviews` and `insurancePolicies` are), its insurance policies as the insurance
  * engine's own `PolicyRecord`s, its owned units with their inspection and maintenance flags, its
- * workers' qualification holdings, and any carrier-scope out-of-service order — and this module
+ * workers' standing on each required qualification as the qualification read adapter decided it,
+ * and any carrier-scope out-of-service order — and this module
  * decides one thing: may this organization SUBMIT a bid on this tender, and why.
  *
  * It does not decide whether a truck or a driver may be dispatched. That is the dispatch gate's
@@ -23,25 +24,18 @@
  *     qualification, never which workers. Private credential detail stays in the registry.
  *   - The insurance rule is the insurance engine's (`matchCustomerRequirements`): MATCH / GAP /
  *     UNKNOWN, with the tender as the "customer".
- *   - The qualification rule is the canonical one (`qualificationValidity` + `heldFromValidity`): verified, unexpired, with an
- *     establishable expiry.
+ *   - The qualification rule is not decided here. Whether a worker holds a code is the qualification
+ *     read adapter's answer (`qualificationReads.effectiveQualifications`, D-05): the Academy record
+ *     decides, a legacy holding is only a marked fallback where none exists, and the person must be in
+ *     the bidding organization. This module counts `held` and carries the adapter's not-held code
+ *     through; a code the adapter did not answer is unknown, and unknown is not held.
  *   - The document rule is the document engine's (`complianceDocumentValidity`).
  */
 
 import { canonicalJson, sha256 } from "./auditPackage";
 import { complianceDocumentValidity, type ComplianceDocumentRow } from "./complianceDocumentValidity";
 import { matchCustomerRequirements, type PolicyRecord } from "./insuranceRisk";
-import { heldFromValidity, qualificationValidity, type HeldVerdict, type QualificationHolding } from "./qualificationValidity";
-
-/**
- * Whether a worker holds `code` at `at`, by the one qualification rule: the canonical verdict
- * (`qualificationValidity`) read the operational way (`heldFromValidity`). This is what the retired
- * `countsAsHeld` did (C1b-3 folded it into those two), including naming an "extracted" record as such.
- */
-function holdsQualification(holdings: readonly QualificationHolding[], code: string, at: Date): HeldVerdict {
-  const newest = holdings.filter(h => h.code === code).sort((x, y) => y.recordedAt.getTime() - x.recordedAt.getTime())[0];
-  return heldFromValidity(qualificationValidity(holdings, code, at), code, newest?.verificationState === "extracted" ? "extracted" : "unverified");
-}
+import type { EffectiveQualification } from "../qualificationReads";
 import type { BiddingWindow, PostingDistribution } from "./marketplace";
 
 /* ===================== tender requirements ===================== */
@@ -57,7 +51,7 @@ export const DEFAULT_LIABILITY_COVERAGE_TYPE = "general_liability";
  * record the canonical registries hold; nothing here is a rule engine.
  */
 export type TenderRequirements = {
-  /** Qualification codes (`workerQualifications.code` / `academyQualifications.qualificationCode`) a worker must hold. */
+  /** Qualification codes a worker must hold, as the qualification read adapter answers for them (Academy first, D-05). */
   workerQualificationCodes: string[];
   /** Carrier-level compliance document types (`complianceDocuments.docType`, ownerType `carrier`): WCB clearance, safety fitness, permits. */
   organizationDocTypes: string[];
@@ -121,8 +115,28 @@ export function normalizeTenderRequirements(raw: unknown): TenderRequirements {
 /** A unit as the registry holds it; only the fields that decide anything. */
 export type UnitFact = { unitId: number; vehicleType: string; inspectionStatus: "current" | "due" | "blocked"; maintenanceStatus: "clear" | "review" | "blocked" };
 
-/** One worker's holdings, from both canonical sources, already converted to the Academy engine's shape. */
-export type WorkerFact = { userId: number; holdings: QualificationHolding[] };
+/**
+ * One worker's standing on one required code, exactly as `qualificationReads.effectiveQualifications`
+ * returned it: held or not, the adapter's not-held code, the validity state and which record decided.
+ * Nothing here is recomputed from the rows.
+ */
+export type WorkerQualificationStanding = Pick<EffectiveQualification, "code" | "held" | "notHeld" | "state" | "source" | "sourceRef" | "expiresAt">;
+
+/** One worker and the adapter's standing on each code the tender requires. */
+export type WorkerFact = { userId: number; qualifications: WorkerQualificationStanding[] };
+
+/** The adapter's reason a code is not held, in its own vocabulary. */
+type NotHeldCode = NonNullable<EffectiveQualification["notHeld"]>;
+
+/**
+ * A worker's standing on `code`, as the adapter decided it. A code the adapter did not answer is
+ * unknown, and a not-held answer with no code is unknown: neither ever counts as held.
+ */
+export function workerStanding(w: WorkerFact, code: string): { held: boolean; notHeld: NotHeldCode | null } {
+  const q = w.qualifications.find(x => x.code === code);
+  if (!q) return { held: false, notHeld: "unknown" };
+  return q.held === true ? { held: true, notHeld: null } : { held: false, notHeld: q.notHeld ?? "unknown" };
+}
 
 /**
  * `submission`: may a bid be submitted now — the bidding window is a question. `standing`: is the
@@ -217,7 +231,7 @@ export function readinessFingerprint(f: MarketplaceReadinessFacts, now: Date): s
     carrierDocuments: f.carrierDocuments.map(d => [d.id, d.docType, d.verificationStatus, d.expiresAt?.toISOString() ?? null, lapsed(d.expiresAt)]).sort(),
     policies: f.policies.map(p => [p.policyRef, p.status, p.coverageVerificationStatus, p.expiresAt.toISOString(), lapsed(p.expiresAt), p.coverages.map(c => [c.coverageType, c.limitAmount, c.additionalInsuredEndorsement]).sort(), p.document ? (p.document.source === "compliance_document" ? [p.document.source, p.document.verdict.state, p.document.verdict.docType, p.document.verdict.documentId, p.document.verdict.expiresAt?.toISOString() ?? null, p.document.verdict.claimedExpiresAt?.toISOString() ?? null, p.document.verdict.claimLapsed] : [p.document.source]) : null]).sort(),
     units: f.units.map(u => [u.unitId, u.vehicleType, u.inspectionStatus, u.maintenanceStatus]).sort(),
-    workers: f.workers.map(w => [w.userId, w.holdings.map(h => [h.holdingRef, h.code, h.verificationState, h.expiresAt?.toISOString() ?? null, lapsed(h.expiresAt)]).sort()]).sort(),
+    workers: f.workers.map(w => [w.userId, w.qualifications.map(q => [q.code, q.source, q.sourceRef, q.state, q.held, q.notHeld, q.expiresAt?.toISOString() ?? null, lapsed(q.expiresAt)]).sort()]).sort(),
     unlinkedWorkers: f.unlinkedWorkers,
     activeCarrierOutOfServiceOrders: f.activeCarrierOutOfServiceOrders,
   };
@@ -312,16 +326,22 @@ export function evaluateMarketplaceReadiness(f: MarketplaceReadinessFacts, now: 
     if (f.workers.length === 0) {
       row("worker_qualifications", "UNKNOWN", `${codes.join(", ")} required of workers, but the organization has no worker linked to a user, so no holding can be read${f.unlinkedWorkers ? ` (${f.unlinkedWorkers} unlinked worker(s))` : ""}.`);
     } else {
-      const perCode = codes.map(code => ({ code, holders: f.workers.filter(w => holdsQualification(w.holdings, code, now).held).length }));
-      const holdAll = f.workers.filter(w => codes.every(code => holdsQualification(w.holdings, code, now).held)).length;
-      const summary = perCode.map(p => `${p.code}: ${p.holders}/${f.workers.length}`).join(", ");
+      const perCode = codes.map(code => {
+        const standings = f.workers.map(w => workerStanding(w, code));
+        // The adapter's not-held codes, counted: why the others do not hold it, without saying who.
+        const why = new Map<NotHeldCode, number>();
+        for (const s of standings) if (!s.held) why.set(s.notHeld ?? "unknown", (why.get(s.notHeld ?? "unknown") ?? 0) + 1);
+        return { code, holders: standings.filter(s => s.held).length, why: Array.from(why).sort(([a], [b]) => a.localeCompare(b)).map(([k, n]) => `${k} ${n}`).join(", ") };
+      });
+      const holdAll = f.workers.filter(w => codes.every(code => workerStanding(w, code).held)).length;
+      const summary = perCode.map(p => `${p.code}: ${p.holders}/${f.workers.length}${p.why ? ` [not held: ${p.why}]` : ""}`).join(", ");
       if (holdAll === 0) row("worker_qualifications", "BLOCK", `No worker holds every required qualification (${summary}); held means verified, unexpired, with an establishable expiry.`);
       else if (holdAll < needed) row("worker_qualifications", "WARN", `${holdAll} of ${needed} required worker(s) hold every required qualification (${summary}).`);
       else row("worker_qualifications", "PASS", `${holdAll} worker(s) hold every required qualification for ${needed} required (${summary}).`);
       if (f.unlinkedWorkers) row("worker_qualifications:unlinked", "WARN", `${f.unlinkedWorkers} worker(s) are not linked to a user; their holdings were not read.`, false);
     }
     if (req.tdgRequired) {
-      const tdgHolders = f.workers.filter(w => holdsQualification(w.holdings, TDG_QUALIFICATION_CODE, now).held).length;
+      const tdgHolders = f.workers.filter(w => workerStanding(w, TDG_QUALIFICATION_CODE).held).length;
       row("dangerous_goods", tdgHolders > 0 ? "PASS" : f.workers.length === 0 ? "UNKNOWN" : "BLOCK", tdgHolders > 0 ? `${tdgHolders} worker(s) hold ${TDG_QUALIFICATION_CODE}.` : `Dangerous goods on this haul and no worker holds ${TDG_QUALIFICATION_CODE}.`);
     }
   } else row("worker_qualifications", "PASS", "No worker qualification required.");

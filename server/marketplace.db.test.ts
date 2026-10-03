@@ -23,7 +23,7 @@ describe("marketplace — preconditions", () => {
 
 const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
-let seq = 310_000_000 + Math.floor(Math.random() * 50_000);
+let seq = 316_000_000 + Math.floor(Math.random() * 50_000);
 const rnd = () => Math.random().toString(36).slice(2, 9).toUpperCase();
 const callerFor = (userId: number) => appRouter.createCaller({ req: {} as never, res: {} as never, user: { id: userId, role: "user" } as never });
 
@@ -328,15 +328,20 @@ d("invite-only tenders and tenant isolation", () => {
     const clientDispatcher = await member(client, ["dispatcher"]);
     const clientDriver = await member(client, ["driver"]);
     const suspendedOffice = await member(suspended, ["office"]);
+    const vac = await org("Unit Rate Vac");
+    const vacOffice = await member(vac, ["office"]);
 
     const p = await callerFor(clientOffice).marketplace.postingCreate({ ...POSTING, pricingBasis: "unit_rate", visibility: "open" });
     await callerFor(clientOffice).marketplace.postingPublish({ postingRef: p.postingRef });
     await callerFor(clientOffice).marketplace.postingOpenBidding({ postingRef: p.postingRef });
 
-    await expect(callerFor(suspendedOffice).marketplace.bidDraftSave({ postingRef: p.postingRef, content: fixedBid(1) })).rejects.toThrow(/asks for unit_rate bids/);
+    // A suspended organization's member is refused before the marketplace is reached: since v23.26 the
+    // acting scope does not resolve into a company an administrator has stopped. (The evaluator's own
+    // `organization` BLOCK row, for a bidder suspended after it bid, is pinned in marketplaceReadiness.test.)
     const unit = { ...fixedBid(1), pricingType: "unit_rate" as const, fixedTotalCents: null, components: [{ code: "LOAD", label: "Per load", unit: "LOAD" as const, rateCents: 48_500, estimatedQuantityMillis: 8_000 }] };
-    const sb = await callerFor(suspendedOffice).marketplace.bidDraftSave({ postingRef: p.postingRef, content: unit });
-    await expect(callerFor(suspendedOffice).marketplace.bidSubmit({ bidRef: sb.bidRef })).rejects.toThrow(/organization \[BLOCK\]: Bidding organization is suspended/);
+    await expect(callerFor(suspendedOffice).marketplace.bidDraftSave({ postingRef: p.postingRef, content: unit })).rejects.toThrow(/No active organization membership/);
+    await expect(callerFor(vacOffice).marketplace.bidDraftSave({ postingRef: p.postingRef, content: fixedBid(1) })).rejects.toThrow(/asks for unit_rate bids/);
+    const sb = await callerFor(vacOffice).marketplace.bidDraftSave({ postingRef: p.postingRef, content: unit });
 
     // Roles: a driver holds no marketplace permission; a dispatcher may read and bid but not post; office may not award.
     await expect(callerFor(clientDriver).marketplace.postingsList()).rejects.toThrow(/marketplace\.read/);

@@ -10,31 +10,26 @@
  *   insurance               the insurance engine's PolicyRecords, via the loader the insurance surface uses
  *   equipment               units the organization owns (coreRecordOwnership) with their inspection and
  *                           maintenance flags
- *   workers                 organizationWorkers (active) and owned operators, resolved to users; holdings
- *                           from workerQualifications (recorded) and academyQualifications (issued)
+ *   workers                 organizationWorkers (active) and owned operators, resolved to users; each
+ *                           one's standing on the tender's codes from the qualification read adapter
+ *                           (`qualificationReads.effectiveQualifications`, D-05), in the bidding
+ *                           organization's scope — never from the qualification tables directly
  *   enforcement             outOfServiceOrders, scope `carrier`, active, in the organization's tenant
  *
- * Nothing here decides anything. Private credential fields never leave this module: a holding is
- * reduced to code, state and expiry before it reaches the evaluator, and the evaluator reduces it
- * to a count before it reaches anyone.
+ * Nothing here decides anything. Private credential fields never leave this module: the adapter's
+ * answer is reduced to code, held, not-held code, state, deciding record and expiry before it reaches
+ * the evaluator, and the evaluator reduces it to counts before it reaches anyone.
  */
 import { and, eq, inArray } from "drizzle-orm";
 import {
-  academyQualifications, complianceDocuments, contractorBusinessProfiles, coreRecordOwnership, financialEntities, marketplaceInvitations,
-  operators, organizationWorkers, organizations, outOfServiceOrders, units, workerQualifications, type MarketplacePostingRow,
+  complianceDocuments, contractorBusinessProfiles, coreRecordOwnership, financialEntities, marketplaceInvitations,
+  operators, organizationWorkers, organizations, outOfServiceOrders, units, type MarketplacePostingRow,
 } from "../../drizzle/schema";
 import type { DbOrTx } from "./dbTypes";
 import { policiesForFinancialEntity } from "./insuranceCoverage";
 import { biddingWindow } from "./marketplace";
 import { normalizeTenderRequirements, type MarketplaceReadinessFacts, type ReadinessStage, type WorkerFact } from "./marketplaceReadiness";
-import type { QualificationHolding } from "./qualificationValidity";
-
-/** An Academy-issued qualification presented in the holdings engine's shape. `current` is the Academy's verified. */
-function academyHolding(q: typeof academyQualifications.$inferSelect): QualificationHolding {
-  const verificationState: QualificationHolding["verificationState"] =
-    q.status === "current" || q.status === "expired" ? "verified" : q.status === "pending" ? "unverified" : "rejected";
-  return { holdingRef: q.qualificationRef, code: q.qualificationCode, verificationState, issuedAt: q.validFrom, expiresAt: q.expiresAt, recordedAt: q.verifiedAt ?? q.validFrom ?? q.createdAt };
-}
+import { effectiveQualifications } from "../qualificationReads";
 
 export async function gatherReadinessFacts(
   db: DbOrTx,
@@ -71,16 +66,16 @@ export async function gatherReadinessFacts(
     if (userId) userIds.add(userId); else unlinkedWorkers++;
   }
   for (const o of operatorRows) { if (o.userId) userIds.add(o.userId); else if (!listed.some(w => w.operatorId === o.id)) unlinkedWorkers++; }
-  const ids = Array.from(userIds);
-  const recorded = ids.length ? await db.select().from(workerQualifications).where(inArray(workerQualifications.userId, ids)) : [];
-  const issued = ids.length ? await db.select().from(academyQualifications).where(inArray(academyQualifications.userId, ids)) : [];
-  const workers: WorkerFact[] = ids.map(userId => ({
-    userId,
-    holdings: [
-      ...recorded.filter(r => r.userId === userId).map(r => ({ holdingRef: r.holdingRef, code: r.code, verificationState: r.verificationState, issuedAt: r.issuedAt, expiresAt: r.expiresAt, recordedAt: r.recordedAt })),
-      ...issued.filter(q => q.userId === userId).map(academyHolding),
-    ],
-  }));
+  // Each worker's standing on the tender's codes (TDG included when required), as the qualification
+  // read adapter decides it in the bidding organization's scope. The adapter is the only reader of
+  // the qualification stores; a person outside the organization reads unknown on every code.
+  const requirements = normalizeTenderRequirements(JSON.parse(posting.requirementsJson));
+  const codes = requirements.workerQualificationCodes;
+  const workers: WorkerFact[] = [];
+  for (const userId of Array.from(userIds).sort((a, b) => a - b)) {
+    const read = codes.length ? await effectiveQualifications(db, { tenantId: bidderOrgRef, userId, at: now, codes }) : [];
+    workers.push({ userId, qualifications: read.map(q => ({ code: q.code, held: q.held, notHeld: q.notHeld, state: q.state, source: q.source, sourceRef: q.sourceRef, expiresAt: q.expiresAt })) });
+  }
 
   const oos = await db.select({ id: outOfServiceOrders.id }).from(outOfServiceOrders).where(and(eq(outOfServiceOrders.scope, "carrier"), eq(outOfServiceOrders.status, "active"), eq(outOfServiceOrders.tenantId, bidderOrgRef)));
 
@@ -95,7 +90,7 @@ export async function gatherReadinessFacts(
     window: biddingWindow({ state: posting.state, biddingClosesAt: posting.biddingClosesAt }, now),
     unitsRequired: posting.unitsRequired,
     unitsOffered: args.unitsOffered,
-    requirements: normalizeTenderRequirements(JSON.parse(posting.requirementsJson)),
+    requirements,
     financialEntityIds,
     carrierDocuments,
     policies,

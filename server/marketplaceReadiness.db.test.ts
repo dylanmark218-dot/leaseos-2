@@ -240,7 +240,7 @@ d("tenant isolation and authorization", () => {
     expect(aRow.currentReadiness).toMatchObject({ eligibility: "eligible", blockerCount: 0 });
     expect(aRow.currentReadiness!.checks.find(c => c.check === "worker_qualifications")).toEqual({ check: "worker_qualifications", result: "PASS" });
     const text = JSON.stringify(seen);
-    for (const secret of [...qa.holdingRefs, ...qa.userIds.map(String), qa.policyRef!, String(qa.financialEntityId)]) expect(text).not.toContain(secret);
+    for (const secret of [...qa.qualificationRefs, ...qa.userIds.map(String), qa.policyRef!, String(qa.financialEntityId)]) expect(text).not.toContain(secret);
     expect(text).not.toMatch(/"detail"/);
     expect(seen.some(x => x.bidRef === db2.bidRef)).toBe(false);   // a draft is nobody's business but the bidder's
 
@@ -262,8 +262,8 @@ d("tenant isolation and authorization", () => {
     await qualifyOrganization(pool, unverified, { ...COMPLIANT, coverageVerified: false });
     const p = await tender(clientOffice);
 
-    const s1 = await callerFor(suspendedOffice).marketplace.bidReadiness({ postingRef: p.postingRef });
-    expect(s1.blockers.map(b => b.check)).toEqual(["organization"]);
+    // Since v23.26 the acting scope refuses a suspended company's member outright, before readiness is asked.
+    await expect(callerFor(suspendedOffice).marketplace.bidReadiness({ postingRef: p.postingRef })).rejects.toThrow(/No active organization membership/);
     const s2 = await callerFor(unverifiedOffice).marketplace.bidReadiness({ postingRef: p.postingRef });
     expect(checkOf(s2, "insurance")).toMatchObject({ result: "UNKNOWN", blocking: true });
     expect(s2.verdict).toBe("blocked");
