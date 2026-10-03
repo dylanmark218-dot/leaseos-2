@@ -40,6 +40,13 @@ export type Admission = {
   permission: string | null;
   proof: TenantProof;
   admittedAt: Date;
+  /**
+   * AIL-1B.1 — what the resolver says this content is and where it came from (record id, revision,
+   * reviewer, approval time, source), carried with the block so an answer can be traced to the exact
+   * version it relied on. Description only: nothing reads it to decide authority, and a resolver
+   * cannot raise a block's authority through it.
+   */
+  provenance: Readonly<Record<string, string | null>> | null;
 };
 
 export type AdmittedContextBlock = {
@@ -78,7 +85,7 @@ export type AdmissionRefusal =
  * `user_message` and `company_policy` are not here: the first two have their own constructors below,
  * and company policy is configuration, never something loaded from a learned or retrieved record.
  */
-export const RESOLVABLE_KINDS: readonly BlockKind[] = ["retrieved_document", "record_data", "external_message"];
+export const RESOLVABLE_KINDS: readonly BlockKind[] = ["retrieved_document", "record_data", "organization_knowledge", "external_message"];
 /** Proofs a resolver may give. `system` is not one: it is the system prompt's alone. */
 export const RESOLVABLE_PROOFS: readonly TenantProof["kind"][] = ["row", "parent", "legacy_single_tenant"];
 
@@ -107,6 +114,8 @@ export type ResolvedSource = {
   proof: TenantProof;
   permission: string | null;
   text: string;
+  /** AIL-1B.1 — optional provenance, copied verbatim into the admission receipt. */
+  provenance?: Readonly<Record<string, string | null>>;
 };
 
 export type ContextResolver = {
@@ -212,6 +221,7 @@ export async function admitSource(args: {
       permission: resolved.permission,
       proof: resolved.proof,
       admittedAt: args.at,
+      provenance: resolved.provenance ? Object.freeze({ ...resolved.provenance }) : null,
     },
   } as AdmittedContextBlock;
 }
@@ -225,7 +235,7 @@ export const systemPromptBlock = (args: { blockRef: string; text: string; at: Da
   blockRef: args.blockRef, kind: "system_prompt", tenantId: null, text: args.text, sourceRef: null,
   admission: {
     principalUserId: null, tenantId: null, resolverKey: "system",
-    permission: null, proof: { kind: "system" }, admittedAt: args.at,
+    permission: null, proof: { kind: "system" }, admittedAt: args.at, provenance: null,
   },
 } as AdmittedContextBlock);
 
@@ -239,7 +249,7 @@ export const authenticatedUserBlock = (args: { blockRef: string; text: string; a
   blockRef: args.blockRef, kind: "user_message", tenantId: args.acting.tenantId, text: args.text, sourceRef: null,
   admission: {
     principalUserId: args.acting.userId, tenantId: args.acting.tenantId, resolverKey: "session",
-    permission: null, proof: { kind: "row", tenantId: args.acting.tenantId }, admittedAt: args.at,
+    permission: null, proof: { kind: "row", tenantId: args.acting.tenantId }, admittedAt: args.at, provenance: null,
   },
 } as AdmittedContextBlock);
 

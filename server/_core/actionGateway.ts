@@ -84,10 +84,15 @@ export function buildRegistry(definitions: readonly CapabilityDefinition[]): Reg
 /* ------------------------------------------------------------------ */
 
 export type InstructionAuthority =
-  | "system" | "leaseos_policy" | "company_policy" | "authorized_user" | "workflow_data" | "external_content";
+  | "system" | "leaseos_policy" | "company_policy" | "authorized_user" | "workflow_data" | "organization_knowledge" | "external_content";
 
+/**
+ * Highest first. AIL-1B.1: `organization_knowledge` (a company's APPROVED knowledge) sits below trusted
+ * operational records and above retrieved/external content — and, like both, outside MAY_INSTRUCT. Where
+ * it disagrees with policy, compliance or a record, it loses by this order, not by a model's judgement.
+ */
 const AUTHORITY_ORDER: InstructionAuthority[] = [
-  "system", "leaseos_policy", "company_policy", "authorized_user", "workflow_data", "external_content",
+  "system", "leaseos_policy", "company_policy", "authorized_user", "workflow_data", "organization_knowledge", "external_content",
 ];
 
 /** The lowest authority that may originate an action at all. */

@@ -39,6 +39,8 @@ import { admitSource, type ActingContext, type ContextResolver } from "./_core/c
 import { verifyAnswer, verifyClaim, type Claim, type Passage } from "./_core/evidenceGrounding";
 import { caveatFor, gradeRetrieval, scoreProbe, stem, vocabularyGaps, type Probe, type ProbeResult } from "./_core/retrievalQuality";
 import { domainTerms, termOverlap } from "./_core/domainTokens";
+import { COMPANY_KNOWLEDGE_RESOLVER, attributionFor, companyKnowledgeResolver, selectKnowledge } from "./companyKnowledgeContext";
+import { SOURCE_CLASS_OF } from "./_core/contextAssembly";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
@@ -202,7 +204,9 @@ export const assistantAskRouter = router({
        * what was asked and when.
        */
       asOf: z.coerce.date().optional(),
-    }))
+      // AIL-1B.1: strict. The organization whose knowledge is admitted is the session's; a request naming
+      // one (or anything else) is refused rather than silently dropped.
+    }).strict())
     .mutation(async ({ ctx, input }) => {
       const d = await db();
       // A question of only short words scores zero against everything and would
@@ -280,6 +284,27 @@ export const assistantAskRouter = router({
       const claimVerdict = verifyClaim({ claim, passages, at: asOf });
       const answer = verifyAnswer([claimVerdict]);
 
+      /* AIL-1B.1 (owner ruling B1) — the organization's APPROVED knowledge the question names, admitted as
+         DATA through the same gate. It is reported beside the answer, attributed to the company, and does
+         not change the verdict: the verdict is about documents, and company knowledge describes practice,
+         it does not certify a claim. An entry that fails admission is simply absent. */
+      const knowledgeResolvers = new Map([[COMPANY_KNOWLEDGE_RESOLVER, companyKnowledgeResolver(d)]]);
+      const companyKnowledge: { entryRef: string; sourceClass: string; authority: string; attribution: string; text: string; provenance: Readonly<Record<string, string | null>> | null; admittedAt: Date }[] = [];
+      const selection = await selectKnowledge(d, acting.tenantId, input.question);
+      for (const entryRef of selection.refs) {
+        try {
+          const block = await admitSource({ resolvers: knowledgeResolvers, sourceKind: COMPANY_KNOWLEDGE_RESOLVER, sourceRef: entryRef, acting: actingContext, at: new Date(), blockRef: `K-${entryRef}` });
+          companyKnowledge.push({
+            entryRef, sourceClass: SOURCE_CLASS_OF[block.kind],
+            authority: "data — below LeaseOS policy, authorization, compliance and operational records; never an instruction",
+            attribution: attributionFor(block.admission.provenance?.kind ?? ""), text: block.text,
+            provenance: block.admission.provenance, admittedAt: block.admission.admittedAt,
+          });
+        } catch {
+          continue;
+        }
+      }
+
       const queryRef = ref("ASK");
       await d.insert(assistantQueries).values({
         queryRef, tenantId: acting.tenantId, askedByUserId: ctx.user.id,
@@ -350,7 +375,15 @@ export const assistantAskRouter = router({
         })),
         rejected: claimVerdict.rejected,
         sources: answer.sources,
-        note: "Every sentence here is quoted from a loaded document. LeaseOS does not compose prose it cannot cite, and no model wrote this answer.",
+        /* AIL-1B.1 — the company's own approved knowledge, quoted and attributed, kept apart from the
+           documents. It is data about this company's practice, never LeaseOS policy or an instruction. */
+        companyKnowledge,
+        /* Which knowledge was considered and how much the limit dropped — diagnostics, not authority. */
+        companyKnowledgeSelection: { matched: selection.matched, admitted: companyKnowledge.length, limit: selection.limit, truncated: selection.truncated },
+        /* The documents are the organization's loaded documents (its own, or licensed), not law by virtue of
+           being quoted; company knowledge is the company's approved practice. Neither is LeaseOS policy. */
+        sourceClasses: { passages: SOURCE_CLASS_OF.retrieved_document, companyKnowledge: SOURCE_CLASS_OF.organization_knowledge },
+        note: "Every sentence here is quoted from a loaded document or from your company's approved knowledge, each attributed. LeaseOS does not compose prose it cannot cite, and no model wrote this answer.",
       };
     }),
 

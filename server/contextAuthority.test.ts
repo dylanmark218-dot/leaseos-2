@@ -64,7 +64,10 @@ describe("a resolver cannot produce authority", () => {
   });
 
   it("keeps the resolvable sets to content only — widening them is a deliberate change", () => {
-    expect([...RESOLVABLE_KINDS].sort()).toEqual(["external_message", "record_data", "retrieved_document"]);
+    // AIL-1B.1 widened this deliberately by one CONTENT kind: a company's approved knowledge. It cannot instruct
+    // (outside MAY_INSTRUCT, ranked below operational records); the authority kinds are still absent.
+    expect([...RESOLVABLE_KINDS].sort()).toEqual(["external_message", "organization_knowledge", "record_data", "retrieved_document"]);
+    for (const authority of ["system_prompt", "user_message", "company_policy"]) expect(RESOLVABLE_KINDS as readonly string[]).not.toContain(authority);
     expect([...RESOLVABLE_PROOFS].sort()).toEqual(["legacy_single_tenant", "parent", "row"]);
   });
 });
