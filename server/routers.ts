@@ -84,6 +84,7 @@ import { drizzleWidgetLayoutStore } from "./widgetLayouts";
 import { widgetReaderFor } from "./widgetSources";
 import { automationPolicyRouter } from "./automationPolicyRouter";
 import { restrictedVaultRouter } from "./restrictedVaultRouter";
+import { safetyProgramRouter } from "./safetyProgramRouter";
 import { composeReadiness } from "./readinessComposer";
 import { branchRolesFor } from "./_core/widgetRoleKeys";
 import { isDomainRole, permissionsForDomainRole } from "./_core/recordsAuthorization";
@@ -357,6 +358,7 @@ export const appRouter = router({
   widgets: widgetsRouter(widgetDeps),
   automationPolicy: automationPolicyRouter,
   restrictedVault: restrictedVaultRouter,
+  safetyProgram: safetyProgramRouter,
   manifestCustody: manifestCustodyRouter,
   securityIncidents: securityIncidentsRouter,
   commercialOffice: commercialOfficeRouter,
