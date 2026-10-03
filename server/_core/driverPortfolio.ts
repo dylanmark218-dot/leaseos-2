@@ -34,6 +34,7 @@
 
 import { complianceDocumentValidity, type ComplianceDocumentRow } from "./complianceDocumentValidity";
 import type { DispatchBlocker } from "./dispatchReadiness";
+import { MEDICAL_FITNESS_DOC_TYPES } from "./compliancePassport";
 import { walletStatusAt, type WalletHeadline, type WalletStatus } from "../../shared/driverWallet";
 
 /* ------------------------------------------------------------------ */
@@ -100,6 +101,29 @@ export function credentialType(code: string): CredentialType | null {
   const m = ORIENTATION.exec(c);
   if (!m) return null;
   return { code: c, label: `${m[1] === "client" ? "Client" : "Site"} orientation — ${m[2]}`, category: "orientation", docTypes: [c], expires: false, walletCard: true };
+}
+
+/**
+ * What may leave the organization through a share. An explicit server-side rule, not the record's
+ * `privateDetail` flag: a flag can be wrong or flipped, and a medical record shared to a gate is a
+ * disclosure that cannot be taken back.
+ *
+ *  - Allowed: the catalogue's licence, endorsement, safety-ticket, company-training and orientation
+ *    types — nothing outside the catalogue, so a new doc type is unshareable until it is added here.
+ *  - Never: medical fitness (MEDICAL_FITNESS_DOC_TYPES) and anything whose doc type names medical,
+ *    health, drug/alcohol, criminal-record, abstract or background screening — whatever its flag says
+ *    and whatever catalogue code it is presented under.
+ */
+export const SHAREABLE_CATEGORIES: readonly CredentialCategory[] = ["licence", "endorsement", "safety_ticket", "company_training", "orientation"];
+export const NEVER_SHAREABLE = /medical|health|fitness|drug|alcohol|criminal|abstract|background|screening/;
+
+export function shareableType(docType: string, privateDetail?: boolean | null): CredentialType | null {
+  const d = normalizeCode(docType);
+  if (privateDetail || MEDICAL_FITNESS_DOC_TYPES.map(normalizeCode).includes(d) || NEVER_SHAREABLE.test(d)) return null;
+  // By the record's doc type, as the wallet reads it: an alias (h2s_certificate) is its catalogue type.
+  const type = CREDENTIAL_CATALOG.find(t => t.docTypes.map(normalizeCode).includes(d)) ?? credentialType(d);
+  if (!type || !SHAREABLE_CATEGORIES.includes(type.category) || !type.docTypes.map(normalizeCode).includes(d)) return null;
+  return type;
 }
 
 /** The orientation code for a customer or site, as bindings and uploads should spell it. */
@@ -600,7 +624,7 @@ export function walletView(args: {
 
   return {
     operatorId: portfolio.operatorId,
-    headline: baseline.verdict === "blocked" ? "NOT READY" : baseline.verdict === "ready" ? "READY FOR WORK" : "ACTION REQUIRED",
+    headline: baseline.verdict === "blocked" ? "NOT READY" : baseline.verdict === "ready" ? "BASELINE MET" : "ACTION REQUIRED",
     scope: "company_baseline",
     verdict: baseline.verdict,
     cards, generatedAt: at, validUntil,
@@ -784,9 +808,11 @@ export function sharedCredentialView(args: {
   at: Date;
 }): SharedCredentialView | null {
   const row = args.credentials.find(c => c.id === args.credentialId);
-  if (!row || row.privateDetail) return null;
-  const type = credentialType(args.code);
-  if (!type || !type.docTypes.map(normalizeCode).includes(normalizeCode(row.docType))) return null;
+  if (!row) return null;
+  // The shareability rule, re-applied at every redemption: a row reclassified since the share was
+  // issued, or a share naming a code its row does not carry, shows nothing.
+  const type = shareableType(row.docType, row.privateDetail);
+  if (!type || type.code !== normalizeCode(args.code)) return null;
   const base = {
     holderName: args.holderName, label: type.label,
     expiresOn: row.expiresAt ? day(row.expiresAt) : null,
