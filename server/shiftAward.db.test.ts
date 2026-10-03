@@ -30,8 +30,15 @@ const rows = async (sql: string, p: unknown[] = []) => (await pool.query<mysql.R
 type Finding = { code: string; overrideClass: string; overrideAuthority?: string; dispatchEffect: string };
 
 /** An operator whose own prerequisites are established: licence, medical, today's HOS attestation. */
-async function establishedOperator(manager: number) {
+async function establishedOperator(manager: number, opts: { foreignRecordFirst?: boolean } = {}) {
   const driverUser = await withRole("driver");
+  if (opts.foreignRecordFirst) {
+    // OPID-7: the person's first operator row (the one .limit(1) returns) belongs to another organization.
+    const orgRef = `ORG-${rnd()}`;
+    await pool.execute("INSERT INTO organizations (orgRef, name, status) VALUES (?,?,'active')", [orgRef, `o ${orgRef}`]);
+    const [f] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name) VALUES (?, 'Elsewhere')", [driverUser]);
+    await pool.execute("INSERT INTO coreRecordOwnership (orgRef, recordType, recordId, assignedByUserId) VALUES (?, 'operator', ?, 1)", [orgRef, f.insertId]);
+  }
   const [op] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO operators (userId, name, licenseExpiresAt) VALUES (?, 'C. One', DATE_ADD(NOW(), INTERVAL 400 DAY))", [driverUser]);
   const operatorId = Number(op.insertId);
   // #52 (on main): the legacy operators.licenseExpiresAt date alone is an unverified licence, so a ready
@@ -55,10 +62,10 @@ async function onRoster(userId: number) {
  * unit with inspection, registration and verified insurance, a job with an approved route, and a
  * posting with one slot, linked to an open post. What remains is warning-grade only.
  */
-async function establishedScene() {
+async function establishedScene(opts: { foreignRecordFirst?: boolean } = {}) {
   const dispatcher = await withRole("dispatcher");
   const manager = await withRole("management");
-  const { driverUser, operatorId } = await establishedOperator(manager);
+  const { driverUser, operatorId } = await establishedOperator(manager, opts);
   const [u] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO units (unitNumber, vehicleType, company, maintenanceStatus) VALUES (?, 'vacuum_truck', 'ABC', 'clear')", [key("U").slice(0, 30)]);
   const unitId = Number(u.insertId);
   for (const t of ["cvip_certificate", "vehicle_registration", "insurance_proof"]) {
@@ -294,4 +301,34 @@ d("the organization boundary", () => {
     const c = await acknowledgedCheck(s);
     expect(await orgCaller(dispA).shifts.award({ postRef: p.postRef, userId: drvA, unitId: null, trailerId: null, checkId: c.checkId, expectedLastEventId: null, reason: null })).toMatchObject({ ok: false, code: "post_unlinked" });
   });
+});
+
+d("OPID-7 the award binds the person's own operator record in this organization", () => {
+  async function acceptedOffer(s: Scene) {
+    const offer = await caller(s.dispatcher).shifts.offer({ postRef: s.postRef, userId: s.driverUser });
+    await caller(s.driverUser).shifts.offerRespond({ offerRef: offer.offerRef, decision: "accepted" });
+  }
+  it("another organization's record, first by id, does not stand in for theirs: the award binds the record here", async () => {
+    const s = await establishedScene({ foreignRecordFirst: true });
+    const c = await acknowledgedCheck(s);
+    await acceptedOffer(s);
+    const a = await award(s, { checkId: c.checkId });
+    expect(a.ok, (a as { refusals?: string[] }).refusals?.join(" | ")).toBe(true);
+    const role = (await rows("SELECT assignedOperatorId FROM dispatchRoles WHERE id = ?", [s.roleId]))[0]!;
+    expect(Number(role.assignedOperatorId)).toBe(s.operatorId);
+  }, 60_000);
+
+  it("two records in this organization are refused, not the first bound", async () => {
+    const s = await establishedScene();
+    const c = await acknowledgedCheck(s);
+    await acceptedOffer(s);
+    await pool.execute("INSERT INTO operators (userId, name) VALUES (?, 'Second record')", [s.driverUser]);
+    const a = await award(s, { checkId: c.checkId });
+    expect(a.ok).toBe(false);
+    if (a.ok) return;
+    expect(a.code).toBe("no_operator_record");
+    expect(a.refusals.join(" ")).toMatch(/More than one operator record/);
+    const role = (await rows("SELECT assignedOperatorId FROM dispatchRoles WHERE id = ?", [s.roleId]))[0]!;
+    expect(role.assignedOperatorId).toBeNull();
+  }, 60_000);
 });
