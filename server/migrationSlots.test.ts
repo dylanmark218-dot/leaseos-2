@@ -62,9 +62,14 @@ describe("the real tree", () => {
     // Mechanic Portal CP2 took 0221–0222 (defect lifecycle and its guards): 0220 is claimed by
     // `claude/eld-compliance-intelligence-ramlrd`, so head+1 would have collided; the register records the scan.
     expect(files).toContain("0222_defect_lifecycle_guards.sql");
-    expect(headSlot(files)).toBe("0222");
+    // Payroll P1 took 0226 (compensation agreements): 0220–0225 are claimed by open branches (ELD, integration
+    // hub, CI stabilization), so head+1 would have collided twice; drafted as 0224 and moved before it was applied.
+    expect(files).toContain("0226_payroll_compensation_agreements.sql");
+    // Payroll P2 took 0227 (pay schedules): 0223–0225 are still claimed by open branches, below main's 0226.
+    expect(files).toContain("0227_payroll_pay_schedules.sql");
+    expect(headSlot(files)).toBe("0227");
     // S2-FLEET-A: 0213 (0213_runtime_instances), claimed when main's head was 0209 and 0210–0212 were held
-    // by the driver-portfolio branch; 0214–0219 landed on main afterwards, so 0213 sits below the head and
+    // by the driver-portfolio branch; 0214–0227 landed on main afterwards, so 0213 sits below the head and
     // applies by name like 0207/0208 and 0214–0216 do.
     expect(files).toContain("0213_runtime_instances.sql");
     expect(files.filter(f => /^021[0-2]_/.test(f))).toEqual([]);

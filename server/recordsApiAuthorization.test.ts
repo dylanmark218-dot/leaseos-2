@@ -89,9 +89,9 @@ async function attempt(fn: () => Promise<unknown>): Promise<"forbidden" | "passe
 }
 
 d("the gate is on every records procedure", () => {
-  it("declares a permission for all 20 procedures", () => {
-    // B23.1A: +1 records.roles.resolveLegacy;  B23.1: +1 records.roles.revoke
-    expect(Object.keys(RECORDS_PROCEDURE_PERMISSIONS).length).toBe(20);   // + main's one since #64's base
+  it("declares a permission for all 23 procedures", () => {
+    // Records & File Manager: +3 records.files.*;  B23.1A: +1 records.roles.resolveLegacy;  B23.1: +1 records.roles.revoke
+    expect(Object.keys(RECORDS_PROCEDURE_PERMISSIONS).length).toBe(23);   // +3 records.files.{list,get,download};  + main's one since #64's base
   });
 
   it("mounts records on the app router", () => {

@@ -53,6 +53,8 @@ import {
   financeRouter,
   payrollRouter,
 } from "./payrollRouter";
+import { payrollCompensationRouter } from "./payrollCompensationRouter";   // payroll P1 (0226)
+import { payrollScheduleRouter } from "./payrollScheduleRouter";   // payroll P2 (0227)
 import { fundingRouter, portalsRouter } from "./portalFundingRouter";
 import { purchasingRouter, recoveryRouter, roadsideRouter, vendorRouter } from "./purchasingRouter";
 import { deviceRouter, syncRouter } from "./deviceRouter";
@@ -377,6 +379,8 @@ export const appRouter = router({
   people: peopleRouter,
   records: recordsRouter,
   payroll: payrollRouter,
+  payrollCompensation: payrollCompensationRouter,
+  payrollSchedule: payrollScheduleRouter,
   contractors: contractorRouter,
   contractorOperations: contractorOperationsRouter,
   finance: financeRouter,

@@ -3327,6 +3327,9 @@ export const payGroups = mysqlTable("payGroups", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+/** 0226 (D9) — `organizationWorkers.workerType`, the one classification vocabulary payroll snapshots. */
+export const WORKER_CLASSIFICATIONS = ["OWNER_DRIVER", "EMPLOYEE_DRIVER", "CO_DRIVER", "SWAMPER", "LABORER", "EQUIPMENT_OPERATOR", "HELPER", "SHOP_HAND", "MECHANIC", "MAINTENANCE_SUPERVISOR", "BOOKKEEPER", "DISPATCHER", "SAFETY_COMPLIANCE", "OFFICE_ADMIN"] as const;
+
 export const employeePayrollProfiles = mysqlTable("employeePayrollProfiles", {
   id: int("id").autoincrement().primaryKey(),
   operatorId: int("operatorId"),
@@ -3340,6 +3343,10 @@ export const employeePayrollProfiles = mysqlTable("employeePayrollProfiles", {
   effectiveFrom: timestamp("effectiveFrom").notNull(),
   terminatedAt: timestamp("terminatedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0226 (D9) — the normalized classification (organizationWorkers vocabulary), where it came from, and the worker row. */
+  workerClassification: mysqlEnum("workerClassification", WORKER_CLASSIFICATIONS),
+  classificationSource: mysqlEnum("classificationSource", ["organization_worker", "legacy_mapped"]),
+  organizationWorkerRef: varchar("organizationWorkerRef", { length: 64 }),
 });
 
 export const payRates = mysqlTable("payRates", {
@@ -3368,10 +3375,30 @@ export const payPeriods = mysqlTable("payPeriods", {
   financialEntityId: int("financialEntityId").notNull(),
   startsOn: timestamp("startsOn").notNull(),
   endsOn: timestamp("endsOn").notNull(),
-  state: mysqlEnum("state", ["draft", "collecting", "review", "approved", "processing", "paid", "closed", "amended"]).default("draft").notNull(),
+  /** 0227 adds `voided`. The P2 machine: collecting=OPEN, review=REVIEWING, approved=APPROVED (locked), processing, closed=FINALIZED, amended=CORRECTED, voided. `paid` reads as FINALIZED. */
+  state: mysqlEnum("state", ["draft", "collecting", "review", "approved", "processing", "paid", "closed", "amended", "voided"]).default("draft").notNull(),
   lockedAt: timestamp("lockedAt"),
   lockedByUserId: int("lockedByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 0227 (P2) — the schedule that generated the period; authoritative calendar dates [start, end); the machine's actors. */
+  payScheduleId: int("payScheduleId"),
+  periodStartDate: date("periodStartDate", { mode: "string" }),
+  periodEndDate: date("periodEndDate", { mode: "string" }),
+  paymentDate: date("paymentDate", { mode: "string" }),
+  cutoffDate: date("cutoffDate", { mode: "string" }),
+  createdByUserId: int("createdByUserId"),
+  submittedByUserId: int("submittedByUserId"),
+  submittedAt: timestamp("submittedAt"),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  finalizedByUserId: int("finalizedByUserId"),
+  finalizedAt: timestamp("finalizedAt"),
+  reopenedByUserId: int("reopenedByUserId"),
+  reopenedAt: timestamp("reopenedAt"),
+  reopenReason: varchar("reopenReason", { length: 400 }),
+  voidedByUserId: int("voidedByUserId"),
+  voidedAt: timestamp("voidedAt"),
+  voidReason: varchar("voidReason", { length: 400 }),
 });
 
 export const payrollTimeEntries = mysqlTable("payrollTimeEntries", {
@@ -10428,3 +10455,139 @@ export const workOrderTasks = mysqlTable("workOrderTasks", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
+
+
+/* ---- 0226: Payroll P1 — earning-code catalogue, compensation agreements, versions, rules ---- */
+
+/**
+ * The earning-code catalogue. `financialEntityId` NULL = shared seed available to every book (the
+ * dispatchRoleTypes 0170 pattern: NULL means shared here, the opposite of owned rows); a book's own row
+ * with the same code is that book's override. `codeKey` is a PERSISTENT generated column
+ * (CONCAT(COALESCE(financialEntityId,'*'),':',code)), unique; never written by the application.
+ * Tax treatment is metadata only.
+ */
+export const earningCodes = mysqlTable("earningCodes", {
+  id: int("id").autoincrement().primaryKey(),
+  codeRef: varchar("codeRef", { length: 64 }).notNull().unique(),
+  financialEntityId: int("financialEntityId"),
+  code: varchar("code", { length: 40 }).notNull(),
+  name: varchar("name", { length: 120 }).notNull(),
+  description: varchar("description", { length: 500 }),
+  calculationType: mysqlEnum("calculationType", ["hourly", "quantity_times_rate", "percentage", "flat", "per_period_salary", "formula"]).notNull(),
+  rateSource: mysqlEnum("rateSource", ["agreement", "pay_group", "manual", "none"]).default("agreement").notNull(),
+  kind: mysqlEnum("kind", ["earning", "reimbursement", "deduction", "employer_cost", "allowance"]).default("earning").notNull(),
+  taxTreatmentMetaJson: json("taxTreatmentMetaJson"),
+  requiresJob: boolean("requiresJob").default(false).notNull(),
+  requiresUnit: boolean("requiresUnit").default(false).notNull(),
+  requiresApproval: boolean("requiresApproval").default(true).notNull(),
+  countsTowardOvertime: boolean("countsTowardOvertime").default(false).notNull(),
+  activeFrom: date("activeFrom", { mode: "string" }).notNull(),
+  activeUntil: date("activeUntil", { mode: "string" }),
+  retiredByUserId: int("retiredByUserId"),
+  retiredAt: timestamp("retiredAt"),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  codeKey: varchar("codeKey", { length: 80 }),
+});
+export type EarningCodeRow = typeof earningCodes.$inferSelect;
+
+/** One agreement binds one payroll profile to one book; the classification is snapshotted (D9). */
+export const compensationAgreements = mysqlTable("compensationAgreements", {
+  id: int("id").autoincrement().primaryKey(),
+  agreementRef: varchar("agreementRef", { length: 64 }).notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  employeePayrollProfileId: int("employeePayrollProfileId").notNull(),
+  title: varchar("title", { length: 160 }).notNull(),
+  status: mysqlEnum("status", ["draft", "active", "ended"]).default("draft").notNull(),
+  startsOn: date("startsOn", { mode: "string" }).notNull(),
+  endsOn: date("endsOn", { mode: "string" }),
+  workerClassification: mysqlEnum("workerClassification", WORKER_CLASSIFICATIONS).notNull(),
+  classificationSource: mysqlEnum("classificationSource", ["organization_worker", "legacy_mapped"]).notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  endedByUserId: int("endedByUserId"),
+  endedAt: timestamp("endedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CompensationAgreementRow = typeof compensationAgreements.$inferSelect;
+
+export const COMPENSATION_BASES = ["hourly", "salary", "day_rate", "shift_rate", "load_rate", "trip_rate", "mileage_rate", "percentage", "job_rate", "piece_rate", "mixed"] as const;
+
+/**
+ * The unit of approval and of history. Rules are frozen at proposal (`rulesJson`, `rulesHash`); approval never
+ * edits them. Window: [effectiveFrom, effectiveUntil) by calendar date, NULL end = open.
+ */
+export const compensationAgreementVersions = mysqlTable("compensationAgreementVersions", {
+  id: int("id").autoincrement().primaryKey(),
+  versionRef: varchar("versionRef", { length: 64 }).notNull().unique(),
+  agreementId: int("agreementId").notNull(),
+  financialEntityId: int("financialEntityId").notNull(),
+  version: int("version").notNull(),
+  effectiveFrom: date("effectiveFrom", { mode: "string" }).notNull(),
+  effectiveUntil: date("effectiveUntil", { mode: "string" }),
+  basis: mysqlEnum("basis", COMPENSATION_BASES).notNull(),
+  currency: varchar("currency", { length: 3 }).default("CAD").notNull(),
+  rulesHash: varchar("rulesHash", { length: 64 }).notNull(),
+  rulesJson: json("rulesJson").notNull(),
+  status: mysqlEnum("status", ["proposed", "approved", "rejected", "superseded"]).default("proposed").notNull(),
+  proposedByUserId: int("proposedByUserId").notNull(),
+  proposedAt: timestamp("proposedAt").notNull(),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  rejectedByUserId: int("rejectedByUserId"),
+  rejectedAt: timestamp("rejectedAt"),
+  rejectionReason: varchar("rejectionReason", { length: 400 }),
+  approvalRef: varchar("approvalRef", { length: 40 }),
+  supersedesVersionId: int("supersedesVersionId"),
+  supersededByVersionId: int("supersededByVersionId"),
+  notes: varchar("notes", { length: 500 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CompensationAgreementVersionRow = typeof compensationAgreementVersions.$inferSelect;
+
+export const RULE_CALCULATIONS = ["hourly", "quantity_times_rate", "percentage", "flat", "per_period_salary", "formula"] as const;
+export const RULE_UNITS = ["hour", "day", "shift", "km", "load", "trip", "tonne", "m3", "percent", "each", "period"] as const;
+
+/** One rule per earning code inside a version. Rates in thousandths; percentages in thousandths of a percent. */
+export const compensationEarningRules = mysqlTable("compensationEarningRules", {
+  id: int("id").autoincrement().primaryKey(),
+  ruleRef: varchar("ruleRef", { length: 64 }).notNull().unique(),
+  versionId: int("versionId").notNull(),
+  earningCodeId: int("earningCodeId").notNull(),
+  earningCode: varchar("earningCode", { length: 40 }).notNull(),
+  calculation: mysqlEnum("calculation", RULE_CALCULATIONS).notNull(),
+  unit: mysqlEnum("unit", RULE_UNITS).notNull(),
+  rateMillis: int("rateMillis"),
+  percentMillis: int("percentMillis"),
+  overtimeRuleJson: json("overtimeRuleJson"),
+  eligibleRevenueBasisJson: json("eligibleRevenueBasisJson"),
+  minimumMeasurementAuthority: varchar("minimumMeasurementAuthority", { length: 60 }),
+  requiresJob: boolean("requiresJob").default(false).notNull(),
+  requiresUnit: boolean("requiresUnit").default(false).notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CompensationEarningRuleRow = typeof compensationEarningRules.$inferSelect;
+
+/* ---- 0227: Payroll P2 — pay schedules ---- */
+
+export const PAY_FREQUENCIES = ["weekly", "biweekly", "semi_monthly", "monthly", "custom"] as const;
+
+/** A book's payroll calendar; periods are generated from it on calendar dates (see 0227 for the rules). */
+export const paySchedules = mysqlTable("paySchedules", {
+  id: int("id").autoincrement().primaryKey(),
+  scheduleRef: varchar("scheduleRef", { length: 40 }).notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  name: varchar("name", { length: 120 }).notNull(),
+  frequency: mysqlEnum("frequency", PAY_FREQUENCIES).notNull(),
+  anchorDate: date("anchorDate", { mode: "string" }).notNull(),
+  periodLengthDays: int("periodLengthDays"),
+  paymentLagDays: int("paymentLagDays").default(0).notNull(),
+  cutoffLagDays: int("cutoffLagDays").default(0).notNull(),
+  timezone: varchar("timezone", { length: 64 }).notNull(),
+  status: mysqlEnum("status", ["active", "retired"]).default("active").notNull(),
+  createdByUserId: int("createdByUserId").notNull(),
+  retiredByUserId: int("retiredByUserId"),
+  retiredAt: timestamp("retiredAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type PayScheduleRow = typeof paySchedules.$inferSelect;

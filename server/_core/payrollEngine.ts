@@ -392,3 +392,73 @@ export function eligibleRevenueFor(basis: RevenueBasis): EligibleRevenue {
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+/* ------------------------------------------------------------------ */
+/* P0 — collection and separation of duties                            */
+/* ------------------------------------------------------------------ */
+
+/** The states in which a run may still take on lines. Everything after `review` is closed to collection. */
+export function payRunMayCollect(state: PayRunState): boolean {
+  return state === "draft" || state === "collecting";
+}
+
+export type CollectibleEarning = {
+  id: number;
+  status: string;
+  /** The integer shadow is authoritative (B22.3); a null shadow is not money. */
+  calculatedAmountCents: number | null;
+  /** The book of the profile that earned it, never of the caller. */
+  financialEntityId: number;
+  payPeriodId: number;
+  /** True when any pay run already carries a line for this event. */
+  alreadyCollected: boolean;
+};
+
+export type CollectionDecision = {
+  collect: CollectibleEarning[];
+  skipped: Array<{ id: number; reason: string }>;
+};
+
+/**
+ * Decide which earning events a run may collect. Only `approved` events, only in the run's
+ * own book and period, only with an integer amount, and only once. A `pending` or `held`
+ * event is a candidate, not pay; an HOS record, a dispatch booking or a field ticket never
+ * reaches this function at all — they are not earning events until a person proposes one.
+ */
+export function selectCollectible(args: {
+  run: { financialEntityId: number; payPeriodId: number };
+  events: readonly CollectibleEarning[];
+}): CollectionDecision {
+  const collect: CollectibleEarning[] = [];
+  const skipped: Array<{ id: number; reason: string }> = [];
+  for (const e of args.events) {
+    if (e.financialEntityId !== args.run.financialEntityId) { skipped.push({ id: e.id, reason: "outside the run's book" }); continue; }
+    if (e.payPeriodId !== args.run.payPeriodId) { skipped.push({ id: e.id, reason: "outside the run's period" }); continue; }
+    if (e.status !== "approved") { skipped.push({ id: e.id, reason: `status is ${e.status}, not approved` }); continue; }
+    if (e.calculatedAmountCents == null) { skipped.push({ id: e.id, reason: "no integer amount" }); continue; }
+    if (e.alreadyCollected) { skipped.push({ id: e.id, reason: "already collected by a pay run" }); continue; }
+    collect.push(e);
+  }
+  return { collect, skipped };
+}
+
+export type DutySeparation = { allowed: boolean; reason?: string };
+
+/**
+ * Creator ≠ approver, on the record rather than on the role. Role separation (`payroll.run`
+ * vs `payroll.approve`) is necessary and not sufficient: one account can hold both. An act
+ * whose originator cannot be established is refused as well — "unknown" is not "someone else".
+ */
+export function separationOfDuties(args: {
+  originatorUserId: number | null | undefined;
+  actorUserId: number;
+  act: string;
+}): DutySeparation {
+  if (args.originatorUserId == null) {
+    return { allowed: false, reason: `Cannot ${args.act}: the originator of this record is not on the trail, so separation of duties cannot be established` };
+  }
+  if (args.originatorUserId === args.actorUserId) {
+    return { allowed: false, reason: `Cannot ${args.act}: you originated this record, and the person who creates a payroll record may not approve it` };
+  }
+  return { allowed: true };
+}

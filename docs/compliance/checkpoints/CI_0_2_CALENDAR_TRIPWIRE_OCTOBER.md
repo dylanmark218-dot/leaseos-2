@@ -22,7 +22,8 @@ them to pass under every one. Both clocks move together:
 - **JavaScript.** `scripts/clock-sweep/fakeclock.setup.ts` fakes `Date` from module load onward.
   The faked clock *advances* in 1 ms steps rather than freezing. A frozen clock, or one that
   ticks in vitest's default 20 ms steps, makes two writes share a timestamp they never share in
-  production, and the sweep then reports that instead of the date (see Finding 3).
+  production, and the sweep then reports that instead of the date (see Finding 3, a test double's
+  artifact).
 - **Database.** Every connection's `NOW()` is pinned to the same offset through MariaDB
   `init_connect`. That only runs for non-SUPER accounts, so the sweep connects as a dedicated
   account with rights on the test database alone. A JavaScript-only sweep would miss a fixture
@@ -84,15 +85,15 @@ through **2026-12-09**. On 2026-12-10 the year-end group starts:
    window, so the passport reads REVIEW instead of READY from 2028-03-22. The tripwire only fails
    21 days ahead. A medical report with the same expiry flips eligibility from "unknown" to "no"
    on the 21st. **Fix (test only):** both expiries are now + 2 years.
-3. **Production, NOT fixed here (owner decision):** `fieldRoute.evidence.upload` stores bytes at
-   `${userId}/evidence/${Date.now()}-${fileName}` (`server/routers.ts:558`). If the same user
-   uploads two files with the same name in the same millisecond, the second overwrites the
-   first's bytes under the same key. The first evidence record's stored content then no longer
-   matches what it was. The sweep exposed this: fieldDevice's lifecycle test (uploads named
-   `e.bin` in quick succession) fails under a 20 ms clock and passes under a 1 ms one. That is
-   rare in production with a real millisecond clock, but an offline device draining a queue is
-   exactly the case that makes it likely. A fix would add a random or sequence component to the
-   key. It is an evidence-integrity defect and belongs in its own checkpoint.
+3. **Corrected (CI-0.2a): not a production defect.** This finding originally reported that
+   `fieldRoute.evidence.upload` could overwrite one upload with another when the same user uploaded
+   two same-named files in one millisecond, because the key is
+   `${userId}/evidence/${Date.now()}-${fileName}` (`server/routers.ts`). That was wrong. The real
+   `storagePut` passes every key through `appendHashSuffix` (`server/storage.ts`), which adds a
+   random 8-hex suffix, so two such uploads get different keys. The collision the sweep exposed
+   belonged to `fieldDevice.test.ts`'s in-memory storage double, which keyed objects by the raw key
+   without the suffix. CI-0.2a gives the double a unique suffix as production does. The suite now
+   passes under a 20 ms clock, which fails it with the old double.
 4. **Housekeeping.** An earlier capitalAssets review comment (from `c2d0005`) had drifted above
    the `auditPackage` entry in a merge. It was moved, unchanged, next to the capitalAssets entry.
 
