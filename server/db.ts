@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import type { MySqlColumn } from "drizzle-orm/mysql-core";
 import { SINGLE_TENANT_ID, resolveActingScope } from "./_core/actingScope";
+import type { DbOrTx } from "./_core/dbTypes";
 import type { OperatorResolution } from "./_core/operatorIdentity";
 import { operatorIdFromRecord } from "./_core/operatorIdentity";
 import { drizzle } from "drizzle-orm/mysql2";
@@ -804,8 +805,9 @@ export async function operatorInScope(operatorId: number, scope: TenantScope): P
  * `operators.userId` is not unique, so two records naming the same person is `ambiguous` — a
  * refusal, never the first row. Fetches two rows at most, which is all that question needs.
  */
-export async function operatorForUserInScope(userId: number, scope: TenantScope): Promise<OperatorResolution> {
-  const db = await getDb();
+export async function operatorForUserInScope(userId: number, scope: TenantScope, d?: DbOrTx): Promise<OperatorResolution> {
+  // `d`: a caller's transaction, so the read sees what that transaction has claimed or written.
+  const db = d ?? await getDb();
   if (!db) throw new Error("Database unavailable");
   const rows = await db.select({ id: operators.id }).from(operators)
     .where(and(eq(operators.userId, userId), ownershipScopeWhere("operator", operators.id, scope))).limit(2);

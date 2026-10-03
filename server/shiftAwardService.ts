@@ -28,8 +28,8 @@
  */
 import { TRPCError } from "@trpc/server";
 import { and, eq, inArray } from "drizzle-orm";
-import { getDb, jobInScope, listActiveUserRoleNames, operatorInScope } from "./db";
-import { dispatchEligibilityChecks, dispatchPostings, dispatchRoles, operators, shiftOffers, shiftPosts } from "../drizzle/schema";
+import { getDb, jobInScope, listActiveUserRoleNames, operatorForUserInScope } from "./db";
+import { dispatchEligibilityChecks, dispatchPostings, dispatchRoles, shiftOffers, shiftPosts } from "../drizzle/schema";
 import type { ActingScope } from "./_core/actingScope";
 import type { Tx } from "./_core/dbTypes";
 import { assessEligibilityValidity, type StoredEligibilityCheck } from "./_core/dispatchAward";
@@ -86,8 +86,11 @@ export async function awardPost(input: ShiftAwardInput): Promise<ShiftAwardResul
   const posting = role ? (await db.select().from(dispatchPostings).where(eq(dispatchPostings.id, role.postingId)).limit(1))[0] : undefined;
   if (!role || !posting || posting.id !== post.dispatchPostingId || !(await jobInScope(posting.jobId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: `Role ${post.dispatchRoleId} not found` });
 
-  const op = (await db.select().from(operators).where(eq(operators.userId, input.userId)).limit(1))[0];
-  if (!op || !(await operatorInScope(op.id, scope))) return refuse("no_operator_record", [`No operator record is linked to user ${input.userId}; a person with no operator record cannot be bound to a slot`]);
+  // The person's own record in this organization: another organization's is not theirs here, and two is a refusal, never the first row.
+  const mine = await operatorForUserInScope(input.userId, scope);
+  if (mine.kind === "none") return refuse("no_operator_record", [`No operator record is linked to user ${input.userId}; a person with no operator record cannot be bound to a slot`]);
+  if (mine.kind === "ambiguous") return refuse("no_operator_record", [`More than one operator record names user ${input.userId} in this organization; resolve them before binding a slot`]);
+  const op = { id: mine.operatorId };
 
   const check = (await db.select().from(dispatchEligibilityChecks).where(eq(dispatchEligibilityChecks.id, input.checkId)).limit(1))[0];
   if (!check || !checkInScope(check, scope)) throw new TRPCError({ code: "NOT_FOUND", message: "Eligibility check not found" });

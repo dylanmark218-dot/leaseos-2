@@ -645,7 +645,7 @@ d("F1.3 — the requirement registry is organization-scoped: no organization cha
     sourceUrl: "https://www.alberta.ca/fixture-not-a-real-page", authorityType: "law", effectiveFrom: new Date("2026-01-01T00:00:00Z"), ...extra,
   } as never) as Promise<{ requirementKey: string; version: number }>;
   const approval = (key: string, version: number) => ({ requirementKey: key, version, target: "CITATION_VERIFIED" as const, decision: "approve" as const, reason: "Checked against the cited section" });
-  let orgA: string, orgB: string, ctlA: number, legalA: number, govA: number, ctlB: number, legalB: number, mgrB: number, dispA: number, dispB: number, unaffiliated: number, key: string, opA: number, opB: number, entA: number, officeA: number;
+  let orgA: string, orgB: string, ctlA: number, legalA: number, govA: number, ctlB: number, legalB: number, mgrB: number, dispA: number, dispB: number, unaffiliated: number, key: string, opA: number, opB: number, entA: number, officeA: number, reviewerA: number;
   let revA: { version: number };
   // A jurisdiction of its own: an unverified proposal makes every passport it applies to UNKNOWN, so a shared
   // one ("CA-AB") would leak into other suites' passports (the convention requirementRegistry.db.test.ts uses).
@@ -653,7 +653,7 @@ d("F1.3 — the requirement registry is organization-scoped: no organization cha
 
   beforeAll(async () => {
     orgA = await org(); orgB = await org();
-    ctlA = await member(orgA, ["controller"]); legalA = await member(orgA, ["legal"]); govA = await member(orgA, ["management"]); officeA = await member(orgA, ["office", "safety", "hr"]); dispA = await member(orgA, ["dispatcher"]);
+    ctlA = await member(orgA, ["controller"]); legalA = await member(orgA, ["legal"]); govA = await member(orgA, ["management"]); officeA = await member(orgA, ["office", "safety", "hr"]); reviewerA = await member(orgA, ["office", "safety", "hr"]); dispA = await member(orgA, ["dispatcher"]);
     ctlB = await member(orgB, ["controller"]); legalB = await member(orgB, ["legal"]); mgrB = await member(orgB, ["management"]); dispB = await member(orgB, ["dispatcher"]);
     unaffiliated = await member(null, ["controller"]);
     key = `f13.req.${rnd().toLowerCase()}`;
@@ -714,7 +714,8 @@ d("F1.3 — the requirement registry is organization-scoped: no organization cha
     const shared = await sharedRows();
     const ev = Number((await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, capturedAt, capturedBy) VALUES ('Licence', 'compliance', NOW(), ?)", [officeA]))[0].insertId);
     const cred = await callerFor(officeA).compliance.credentialRecord({ ownerType: "operator", ownerId: opA, docType: "driver_licence", requirementKey: key, title: "Class 1 licence", evidenceRecordId: ev, expiresAt: new Date(Date.now() + 400 * 86_400_000) });   // #52 ruling B: a verified licence with no expiry is incomplete, never satisfied
-    await callerFor(officeA).compliance.credentialVerify({ credentialId: cred.credentialId, outcome: "verified" });
+    // Main (#135): whoever recorded a credential may not verify it, so a second reviewer in A does.
+    await callerFor(reviewerA).compliance.credentialVerify({ credentialId: cred.credentialId, outcome: "verified" });
     await callerFor(officeA).compliance.consentRecord({ subjectUserId: dispA, consentType: "driver_abstract", purpose: "annual abstract", signedAt: new Date("2026-01-01T00:00:00Z") });
     await callerFor(officeA).compliance.programPublish({ programKey: `P-${rnd()}`, title: "Safety manual", programType: "safety", financialEntityId: entA, effectiveFrom: new Date("2026-01-01T00:00:00Z") });
     await callerFor(officeA).compliance.profileReviewRecord({ financialEntityId: entA, jurisdiction: "CA-AB", profileObtainedAt: new Date("2026-01-01T00:00:00Z"), inspectionsOnProfile: 0, convictionsOnProfile: 0, collisionsOnProfile: 0, knownInspections: 0, knownConvictions: 0, knownCollisions: 0 });
