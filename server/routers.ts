@@ -120,6 +120,7 @@ import { commercialRouter, portalAdminRouter } from "./commercialRouter";
 import { commercialSetupRouter } from "./commercialSetupRouter";
 import { customerCommercialRouter } from "./customerCommercialRouter";
 import { invoicingRouter } from "./invoicingRouter";
+import { billingRouter } from "./billingRouter";
 import { geoRouter } from "./geoRouter";
 import { commsRouter } from "./commsRouter";
 import { enforcementRouter } from "./enforcementRouter";
@@ -410,6 +411,8 @@ export const appRouter = router({
   commercialSetup: commercialSetupRouter,
   customerCommercial: customerCommercialRouter,
   invoicing: invoicingRouter,
+  // v23.32 — Billing, Invoicing & AR: the billing workspace, billing invoices and receivables (0233).
+  billing: billingRouter,
   geo: geoRouter,
   closeout: closeoutRouter,
   // SA1 — Sign & Attest: the signing foundation (docs/sign-attest/SA1_OWNER_RULING.md).

@@ -25,6 +25,10 @@ import { PeopleAccessView, type PeopleAccessViewProps } from "../people/PeopleAc
 import { CustomersView, type CustomerProfile, type CustomersViewProps } from "../pages/CustomersView";
 import { ContractView, type ContractDetail, type ContractViewProps } from "../pages/ContractView";
 import { RateSheetView, type RateSheetDetail, type RateSheetViewProps } from "../pages/RateSheetView";
+import { BillingDashboardView, type BillingDashboardViewProps, type Dashboard } from "../pages/BillingDashboardView";
+import { BillingJobView, type BillingJobViewProps, type Workspace } from "../pages/BillingJobView";
+import { InvoiceView, type InvoiceDetail, type InvoiceViewProps } from "../pages/InvoiceView";
+import { ReceivablesView, type Receivables, type ReceivablesViewProps } from "../pages/ReceivablesView";
 import { FileManagerView } from "../records/FileManagerView";
 import { counts as fileCounts, detail as fileDetail, fileManagerProps } from "../test/fileManagerFixtures";
 import { BoardPanelView, type BoardPanelViewProps } from "../portal/panels/BoardPanelView";
@@ -238,6 +242,48 @@ const a11ySheet = (o: Partial<RateSheetDetail> = {}): RateSheetDetail => ({
 const withheld = (): RateSheetDetail => { const s = a11ySheet({ confidential: false }); return { ...s, versions: s.versions.map(v => ({ ...v, lines: v.lines.map(({ rateMillis: _r, flatCents: _f, basisPoints: _b, multiplierMillis: _m, minimumQuantityMillis: _q, minimumChargeCents: _c, billingIncrementMillis: _i, roundingMode: _o, currency: _cu, ...rest }) => rest) })) }; };
 const sheetProps = (o: Partial<RateSheetViewProps> = {}): RateSheetViewProps => ({ offline: false, sheet: { kind: "loaded", data: a11ySheet() }, selectedVersion: null, onSelectVersion: () => {}, canPropose: true, canApprove: true, busy: false, onVersionCreate: () => {}, onLineAdd: () => {}, onLineRemove: () => {}, onSubmit: () => {}, onDecide: () => {}, onOpenCustomer: () => {}, onOpenContract: () => {}, onOpenJob: () => {}, ...o });
 
+// v23.32 — billing, invoicing and receivables, in the states a person meets them.
+const a11yDashboard = (): Dashboard => ({ asOf: "2026-10-01", counts: { needs_attention: 1, ready: 1, draft: 1, awaiting_approval: 0, issued: 1, overdue: 1, disputed: 0, paid: 0 }, buckets: {
+  needs_attention: [{ jobId: 7, jobCode: "JOB-7", customer: "Bighorn Energy", state: "awaiting_signatures", holdActive: true, blockers: [{ code: "signature_missing", message: "Field ticket FT-1: Ticket is not signed" }], attention: 1, updatedAt: "2026-09-30" }],
+  ready: [{ jobId: 8, jobCode: "JOB-8", customer: "Bighorn Energy", state: "ready", holdActive: false, blockers: [], attention: 0, updatedAt: "2026-09-30" }],
+  draft: [{ invoiceNumber: "INV-2026-000004", origin: "billing_charges", status: "draft", customer: "Bighorn Energy", currency: "CAD", totalCents: 101_750, issuedAt: null, dueAt: null, createdAt: "2026-09-30", receivable: { outstandingCents: 101_750, arStatus: "open", daysOverdue: 0 } }],
+  awaiting_approval: [], issued: [{ invoiceNumber: "INV-2026-000001", origin: "field_ticket", status: "sent", customer: "Acme", currency: "CAD", totalCents: 50_000, issuedAt: "2026-09-01", dueAt: "2026-10-31", createdAt: "2026-09-01", receivable: { outstandingCents: 20_000, arStatus: "partially_paid", daysOverdue: 0 } }],
+  overdue: [{ invoiceNumber: "INV-2026-000002", origin: "billing_charges", status: "sent", customer: "Acme", currency: "CAD", totalCents: 74_000, issuedAt: "2026-08-01", dueAt: "2026-08-31", createdAt: "2026-08-01", receivable: { outstandingCents: 74_000, arStatus: "overdue", daysOverdue: 31 } }], disputed: [], paid: [],
+} });
+const dashboardProps = (o: Partial<BillingDashboardViewProps> = {}): BillingDashboardViewProps => ({ offline: false, dashboard: { kind: "loaded", data: a11yDashboard() }, bucket: "needs_attention", onBucket: () => {}, filter: { q: "", accountRef: "" }, onFilter: () => {}, onOpenJob: () => {}, onOpenInvoice: () => {}, onOpenReceivables: () => {}, ...o });
+const a11yWorkspace = (o: Partial<Workspace> = {}): Workspace => ({
+  job: { id: 7, jobCode: "JOB-7", status: "complete", customer: "Bighorn Energy", location: "LSD 4-12" },
+  workspace: { workspaceRef: "BWS-1", state: "approved_for_invoicing", rowVersion: 4, holdActive: false, holdReason: null, reviewSubmittedByUserId: 11, reviewSubmittedAt: "2026-09-30", reviewDecidedByUserId: 12, reviewNote: "checked" },
+  readiness: { ready: true, blockers: [], warnings: [{ code: "credit_hold", severity: "warning", message: "Bighorn is on hold — this invoice may be issued" }], suggestedState: "ready", billableCents: 120_250, remainingCents: 120_250 },
+  commercial: { snapshotRef: "JCS-1", customer: "Bighorn Energy", billTo: "Bighorn Energy", contract: "MSA-1", rateSheetVersion: "RSV-1", currency: "CAD", paymentTermsDays: 30, purchaseOrder: "4500123" },
+  charges: [
+    { chargeRef: "CHG-1", status: "ready", sourceKind: "field_ticket_line", sourceRef: "FT-1#1", serviceCode: "hydrovac_hour", lineKind: "hourly_equipment", description: "Hydrovac excavation 5.5 h", quantityMillis: 5_500, unit: "hour", measurementSource: "clock", definitionRef: "RD-1", definitionVersion: 1, scopeLevel: "customer_rate_card", pricingMethod: "per_unit", rateMillis: 185_000, billableQuantityMillis: 5_500, pricedAmountCents: 101_750, amountCents: 101_750, currency: "CAD", pricingOutcome: "priced", formula: "billableQuantity(5.5 hour) × rate($185.000/hour)", reasons: ["Priced against snapshot JCS-1"], holdReason: null, billedQuantityMillis: 0, billedAmountCents: 0, remainingQuantityMillis: 5_500, remainingAmountCents: 101_750, overrideStatus: "none", overrideAmountCents: null, overrideReason: null, commercialSnapshotRef: "JCS-1", rateSheetVersionRef: "RSV-1", contractRef: "CON-1" },
+    { chargeRef: "CHG-2", status: "held", sourceKind: "field_ticket_line", sourceRef: "FT-1#2", serviceCode: "steam_hour", lineKind: null, description: "Steam 2 h", quantityMillis: 2_000, unit: "hour", measurementSource: "clock", definitionRef: null, definitionVersion: null, scopeLevel: null, pricingMethod: null, rateMillis: null, billableQuantityMillis: null, pricedAmountCents: null, amountCents: null, currency: "CAD", pricingOutcome: "unknown_rate", formula: "none", reasons: ["No approved definition for steam_hour"], holdReason: "Pricing unknown rate", billedQuantityMillis: 0, billedAmountCents: 0, remainingQuantityMillis: 0, remainingAmountCents: 0, overrideStatus: "pending", overrideAmountCents: 18_500, overrideReason: "agreed by email", commercialSnapshotRef: "JCS-1", rateSheetVersionRef: "RSV-1", contractRef: "CON-1" },
+  ],
+  invoices: [{ invoiceNumber: "INV-2026-000004", status: "draft", totalCents: 101_750, currency: "CAD", createdAt: "2026-09-30" }],
+  history: [{ id: 1, eventType: "review_approved", fromStatus: "under_review", toStatus: "approved_for_invoicing", reason: "checked", actorUserId: 12, actorRole: "management", occurredAt: "2026-09-30" }],
+  ...o,
+});
+const jobProps = (o: Partial<BillingJobViewProps> = {}): BillingJobViewProps => ({ offline: false, workspace: { kind: "loaded", data: a11yWorkspace() }, busy: false, can: { prepare: true, review: true, approve: true, override: true, approveOverride: true, hold: true, draft: true }, onPrepare: () => {}, onRecalculate: () => {}, onSubmitReview: () => {}, onDecideReview: () => {}, onHold: () => {}, onOverrideRequest: () => {}, onOverrideDecide: () => {}, onManualDecide: () => {}, onDraft: () => {}, onOpenInvoice: () => {}, ...o });
+const a11yInvoice = (status = "sent"): InvoiceDetail => ({
+  invoice: { invoiceNumber: "INV-2026-000004", origin: "billing_charges", status, rowVersion: 3, customer: "Bighorn Energy", currency: "CAD", subtotalCents: 101_750, taxCents: 5_088, totalCents: 106_838, taxCode: "GST-CA-AB", taxRateBps: 500, taxJurisdiction: "CA-AB", purchaseOrder: "4500123", afeNumber: null, paymentTermsDays: 30, issuedAt: "2026-09-30", dueAt: "2026-10-30", submittedByUserId: 11, approvedByUserId: 12, voidReason: null },
+  receivable: { originalCents: 106_838, paidCents: 50_000, creditedCents: 9_250, adjustedCents: 2_500, outstandingCents: 50_088, daysOverdue: 0, arStatus: "partially_paid", bucket: "current" },
+  lines: [{ lineNo: 1, description: "Hydrovac excavation 5.5 h", quantityMillis: 5_500, unit: "hour", rateMillis: 185_000, amountCents: 101_750, taxCode: "GST-CA-AB", taxRateBps: 500, taxCents: 5_088, released: false, provenance: { chargeRef: "CHG-1", commercialSnapshotRef: "JCS-1" } }],
+  jobs: [{ jobId: 7, jobCode: "JOB-7" }],
+  allocations: [{ allocationRef: "ALC-1", amountCents: 50_000, allocatedAt: "2026-10-01", paymentRef: "PAY-1", method: "eft", reversed: false, reversesAllocationId: null, reason: null }],
+  credits: [{ creditRef: "CR-2026-000001", amountCents: 9_250, status: "approved", reason: "Half an hour of standby", requestedByUserId: 11 }],
+  adjustments: [{ adjustmentRef: "ADJ-1", amountCents: 2_500, status: "requested", reasonCode: "late_fee", reason: "Per terms", requestedByUserId: 11 }],
+  disputes: [{ caseNumber: "DSC-1", status: "raised", disputedAmountCents: 18_500, reasonStated: "One hour contested", invoiceLineRef: "INV-2026-000004#1", raisedAt: "2026-10-01" }],
+  snapshot: { payloadHash: "a".repeat(64), capturedAt: "2026-09-30" },
+  supportingDocuments: { fieldTickets: [{ ticketNumber: "FT-1", status: "closed", signatureStatus: "accepted" }], ticketDocuments: [], disposalTickets: [], commercialSnapshots: [{ snapshotRef: "JCS-1", payloadHash: "b".repeat(64) }] },
+  history: [], export: { status: "failed", externalId: null, lastError: "QBO timeout", attempts: 1 },
+});
+const invoiceProps = (o: Partial<InvoiceViewProps> = {}): InvoiceViewProps => ({ offline: false, invoice: { kind: "loaded", data: a11yInvoice() }, busy: false, onAction: () => {}, onOpenJob: () => {}, ...o });
+const a11yReceivables = (): Receivables => ({ asOf: "2026-10-01", totals: { current: 50_088, d1_30: 74_000, d31_60: 0, d61_90: 0, d90_plus: 0, disputed: 0, total: 124_088 }, unappliedCents: 48_250,
+  invoices: [{ invoiceNumber: "INV-2026-000002", customer: "Acme", currency: "CAD", totalCents: 74_000, dueAt: "2026-09-01", status: "sent", receivable: { outstandingCents: 74_000, daysOverdue: 30, arStatus: "overdue", bucket: "d1_30" } }],
+  unapplied: [{ paymentRef: "PAY-1", customer: "Bighorn Energy", receivedAt: "2026-10-01", amountCents: 150_000, currency: "CAD", method: "eft", reference: "EFT 7781", unappliedCents: 48_250 }] });
+const receivablesProps = (o: Partial<ReceivablesViewProps> = {}): ReceivablesViewProps => ({ offline: false, receivables: { kind: "loaded", data: a11yReceivables() }, balance: { kind: "loaded", data: { account: { accountRef: "CUST-1", name: "Bighorn Energy", status: "on_hold", currency: "CAD", paymentTermsDays: 30 }, outstandingCents: 124_088, overdueCents: 74_000, unappliedCents: 48_250, netOwingCents: 75_838, disputes: [], recentPayments: [{ paymentRef: "PAY-1", receivedAt: "2026-10-01", amountCents: 150_000, currency: "CAD", method: "eft", status: "partially_applied" }] } }, busy: false, can: { record: true, apply: true }, onRecord: () => {}, onAllocate: () => {}, onBalance: () => {}, onOpenInvoice: () => {}, ...o });
+
 const surfaces = [
   { name: "customers — overview", render: () => render(<CustomersView {...customers()} />) },
   { name: "customers — contacts, with the add form", render: () => render(<CustomersView {...customers({ tab: "contacts" })} />) },
@@ -258,6 +304,18 @@ const surfaces = [
   { name: "rate sheet — the approved version, frozen by a job", render: () => render(<RateSheetView {...sheetProps({ selectedVersion: "RSV-1" })} />) },
   { name: "rate sheet — prices withheld", render: () => render(<RateSheetView {...sheetProps({ sheet: { kind: "loaded", data: withheld() }, canPropose: false, canApprove: false })} />) },
   { name: "rate sheet — loading, offline", render: () => render(<RateSheetView {...sheetProps({ offline: true, sheet: { kind: "loading" } })} />) },
+  { name: "billing dashboard — needs attention", render: () => render(<BillingDashboardView {...dashboardProps()} />) },
+  { name: "billing dashboard — overdue", render: () => render(<BillingDashboardView {...dashboardProps({ bucket: "overdue" })} />) },
+  { name: "billing dashboard — refused by the server", render: () => render(<BillingDashboardView {...dashboardProps({ dashboard: { kind: "unauthorized" } })} />) },
+  { name: "billing job — approved, a held charge with a pending override", render: () => render(<BillingJobView {...jobProps()} />) },
+  { name: "billing job — blocked, no basis, read-only", render: () => render(<BillingJobView {...jobProps({ workspace: { kind: "loaded", data: a11yWorkspace({ commercial: null, charges: [], invoices: [], workspace: null, readiness: { ready: false, blockers: [{ code: "commercial_snapshot_missing", severity: "blocker", message: "The job's commercial basis has not been snapshotted" }], warnings: [], suggestedState: "awaiting_commercial", billableCents: 0, remainingCents: 0 } }) }, can: { prepare: false, review: false, approve: false, override: false, approveOverride: false, hold: false, draft: false } })} />) },
+  { name: "billing job — loading, offline", render: () => render(<BillingJobView {...jobProps({ offline: true, workspace: { kind: "loading" } })} />) },
+  { name: "invoice — issued, part paid, credited, adjusted, disputed", render: () => render(<InvoiceView {...invoiceProps()} />) },
+  { name: "invoice — in review", render: () => render(<InvoiceView {...invoiceProps({ invoice: { kind: "loaded", data: a11yInvoice("in_review") } })} />) },
+  { name: "invoice — draft with undetermined tax", render: () => render(<InvoiceView {...invoiceProps({ invoice: { kind: "loaded", data: { ...a11yInvoice("draft"), invoice: { ...a11yInvoice("draft").invoice, taxCode: "UNDETERMINED", taxRateBps: 0 } } } })} />) },
+  { name: "invoice — read failed", render: () => render(<InvoiceView {...invoiceProps({ invoice: { kind: "failed", message: "Invoice INV-9 not found" } })} />) },
+  { name: "receivables — aging, unapplied cash, a balance on hold", render: () => render(<ReceivablesView {...receivablesProps()} />) },
+  { name: "receivables — refused, no forms", render: () => render(<ReceivablesView {...receivablesProps({ receivables: { kind: "unauthorized" }, balance: null, can: { record: false, apply: false } })} />) },
   { name: "disposal finder", render: () => render(<DisposalFinderView {...finder()} />) },
   { name: "dispatch readiness — blocked", render: () => render(<DispatchReadinessView {...readinessPanel(readinessBlocked)} />) },
   { name: "dispatch readiness — query failed", render: () => render(<DispatchReadinessView {...readinessPanel({ kind: "failed", message: "Database unavailable" })} />) },

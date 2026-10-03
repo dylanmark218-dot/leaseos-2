@@ -37,6 +37,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/surfacesRouter.ts` | `ROLE_AUTHORIZED` | **6** |
 | `server/dispatchRouter.ts` | `ROLE_AUTHORIZED` | **13** |
 | `server/customerCommercialRouter.ts` | `ROLE_AUTHORIZED` | **40** |
+| `server/billingRouter.ts` | `ROLE_AUTHORIZED` (v23.32, 0233; every procedure also `moneyScoped` — the strict F1 boundary — and the approvals, reversals, holds and export marks fail closed as sensitive permissions) | **38** |
 | `server/iftaRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/fuelOpsRouter.ts` | `ROLE_AUTHORIZED` | **7** |
 | `server/periodRouter.ts` | `ROLE_AUTHORIZED` | **3** |
@@ -64,7 +65,7 @@ holds the counts; a bare `protectedProcedure` added later fails the build.
 | `server/driverPortfolioRouter.ts` | `PUBLIC` | 1 (`shareRedeem`: one credential behind a 256-bit token, only its hash stored; re-read on every redemption; revocable; at most 7 days) |
 | Anywhere | bare `protectedProcedure` | **0** |
 
-**536 role-authorized procedures across the surfaces listed above.** Zero on bare `protectedProcedure`.
+**574 role-authorized procedures across the surfaces listed above.** Zero on bare `protectedProcedure`.
 The table lists the surfaces reviewed here, not every router; the system-wide count is generated into
 `LEASEOS_CURRENT_STATE.md`. The numbers in this table are written by `node scripts/procedure-inventory.mjs`,
 which reads them from the routers (CP1.5: nine rows had drifted below their routers and the total said 356).

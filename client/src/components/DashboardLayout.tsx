@@ -59,6 +59,8 @@ const menuItems = [
   { icon: CloudOff, label: "Offline vault", path: "/offline-vault" },
   { icon: DollarSign, label: "Billing & unit safety", path: "/billing-safety" },
   { icon: Building2, label: "Customers", path: "/customers" },
+  { icon: DollarSign, label: "Billing", path: "/billing" },
+  { icon: DollarSign, label: "Receivables", path: "/receivables" },
   { icon: Navigation, label: "Route safety", path: "/route-safety" },
   { icon: Factory, label: "Disposal directory", path: "/disposal-directory" },
   { icon: Timer, label: "Trip operations", path: "/trip-operations" },

@@ -267,6 +267,11 @@ export type Permission =
   | "commercial.job.assign" | "commercial.job.snapshot" | "commercial.job.summary" | "commercial.billing.context"
   // v22.9 — an invoice is drafted by the office from a ticket's decisions and finalized by a second permission into a frozen snapshot.
   | "invoicing.draft" | "invoicing.finalize" | "invoicing.read" | "invoicing.render" | "invoicing.send" | "invoicing.void" | "invoicing.dispute.resolve"
+  // v23.32 — Billing, Invoicing & AR: a job's billing is prepared and submitted by one person and approved by another;
+  // a billing invoice is submitted, approved by someone else, then issued; reversals, adjustments and exports are named acts.
+  | "billing.workspace.read" | "billing.prepare" | "billing.review.submit" | "billing.review.approve" | "billing.charge.override" | "billing.charge.override.approve" | "billing.hold"
+  | "invoicing.submit" | "invoicing.approve" | "invoicing.issue"
+  | "ar.allocation.reverse" | "ar.payment.reverse" | "ar.adjustment.request" | "ar.adjustment.decide" | "ar.dispute.manage" | "ar.export.read" | "ar.export.mark"
   // v22.13 — the mapping foundation: importing open geospatial data, reading it, and verifying a coordinate from the imported grid.
   | "geo.import" | "geo.read" | "geo.locationVerifyFromGrid" | "geo.access.propose" | "geo.access.decide" | "geo.access.passage" | "geo.graph.build"
   // v22.15 — structures on a road, and an approved route that knows when it has gone stale.
@@ -1133,6 +1138,15 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "commercial.rates.read",
     "invoicing.draft",
     "invoicing.read",
+    // v23.32 — billing workspace, invoice review/issue and receivables (the office prepares and submits; approval is someone else's).
+    "billing.workspace.read",
+    "billing.prepare",
+    "billing.review.submit",
+    "billing.charge.override",
+    "invoicing.submit",
+    "invoicing.issue",
+    "ar.adjustment.request",
+    "ar.dispute.manage",
     "invoicing.render",
     "invoicing.send",
     "commercial.pricing.decide",
@@ -1424,6 +1438,21 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   "invoicing.void",
   "invoicing.dispute.resolve",
     "invoicing.read",
+    // v23.32 — billing workspace, invoice review/issue and receivables (management approves; never its own submission).
+    "billing.workspace.read",
+    "billing.prepare",
+    "billing.review.submit",
+    "billing.review.approve",
+    "billing.charge.override",
+    "billing.charge.override.approve",
+    "billing.hold",
+    "invoicing.submit",
+    "invoicing.approve",
+    "invoicing.issue",
+    "ar.adjustment.request",
+    "ar.adjustment.decide",
+    "ar.dispute.manage",
+    "ar.export.read",
     "invoicing.render",
     "invoicing.send",
     "commercial.pricing.decide",
@@ -1609,6 +1638,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "commercial.job.summary",
     "commercial.rates.read",
     "invoicing.read",
+    // v23.32 — billing workspace, invoice review/issue and receivables (read only).
+    "billing.workspace.read",
+    "ar.export.read",
     "closeout.read",
     "shop.read",
     "asset.read",
@@ -1684,6 +1716,18 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "commercial.rates.read",
     "invoicing.draft",
     "invoicing.read",
+    // v23.32 — billing workspace, invoice review/issue and receivables (the bookkeeper prepares, applies, reverses and exports).
+    "billing.workspace.read",
+    "billing.prepare",
+    "billing.review.submit",
+    "billing.charge.override",
+    "invoicing.submit",
+    "invoicing.issue",
+    "ar.allocation.reverse",
+    "ar.adjustment.request",
+    "ar.dispute.manage",
+    "ar.export.read",
+    "ar.export.mark",
     "invoicing.render",
     "invoicing.send",
     "commercial.pricing.decide",
@@ -1892,6 +1936,24 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "invoicing.void",
     "invoicing.dispute.resolve",
     "invoicing.read",
+    // v23.32 — billing workspace, invoice review/issue and receivables (the controller holds every authority).
+    "billing.workspace.read",
+    "billing.prepare",
+    "billing.review.submit",
+    "billing.review.approve",
+    "billing.charge.override",
+    "billing.charge.override.approve",
+    "billing.hold",
+    "invoicing.submit",
+    "invoicing.approve",
+    "invoicing.issue",
+    "ar.allocation.reverse",
+    "ar.payment.reverse",
+    "ar.adjustment.request",
+    "ar.adjustment.decide",
+    "ar.dispute.manage",
+    "ar.export.read",
+    "ar.export.mark",
     "invoicing.render",
     "invoicing.send",
     "commercial.pricing.decide",
@@ -2042,11 +2104,20 @@ const COMPENSATION_PERMISSIONS: readonly Permission[] = ["payroll.compensation.r
   // P2 — the payroll calendar and the period machine, denied to the same roles for the same reason.
   "payroll.schedule.read", "payroll.schedule.manage", "payroll.finalize", "payroll.void"];
 
+/**
+ * v23.32 — the billing and receivables authorities this checkpoint adds, denied by name to the field and shop roles:
+ * a driver or a mechanic shares the job, never its invoice, its rate-backed charges or the customer's balance. Deny
+ * beats grant across every role a person holds, so the set is the NEW permissions only (an existing grant is not
+ * silently withdrawn from anyone), and the dispatcher — often also the office in a small company — is not in it.
+ */
+const BILLING_AR_PERMISSIONS: readonly Permission[] = ["billing.workspace.read", "billing.prepare", "billing.review.submit", "billing.review.approve", "billing.charge.override", "billing.charge.override.approve", "billing.hold",
+  "invoicing.submit", "invoicing.approve", "invoicing.issue", "ar.allocation.reverse", "ar.payment.reverse", "ar.adjustment.request", "ar.adjustment.decide", "ar.dispute.manage", "ar.export.read", "ar.export.mark"];
+
 const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
-  mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
-  shop_lead: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...BILLING_AR_PERMISSIONS],
+  shop_lead: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...BILLING_AR_PERMISSIONS],
   dispatcher: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
-  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS, ...BILLING_AR_PERMISSIONS],
   auditor: ["payroll.read", "billing.write", "personnel.write", ...COMPENSATION_PERMISSIONS],
 
   // The banking and tax-identifier reads are held by nobody in this model.
@@ -2109,6 +2180,15 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // fail-closed set. Each creates or changes operational/commercial truth.
   "invoicing.void",
   "invoicing.dispute.resolve",
+  // v23.32 — each approves, reverses or releases money a second person relies on.
+  "billing.review.approve",
+  "billing.charge.override.approve",
+  "billing.hold",
+  "invoicing.approve",
+  "ar.allocation.reverse",
+  "ar.payment.reverse",
+  "ar.adjustment.decide",
+  "ar.export.mark",
   "geo.import",
   "geo.locationVerifyFromGrid",
   "geo.access.decide",
@@ -3317,6 +3397,45 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "invoicing.send": "invoicing.send",
   "invoicing.void": "invoicing.void",
   "invoicing.disputeResolve": "invoicing.dispute.resolve",
+  /* ---- v23.32: Billing, Invoicing & AR — the billing workspace, billing invoices and receivables ---- */
+  "billing.dashboard": "billing.workspace.read",
+  "billing.workspace": "billing.workspace.read",
+  "billing.readiness": "billing.workspace.read",
+  "billing.readinessRefresh": "billing.prepare",
+  "billing.prepare": "billing.prepare",
+  "billing.recalculate": "billing.prepare",
+  "billing.chargeAddManual": "billing.charge.override",
+  "billing.chargeManualDecide": "billing.charge.override.approve",
+  "billing.chargeOverrideRequest": "billing.charge.override",
+  "billing.chargeOverrideDecide": "billing.charge.override.approve",
+  "billing.reviewSubmit": "billing.review.submit",
+  "billing.reviewDecide": "billing.review.approve",
+  "billing.holdSet": "billing.hold",
+  "billing.invoiceDraft": "invoicing.draft",
+  "billing.invoiceRecalculate": "invoicing.draft",
+  "billing.invoiceSubmit": "invoicing.submit",
+  "billing.invoiceReturn": "invoicing.approve",
+  "billing.invoiceApprove": "invoicing.approve",
+  "billing.invoiceIssue": "invoicing.issue",
+  "billing.invoiceVoid": "invoicing.void",
+  "billing.invoiceGet": "invoicing.read",
+  "billing.invoicesList": "invoicing.read",
+  "billing.receivables": "ar.read",
+  "billing.customerBalance": "ar.read",
+  "billing.unappliedPayments": "ar.read",
+  "billing.paymentRecord": "ar.payment.record",
+  "billing.paymentAllocate": "ar.payment.apply",
+  "billing.allocationReverse": "ar.allocation.reverse",
+  "billing.paymentReverse": "ar.payment.reverse",
+  "billing.creditCreate": "ar.credit.request",
+  "billing.creditDecide": "ar.credit.decide",
+  "billing.adjustmentRequest": "ar.adjustment.request",
+  "billing.adjustmentDecide": "ar.adjustment.decide",
+  "billing.disputeOpen": "ar.dispute.manage",
+  "billing.disputeResolve": "invoicing.dispute.resolve",
+  "billing.overdueSweep": "ar.collect",
+  "billing.exportQueue": "ar.export.read",
+  "billing.exportMark": "ar.export.mark",
   /* ---- v22.13: the mapping foundation ---- */
   "geo.atsImportTownship": "geo.import",
   "geo.accessRoadsImport": "geo.import",

@@ -14,6 +14,7 @@ import { z } from "zod";
 import { storageKeyInput } from "./_core/storageKey";
 import { commercialApprovalPolicies, commercialCategoryTypes, commercialNumberingPolicies, commercialRoleTypes, commercialSettings, facilities, jobs, organizationCommercialRoles, organizationRecordLinks, organizations, userRoleAssignments, vendors, disposalTickets, facilityStatements, facilityStatementLines, units, customerAccounts, customerCredits, customerPayments, invoices, paymentAllocations, commercialApprovals, commercialApprovalSignatures, vendorBills, commercialGlAccounts, commercialGlMappings, invoiceLines, contractorPayables, commercialJobChains, commercialDocuments, commercialDocumentLinks, commercialDocumentDeliveries, evidenceRecords, fieldTicketDocuments, retentionPolicies, documentDefinitions } from "../drizzle/schema";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
+import { ledgerSubjectRef } from "./billingNumbers";
 import { financeScopeFor, requireOwnedEntity } from "./_core/entityScope";
 import { approvalDecision, approvalRequirementFor, layerFor, numberingPolicyFor, type ApprovalPolicyRow } from "./_core/commercialPolicy";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
@@ -466,8 +467,11 @@ export const commercialOfficeRouter = router({
     approvalLedger: roleProcedure("commercialOffice.approvalLedger")
       .input(z.object({ subjectType: z.string().min(1).max(40), subjectRef: z.string().min(1).max(64) }))
       .query(async ({ ctx, input }) => {
-        const { db } = await bookFor(ctx.user.id);
-        const row = (await db.select().from(commercialApprovals).where(and(eq(commercialApprovals.subjectType, input.subjectType), eq(commercialApprovals.subjectRef, input.subjectRef))).limit(1))[0];
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        // v23.32 — a credit number is per organization, so its ledger row is keyed `<ref>@<org>` (billingNumbers.ledgerSubjectRef);
+        // the caller names the number as printed. And the row must be the caller's own book's: a ledger is never read across books.
+        const refs = Array.from(new Set([input.subjectRef, ledgerSubjectRef(input.subjectRef, bookOrgRef ?? SINGLE_TENANT_ID)]));
+        const row = (await db.select().from(commercialApprovals).where(and(eq(commercialApprovals.subjectType, input.subjectType), inArray(commercialApprovals.subjectRef, refs), bookOrgRef == null ? isNull(commercialApprovals.bookOrgRef) : eq(commercialApprovals.bookOrgRef, bookOrgRef))).limit(1))[0];
         if (!row) return null;
         const signatures = await db.select().from(commercialApprovalSignatures).where(eq(commercialApprovalSignatures.commercialApprovalId, row.id)).orderBy(commercialApprovalSignatures.sequence);
         return { ...row, requirement: typeof row.requirement === "string" ? JSON.parse(row.requirement) : row.requirement, signatures: signatures.map(x => ({ ...x, rolesAtApproval: jsonArray<string>(x.rolesAtApproval) })) };

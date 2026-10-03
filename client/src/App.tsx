@@ -27,6 +27,10 @@ import CommercialOffice from "./pages/CommercialOffice";
 import Customers from "./pages/Customers";
 import Contract from "./pages/Contract";
 import RateSheet from "./pages/RateSheet";
+import BillingDashboard from "./pages/BillingDashboard";
+import BillingJob from "./pages/BillingJob";
+import Invoice from "./pages/Invoice";
+import Receivables from "./pages/Receivables";
 import CommunicationsPackage from "./pages/CommunicationsPackage";
 import TransmitCheck from "./pages/TransmitCheck";
 import CommunicationsPackageStatus from "./pages/CommunicationsPackageStatus";
@@ -124,6 +128,11 @@ function Router() {
       <Route path="/customers/:accountRef">{(p: { accountRef: string }) => <DashboardRoute><Customers accountRef={p.accountRef} /></DashboardRoute>}</Route>
       <Route path="/contracts/:contractRef">{(p: { contractRef: string }) => <DashboardRoute><Contract contractRef={p.contractRef} /></DashboardRoute>}</Route>
       <Route path="/rate-sheets/:rateSheetRef">{(p: { rateSheetRef: string }) => <DashboardRoute><RateSheet rateSheetRef={p.rateSheetRef} /></DashboardRoute>}</Route>
+      {/* v23.32 — billing, invoicing and receivables */}
+      <Route path="/billing" component={() => <DashboardRoute><BillingDashboard /></DashboardRoute>} />
+      <Route path="/billing/jobs/:jobId">{(p: { jobId: string }) => <DashboardRoute><BillingJob jobId={Number(p.jobId)} /></DashboardRoute>}</Route>
+      <Route path="/invoices/:invoiceNumber">{(p: { invoiceNumber: string }) => <DashboardRoute><Invoice invoiceNumber={decodeURIComponent(p.invoiceNumber)} /></DashboardRoute>}</Route>
+      <Route path="/receivables" component={() => <DashboardRoute><Receivables /></DashboardRoute>} />
       <Route path="/trip-operations" component={() => <Redirect to="/showcase/trips" />} />
       <Route path="/training-academy" component={() => <DashboardRoute><TrainingAcademy /></DashboardRoute>} />
       <Route path="/404" component={NotFound} />

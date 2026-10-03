@@ -73,7 +73,11 @@ describe("the real tree", () => {
     // the first slot free on main and on all 131 remote branches at the scan.
     expect(files).toContain("0228_safety_program_builder.sql");
     expect(files.filter(f => f.startsWith("0182_"))).toEqual([]);
-    expect(headSlot(files)).toBe("0228");
+    // v23.32 Billing, Invoicing & AR took 0233. Drafted as 0228 when that was free everywhere; before commit main
+    // took 0228 (the Safety Program Builder, #99), payroll P3 also holds 0228 and the integration hub holds 0229–0232,
+    // so it moved to 0233, the first slot free on main (9ec123a) and on all 133 remote refs at the scan.
+    expect(files).toContain("0233_billing_invoicing_ar.sql");
+    expect(headSlot(files)).toBe("0233");
   });
 
   it("keeps the reserved slots empty", () => {

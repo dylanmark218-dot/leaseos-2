@@ -35,6 +35,10 @@ const NOT_A_SURFACE: Record<string, string> = {
   "client/src/pages/Contract.tsx": "the contract screen's container: a live tRPC caller that reads one contract and drives its transitions; ContractView is the surface",
   "client/src/pages/RateSheet.tsx": "the rate sheet screen's container: a live tRPC caller that reads one sheet with every version and drives drafting and approval; RateSheetView is the surface",
   "client/src/commercial/shared.tsx": "a vocabulary of small parts (StatusBadge, StateBlock, HistoryList, TabBar) rendered only inside the three commercial views, which are surfaces",
+  "client/src/pages/BillingDashboard.tsx": "the billing dashboard's container: a live tRPC caller for billing.dashboard; BillingDashboardView is the surface, in three states",
+  "client/src/pages/BillingJob.tsx": "one job's billing container: a live tRPC caller that reads the workspace and drives prepare, review, hold, overrides and the draft; BillingJobView is the surface",
+  "client/src/pages/Invoice.tsx": "one invoice's container: a live tRPC caller that reads the invoice and drives its workflow and its receivable corrections; InvoiceView is the surface",
+  "client/src/pages/Receivables.tsx": "the receivables container: a live tRPC caller for aging, unapplied cash, payments, allocations and a customer's balance; ReceivablesView is the surface",
   "client/src/portal/panels/BoardPanel.tsx": "the Board's container: a live tRPC caller that reads conversations and open work and writes through the device's board queue; the panel it renders, BoardPanelView, is a surface in the suite in two states",
 };
 

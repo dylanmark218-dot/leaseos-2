@@ -63,7 +63,7 @@ export async function commercialScope(userId: number, resolve: typeof financeSco
 const inScope = (s: CommercialScope, col: MySqlColumn) => (s.entityIds.length ? inArray(col, s.entityIds) : sql`1 = 0`);
 
 /** The change ledger row, in the caller's transaction. */
-async function audit(tx: DbOrTx, e: { financialEntityId: number; subjectType: (typeof commercialAuditEvents.$inferInsert)["subjectType"]; subjectRef: string; subjectId?: number | null; eventType: string; fromStatus?: string | null; toStatus?: string | null; changes?: Record<string, { from: unknown; to: unknown }> | null; relatedRef?: string | null; jobId?: number | null; reason?: string | null; actor: Actor; at: Date }) {
+export async function audit(tx: DbOrTx, e: { financialEntityId: number; subjectType: (typeof commercialAuditEvents.$inferInsert)["subjectType"]; subjectRef: string; subjectId?: number | null; eventType: string; fromStatus?: string | null; toStatus?: string | null; changes?: Record<string, { from: unknown; to: unknown }> | null; relatedRef?: string | null; jobId?: number | null; reason?: string | null; actor: Actor; at: Date }) {
   await tx.insert(commercialAuditEvents).values({
     eventRef: ref("CAE"), financialEntityId: e.financialEntityId, subjectType: e.subjectType, subjectRef: e.subjectRef, subjectId: e.subjectId ?? null, eventType: e.eventType,
     fromStatus: e.fromStatus ?? null, toStatus: e.toStatus ?? null, changesJson: e.changes && Object.keys(e.changes).length ? JSON.stringify(e.changes) : null,
@@ -71,7 +71,7 @@ async function audit(tx: DbOrTx, e: { financialEntityId: number; subjectType: (t
   });
 }
 /** A domain event on the outbox, in the caller's transaction (the drizzle handle, so it lives or dies with the change). */
-async function emit(tx: DbOrTx, e: { tenantId: string; type: string; entityType: string; entityId: string; actor: Actor; jobId?: number | null; payload: Record<string, unknown>; at: Date }) {
+export async function emit(tx: DbOrTx, e: { tenantId: string; type: string; entityType: string; entityId: string; actor: Actor; jobId?: number | null; payload: Record<string, unknown>; at: Date }) {
   const row = buildOutboxRow({ type: e.type, actor: { userId: String(e.actor.userId), source: "human" }, subject: { entityType: e.entityType, entityId: e.entityId }, tenantId: e.tenantId, jobId: e.jobId != null ? String(e.jobId) : null, payload: e.payload, occurredAt: e.at }, e.at);
   await tx.insert(domainEventOutbox).values({ ...row, actorSource: "human" });
 }

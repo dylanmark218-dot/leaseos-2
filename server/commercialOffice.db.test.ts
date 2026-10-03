@@ -219,7 +219,7 @@ d("P7.4 — receivables through the approval ladder, and by organization", () =>
     const first = await callerFor(mgr1).ar.creditDecide({ creditRef: req.creditRef, decision: "approved" });
     expect(first).toMatchObject({ status: "requested", ledger: { outcome: "awaiting", approvals: 1, required: 2, awaiting: expect.stringContaining("second person") } });
     await expect(callerFor(mgr1).ar.creditDecide({ creditRef: req.creditRef, decision: "approved" })).rejects.toThrow(/already approved/);
-    const [still] = await pool.query<mysql.RowDataPacket[]>("SELECT status FROM customerCredits WHERE creditRef = ?", [req.creditRef]);
+    const [still] = await pool.query<mysql.RowDataPacket[]>("SELECT status FROM customerCredits WHERE creditRef = ? AND financialEntityId = ?", [req.creditRef, entityId]);
     expect(still[0]!.status).toBe("requested");
     const second = await callerFor(mgr2).ar.creditDecide({ creditRef: req.creditRef, decision: "approved" });
     expect(second).toMatchObject({ status: "approved", ledger: { outcome: "satisfied", approvals: 2, required: 2 } });

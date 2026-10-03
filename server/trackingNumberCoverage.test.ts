@@ -36,7 +36,9 @@ describe("canonical tracking numbers come from the sequence", () => {
 
   it("mints each of them through nextTrackingNumber somewhere", () => {
     const all = serverFiles.map(f => readFileSync(f, "utf8")).join("\n");
-    const missing = CANONICAL_PREFIXES.filter(p => !new RegExp(`sequenceType: "${p}"`).test(all));
+    // v23.32 — INV and CR are minted from the ORGANIZATION's series (billingNumbers.mintScopedNumber → numberSeries.mintNumberInTx):
+    // the same row-locked counter, scoped per organization and written to the Document Control ledger.
+    const missing = CANONICAL_PREFIXES.filter(p => !new RegExp(`sequenceType: "${p}"`).test(all) && !new RegExp(`mintScopedNumber\\([^)]*"${p}"`).test(all));
     expect(missing, "a canonical prefix nothing mints from the sequence").toEqual([]);
   });
 

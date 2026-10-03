@@ -23,6 +23,13 @@ import { determine } from "./_core/taxRuleEngine";
 import { fieldTicketSignatureVerdict } from "./_core/fieldTicketSignature";
 import { GST_RATE_RULE_TYPE, GST_RATE_SEEDS } from "./_core/gstSeeds";
 import { loadTaxRules } from "./payrollService";
+import { billableCharges } from "../drizzle/schema";
+import { bindNumber, mintScopedNumber, prepareSeries } from "./billingNumbers";
+
+/** v23.32 — a billing-charges invoice follows billing.* (submit → approve → issue); this path is the field-ticket one. */
+function fieldTicketOrigin(inv: { origin: string; invoiceNumber: string }) {
+  if (inv.origin !== "field_ticket") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Invoice ${inv.invoiceNumber} was drafted from billing charges — it is reviewed, approved, issued and voided through billing.*` });
+}
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 async function db() { const d = await getDb(); if (!d) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" }); return d; }
@@ -67,6 +74,7 @@ export const invoicingRouter = router({
   render: moneyScoped(roleProcedure("invoicing.render")).input(z.object({ invoiceNumber: z.string().min(1).max(64) })).mutation(async ({ ctx, input }) => {
     const d = await db();
     const inv = await invoiceInScope(d, ctx.money, input.invoiceNumber, "No such invoice");
+    fieldTicketOrigin(inv);
     if (inv.status === "draft" || inv.status === "void") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Invoice is ${inv.status} — a document is rendered from a finalized invoice's snapshot` });
     const existing = (await d.select().from(fieldTicketDocuments).where(and(eq(fieldTicketDocuments.invoiceId, inv.id), eq(fieldTicketDocuments.kind, "invoice"))).limit(1))[0];
     if (existing) return { documentRef: existing.documentRef, contentHash: existing.contentHash, byteLength: existing.byteLength, alreadyRendered: true as const };
@@ -88,6 +96,7 @@ export const invoicingRouter = router({
   void: moneyScoped(roleProcedure("invoicing.void")).input(z.object({ invoiceNumber: z.string().min(1).max(64), reason: z.string().min(5).max(400) })).mutation(async ({ ctx, input }) => {
     const d = await db();
     const inv = await invoiceInScope(d, ctx.money, input.invoiceNumber, "No such invoice");
+    fieldTicketOrigin(inv);
     const allocated = (await d.select({ amountCents: paymentAllocations.amountCents }).from(paymentAllocations).where(eq(paymentAllocations.invoiceId, inv.id))).reduce((a, r) => a + r.amountCents, 0);
     const credited = (await d.select({ amountCents: customerCredits.amountCents, status: customerCredits.status }).from(customerCredits).where(eq(customerCredits.invoiceId, inv.id))).filter(c => c.status === "approved").reduce((a, r) => a + r.amountCents, 0);
     const check = voidCheck({ status: inv.status, allocatedCents: allocated, approvedCreditCents: credited });
@@ -96,7 +105,10 @@ export const invoicingRouter = router({
     // refused when that period is not open (soft-closed or closed): the correction is a credit dated in an
     // open period, or a controller reopening the period with a reason — never a silent rewrite.
     await assertPeriodOpen(inv.financialEntityId!, inv.issuedAt ?? inv.createdAt, `Void of invoice ${inv.invoiceNumber}`);
-    await d.update(invoices).set({ status: "void", voidedAt: new Date(), voidedByUserId: ctx.user.id, voidReason: input.reason }).where(eq(invoices.id, inv.id));
+    const voidedAt = new Date();
+    await d.update(invoices).set({ status: "void", voidedAt, voidedByUserId: ctx.user.id, voidReason: input.reason }).where(eq(invoices.id, inv.id));
+    // v23.32 — the lines are released (the row stays): a released ticket line may be drafted again (0233's live-line UNIQUE).
+    await d.update(invoiceLines).set({ releasedAt: voidedAt }).where(eq(invoiceLines.invoiceId, inv.id));
     const lineIds = (await d.select({ fieldTicketLineId: invoiceLines.fieldTicketLineId }).from(invoiceLines).where(eq(invoiceLines.invoiceId, inv.id))).map(l => l.fieldTicketLineId).filter((x): x is number => x != null);
     if (lineIds.length) await d.update(billingBookEntries).set({ billingStatus: "ready", holdReason: `Released: invoice ${inv.invoiceNumber} voided — ${input.reason}`.slice(0, 300) }).where(and(eq(billingBookEntries.billingBookId, inv.billingBookId), inArray(billingBookEntries.fieldTicketLineId, lineIds)));
     await d.update(billingBooks).set({ billingState: "billing_review" }).where(eq(billingBooks.id, inv.billingBookId));
@@ -112,9 +124,15 @@ export const invoicingRouter = router({
     if (!res.permitted) return { resolved: false as const, refusals: res.refusals };
     let creditRef: string | null = null;
     if (res.creditCents > 0) {
-      creditRef = (await nextTrackingNumber(d, { sequenceType: "CR" })).trackingNumber;
       if (inv.financialEntityId == null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The invoice carries no financial entity — assign it before a credit is requested against it" });
-      await d.insert(customerCredits).values({ creditRef, financialEntityId: inv.financialEntityId, customer: inv.customer, customerAccountId: inv.customerAccountId, invoiceId: inv.id, amountCents: res.creditCents, reason: `Dispute ${c.caseNumber}: ${input.narrative}`.slice(0, 400), requestedByUserId: ctx.user.id, status: "requested" });
+      const entityId = inv.financialEntityId;
+      await prepareSeries(d, ctx.money.tenantId, "CR");
+      creditRef = await d.transaction(async tx => {
+        const n = await mintScopedNumber(tx, ctx.money, "CR", { recordType: "customer_credit", actorUserId: ctx.user.id });
+        const ins = await tx.insert(customerCredits).values({ creditRef: n.number, numberScope: n.numberScope, numberAllocationRef: n.allocationRef, source: "dispute", disputeCaseId: c.id, financialEntityId: entityId, customer: inv.customer, customerAccountId: inv.customerAccountId, invoiceId: inv.id, amountCents: res.creditCents, currency: inv.currency, reason: `Dispute ${c.caseNumber}: ${input.narrative}`.slice(0, 400), requestedByUserId: ctx.user.id, status: "requested" });
+        await bindNumber(tx, n.allocationRef, Number(ins[0]?.insertId ?? 0));
+        return n.number;
+      });
     }
     await d.update(disputeCases).set({ status: res.caseStatus!, resolutionNarrative: input.narrative, resolvedAt: new Date(), assignedUserId: ctx.user.id }).where(eq(disputeCases.id, c.id));
     const delivery = inv.viewedAt ? "viewed" : "sent";
@@ -127,6 +145,7 @@ export const invoicingRouter = router({
   send: moneyScoped(roleProcedure("invoicing.send")).input(z.object({ invoiceNumber: z.string().min(1).max(64) })).mutation(async ({ ctx, input }) => {
     const d = await db();
     const inv = await invoiceInScope(d, ctx.money, input.invoiceNumber, "No such invoice");
+    fieldTicketOrigin(inv);
     if (inv.status !== "approved") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Invoice is ${inv.status} — only a finalized, unsent invoice is sent` });
     const doc = (await d.select().from(fieldTicketDocuments).where(and(eq(fieldTicketDocuments.invoiceId, inv.id), eq(fieldTicketDocuments.kind, "invoice"))).limit(1))[0];
     if (!doc) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Render the invoice document before sending" });
@@ -153,6 +172,9 @@ export const invoicingRouter = router({
       const liveByInvoice = new Map(liveInvoices.filter(i => i.status !== "void").map(i => [i.id, i.invoiceNumber]));
       const alreadyInvoiced = new Map<number, string>();
       for (const o of onLines) { const n = liveByInvoice.get(o.invoiceId); if (n && o.fieldTicketLineId != null) alreadyInvoiced.set(o.fieldTicketLineId, n); }
+      // v23.32 — a line that carries a live billing charge is billed through billing.*, never twice through both paths.
+      const charged = x.lines.length ? await d.select({ sourceId: billableCharges.sourceId, chargeRef: billableCharges.chargeRef }).from(billableCharges).where(and(eq(billableCharges.sourceKind, "field_ticket_line"), inArray(billableCharges.sourceId, x.lines.map(l => l.id)), inArray(billableCharges.status, ["proposed", "ready", "held"]))) : [];
+      for (const c of charged) if (c.sourceId != null && !alreadyInvoiced.has(c.sourceId)) alreadyInvoiced.set(c.sourceId, `billing charge ${c.chargeRef}`);
       const draft = draftFromTicket({ signature: x.signature, lines: x.forDraft, partialAcceptanceAllowed: x.partialAcceptanceAllowed, alreadyInvoiced });
       if (draft.blockers.length) return { drafted: false as const, blockers: draft.blockers, excluded: draft.excluded, subtotalCents: draft.subtotalCents };
       // the job's billing book, opened if absent
@@ -161,11 +183,19 @@ export const invoicingRouter = router({
         const ins = await d.insert(billingBooks).values({ bookNumber: (await nextTrackingNumber(d, { sequenceType: "BB" })).trackingNumber, jobId: x.t.jobId, customer: x.account.name, afeNumber: input.afeNumber ?? null, purchaseOrder: input.purchaseOrder ?? null, billingState: "billing_review", openedAt: new Date() });
         book = (await d.select().from(billingBooks).where(eq(billingBooks.id, Number(ins[0]?.insertId ?? 0))).limit(1))[0]!;
       }
-      // Configured, transactional sequence (rule §18): INV-<year>-<000001>, format from trackingSequences.
-      const invoiceNumber = (await nextTrackingNumber(d, { sequenceType: "INV" })).trackingNumber;
-      const ins = await d.insert(invoices).values({ invoiceNumber, financialEntityId: x.account.financialEntityId, billingBookId: book.id, jobId: x.t.jobId, customer: x.account.name, customerAccountId: x.account.id, afeNumber: input.afeNumber ?? null, purchaseOrder: input.purchaseOrder ?? null, subtotalCents: draft.subtotalCents, taxCents: 0, gstTreatment: "unknown", gstTreatmentSource: null, totalCents: draft.subtotalCents, currency: "CAD", status: "draft" });
-      const invoiceId = Number(ins[0]?.insertId ?? 0);
-      await d.insert(invoiceLines).values(draft.lines.map(l => ({ invoiceId, lineNo: l.lineNo, fieldTicketLineId: l.fieldTicketLineId, pricingDecisionRef: l.pricingDecisionRef, serviceCode: l.serviceCode, description: l.description, quantityMillis: l.quantityMillis, billableQuantityMillis: l.billableQuantityMillis, unit: l.unit, rateMillis: l.rateMillis, amountCents: l.amountCents, basis: l.basis })));
+      // v23.32 — the organization's INV series on the Document Control ledger, minted in the same transaction as the
+      // invoice and its lines, with the ticket locked: a rolled-back draft rolls its number back, and a ticket line on
+      // two live invoices is refused by 0233's live-line UNIQUE even if two drafts race.
+      await prepareSeries(d, ctx.money.tenantId, "INV");
+      const { invoiceNumber } = await d.transaction(async tx => {
+        await tx.select({ id: fieldTickets.id }).from(fieldTickets).where(eq(fieldTickets.id, x.t.id)).for("update");
+        const n = await mintScopedNumber(tx, ctx.money, "INV", { recordType: "invoice", actorUserId: ctx.user.id });
+        const ins = await tx.insert(invoices).values({ invoiceNumber: n.number, numberScope: n.numberScope, numberAllocationRef: n.allocationRef, financialEntityId: x.account!.financialEntityId, billingBookId: book!.id, jobId: x.t.jobId, customer: x.account!.name, customerAccountId: x.account!.id, afeNumber: input.afeNumber ?? null, purchaseOrder: input.purchaseOrder ?? null, subtotalCents: draft.subtotalCents, taxCents: 0, gstTreatment: "unknown", gstTreatmentSource: null, totalCents: draft.subtotalCents, currency: "CAD", status: "draft", draftedByUserId: ctx.user.id });
+        const invoiceId = Number(ins[0]?.insertId ?? 0);
+        await bindNumber(tx, n.allocationRef, invoiceId);
+        await tx.insert(invoiceLines).values(draft.lines.map(l => ({ invoiceId, lineNo: l.lineNo, fieldTicketLineId: l.fieldTicketLineId, pricingDecisionRef: l.pricingDecisionRef, serviceCode: l.serviceCode, description: l.description, quantityMillis: l.quantityMillis, billableQuantityMillis: l.billableQuantityMillis, unit: l.unit, rateMillis: l.rateMillis, amountCents: l.amountCents, basis: l.basis })));
+        return { invoiceNumber: n.number };
+      });
       const existingEntries = await d.select({ id: billingBookEntries.id, fieldTicketLineId: billingBookEntries.fieldTicketLineId }).from(billingBookEntries).where(eq(billingBookEntries.billingBookId, book.id));
       const entryByLine = new Map(existingEntries.map(e => [e.fieldTicketLineId, e.id]));
       for (const l of draft.lines) {
@@ -196,6 +226,7 @@ export const invoicingRouter = router({
     .mutation(async ({ ctx, input }) => {
       const d = await db();
       const inv = await invoiceInScope(d, ctx.money, input.invoiceNumber, "No such invoice");
+      fieldTicketOrigin(inv);
       const lines = await d.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, inv.id));
       const rules = await loadTaxRules(input.jurisdiction);
       const keys = new Set(rules.map(r => r.ruleKey));

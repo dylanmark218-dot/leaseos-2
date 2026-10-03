@@ -28,6 +28,13 @@ export const HUMAN: Record<string, string> = {
   inherit: "As the account", required: "Required", not_required: "Not required", none: "None", manual: "Manual", auto: "Automatic", per_job: "Per job", weekly: "Weekly", monthly: "Monthly",
   in_term: "In term", notice_period: "Notice period", open_ended: "Open-ended", customer_contract: "Contract", customer_rate_card: "Customer sheet", company: "Company default", branch: "Branch", job_override: "Job override",
   resolved: "Resolved", conflict: "Conflict — a person decides", not_selected: "No sheet selected", blocking: "Blocked", review: "Review", activation: "Activation", correction: "Correction", manual_snapshot: "Manual",
+  // v23.32 — billing, invoicing and receivables
+  not_ready: "Not ready", awaiting_documents: "Awaiting documents", awaiting_signatures: "Awaiting signatures", awaiting_disposal: "Awaiting disposal", awaiting_commercial: "Awaiting commercial basis", ready: "Ready to bill",
+  under_review: "Under review", approved_for_invoicing: "Approved for invoicing", invoiced: "Invoiced", partially_paid: "Partially paid", paid: "Paid", disputed: "Disputed", credited: "Credited",
+  in_review: "In review", sent: "Issued", viewed: "Issued · viewed", void: "Void", held: "Held", proposed: "Proposed", cancelled: "Cancelled", overdue: "Overdue", credit_pending: "Credit pending",
+  priced: "Priced", unknown_rate: "No rate — held", conversion_review: "Unit conversion needs review", measurement_review: "Measurement needs review", requested: "Requested", refused: "Refused", unapplied: "Unapplied", partially_applied: "Partly applied", applied: "Applied", reversed: "Reversed",
+  pending: "Pending", exported: "Exported", failed: "Failed", raised: "Raised", investigating: "Investigating", resolved_upheld: "Resolved — upheld", resolved_credited: "Resolved — credited", resolved_partial: "Resolved — partly credited", withdrawn: "Withdrawn",
+  d1_30: "1–30 days overdue", d31_60: "31–60 days", d61_90: "61–90 days", d90_plus: "Over 90 days", field_ticket_line: "Field ticket line", billing_charges: "Billing charges", field_ticket: "Field ticket",
 };
 export const human = (k: string | null | undefined) => (k == null ? "—" : HUMAN[k] ?? k.replace(/_/g, " "));
 
@@ -44,6 +51,12 @@ const STATUS_TONE: Record<string, keyof typeof TONE> = {
   on_hold: "blocked", suspended: "blocked", terminated: "blocked", blocking: "blocked", conflict: "blocked", exhausted: "blocked",
   pending_approval: "review", draft: "pending", review: "review", notice_period: "review", expired: "review",
   inactive: "unknown", superseded: "unknown", retired: "unknown", rejected: "unknown", ended: "unknown", closed: "unknown", unknown: "unknown", not_selected: "unknown",
+  // v23.32
+  ready: "ready", approved_for_invoicing: "ready", paid: "ready", priced: "ready", applied: "ready", exported: "ready", resolved_upheld: "ready", sent: "ready", viewed: "ready", invoiced: "ready",
+  not_ready: "blocked", held: "blocked", overdue: "blocked", disputed: "blocked", failed: "blocked", unknown_rate: "blocked", raised: "blocked",
+  awaiting_documents: "review", awaiting_signatures: "review", awaiting_disposal: "review", awaiting_commercial: "review", under_review: "review", in_review: "review", partially_paid: "review", proposed: "review", requested: "review",
+  credit_pending: "review", partially_applied: "review", conversion_review: "review", measurement_review: "review", investigating: "review", conflict_export: "review",
+  credited: "unknown", void: "unknown", cancelled: "unknown", reversed: "unknown", refused: "unknown", withdrawn: "unknown", resolved_credited: "unknown", resolved_partial: "unknown", unapplied: "pending", pending: "pending",
 };
 export function StatusBadge({ status }: { status: string | null | undefined }) {
   const t = TONE[STATUS_TONE[status ?? "unknown"] ?? "unknown"]!;

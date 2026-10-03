@@ -108,6 +108,26 @@ Next free number at that time: `0191` (superseded above).
   `0189`, the first number no branch holds, rather than `0175` (named free on 2026-09-23 and claimed by
   four branches since). No other branch renumbered.
 
+## Claim: 0233 (v23.32 — Billing, Invoicing, Accounts Receivable, 2026-10-03)
+
+`main` = `9ec123a`, migration head **`0228_safety_program_builder.sql`** (Safety Program Builder, merged as #99).
+Drafted as `0228` while `main` was `48a64e1` (head `0227`) and `0228` was free on all 131 refs; before the commit
+`main` took `0228` (and payroll P3 holds it too) and the integration hub holds `0229`–`0232`, so the migration moved to the first number free
+everywhere. Scan over `origin/main` and all 133 remote refs immediately before the commit:
+
+| Number | Migration file | Branch | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|
+| 0220 | `0220_eld_event_ledger.sql` | `claude/eld-compliance-intelligence-ramlrd` | open | none now (integration hub renumbered to 0229–0232) | keeps it |
+| 0224 | `0224_eld_duty_day_designations.sql` | `claude/eld-compliance-intelligence-ramlrd` | open | with ci-stabilization | first to merge keeps it |
+| 0224, 0225 | `0224_offline_capture_identity_scope.sql`, `0225_queued_package_identity_scope.sql` | `fix/main-ci-stabilization` | open | 0224 with ELD | first to merge keeps it |
+| 0228 | `0228_safety_program_builder.sql` | `main` (#99) | merged | with payroll P3 | main keeps it |
+| 0228 | `0228_payroll_time_candidates_exceptions.sql` | `claude/payroll-p3-time-candidates` | open | with main | renumbers at its merge |
+| 0229–0232 | `0229_integration_hub_connectors.sql` … `0232_integration_hub_conflicts_and_links.sql` | `claude/integration-hub-subsystem-6nzrkw` | open | none | keeps them |
+| **0233** | **`0233_billing_invoicing_ar.sql`** | **`claude/leaseos-billing-invoicing-ar`** | **claiming** | **none** | **keeps 0233** |
+
+No ref holds anything at or above `0233`. **Next free number for new work: `0234`** (re-check with the scan before
+committing).
+
 ## Claim: 0227 (payroll P2 — pay schedules and the pay-period machine, 2026-10-03)
 
 `main` = `a61ff29`, migration head **`0226_payroll_compensation_agreements.sql`** (P1, merged as #130). Scan over

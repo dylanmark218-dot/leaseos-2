@@ -1348,7 +1348,23 @@ export const fieldTicketEvents = mysqlTable("fieldTicketEvents", {
 
 export const invoices = mysqlTable("invoices", {
   id: int("id").autoincrement().primaryKey(),
-  invoiceNumber: varchar("invoiceNumber", { length: 64 }).notNull().unique(),
+  // 0233 — unique per number scope (the organization's INV series; 'default' = the shared pre-0233 series).
+  invoiceNumber: varchar("invoiceNumber", { length: 64 }).notNull(),
+  numberScope: varchar("numberScope", { length: 64 }).default("default").notNull(),
+  numberAllocationRef: varchar("numberAllocationRef", { length: 40 }),
+  origin: mysqlEnum("origin", ["field_ticket", "billing_charges"]).default("field_ticket").notNull(),
+  taxCode: varchar("taxCode", { length: 24 }),
+  taxRateBps: int("taxRateBps"),
+  taxJurisdiction: varchar("taxJurisdiction", { length: 20 }),
+  paymentTermsDays: int("paymentTermsDays"),
+  draftedByUserId: int("draftedByUserId"),
+  submittedByUserId: int("submittedByUserId"),
+  submittedAt: timestamp("submittedAt"),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  issuedByUserId: int("issuedByUserId"),
+  overdueNotifiedAt: timestamp("overdueNotifiedAt"),
+  rowVersion: int("rowVersion").default(0).notNull(),
   // v21.8 — which entity issued it, when, and whether the sale is taxable.
   financialEntityId: int("financialEntityId"),
   issuedAt: timestamp("issuedAt"),
@@ -1377,6 +1393,7 @@ export const invoices = mysqlTable("invoices", {
     "partially_paid",
     "paid",
     "void",
+    "in_review",
   ])
     .default("draft")
     .notNull(),
@@ -1398,7 +1415,7 @@ export const invoices = mysqlTable("invoices", {
   externalPortalRef: varchar("externalPortalRef", { length: 120 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (t) => ({ scopeNumber: uniqueIndex("invoices_scope_number_unique").on(t.numberScope, t.invoiceNumber), number: index("invoices_number").on(t.invoiceNumber), entityStatus: index("invoices_entity_status").on(t.financialEntityId, t.status), job: index("invoices_job").on(t.jobId) }));
 
 // Append-only. Never update a row here — corrections create new rows.
 export const recordAmendments = mysqlTable("recordAmendments", {
@@ -2645,8 +2662,20 @@ export const disputeCases = mysqlTable("disputeCases", {
   assignedUserId: int("assignedUserId"),
   raisedAt: timestamp("raisedAt").notNull(),
   resolvedAt: timestamp("resolvedAt"),
+  // 0233 — the invoice (and line) by id, its book, who opened and resolved it, and the outcome's amount.
+  invoiceId: int("invoiceId"),
+  invoiceLineId: int("invoiceLineId"),
+  financialEntityId: int("financialEntityId"),
+  openedByUserId: int("openedByUserId"),
+  notes: text("notes"),
+  documentRefsJson: text("documentRefsJson"),
+  resolvedByUserId: int("resolvedByUserId"),
+  resolutionAmountCents: int("resolutionAmountCents"),
+  creditId: int("creditId"),
+  /** Generated (PERSISTENT), never written: one open dispute per invoice (line 0) or per invoice line. */
+  openKey: varchar("openKey", { length: 40 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (t) => ({ open: uniqueIndex("disputeCases_open_uq").on(t.openKey), invoice: index("disputeCases_invoice").on(t.invoiceId) }));
 
 export const subcontractors = mysqlTable("subcontractors", {
   id: int("id").autoincrement().primaryKey(),
@@ -4865,14 +4894,23 @@ export const customerPayments = mysqlTable("customerPayments", {
   customerAccountId: int("customerAccountId"),
   receivedAt: timestamp("receivedAt").notNull(),
   amountCents: int("amountCents").notNull(),
-  method: mysqlEnum("method", ["eft", "cheque", "card", "cash", "other"]).notNull(),
+  // 0233 — `card` is a card REFERENCE only (an authorization number in `reference`); no card data is stored.
+  method: mysqlEnum("method", ["eft", "cheque", "card", "cash", "other", "wire", "import"]).notNull(),
   reference: varchar("reference", { length: 120 }),
   bankStatementLineId: int("bankStatementLineId"),
   status: mysqlEnum("status", ["unapplied", "partially_applied", "applied", "reversed"]).default("unapplied").notNull(),
   recordedByUserId: int("recordedByUserId").notNull(),
   evidenceRecordId: int("evidenceRecordId"),
+  currency: varchar("currency", { length: 3 }).default("CAD").notNull(),
+  payerName: varchar("payerName", { length: 220 }),
+  source: mysqlEnum("source", ["manual", "import", "bank_match", "portal"]).default("manual").notNull(),
+  notes: varchar("notes", { length: 600 }),
+  idempotencyKey: varchar("idempotencyKey", { length: 120 }),
+  reversedAt: timestamp("reversedAt"),
+  reversedByUserId: int("reversedByUserId"),
+  reversalReason: varchar("reversalReason", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (t) => ({ idempotency: uniqueIndex("customerPayments_idempotency_unique").on(t.financialEntityId, t.idempotencyKey), account: index("customerPayments_account").on(t.customerAccountId) }));
 
 export const paymentAllocations = mysqlTable("paymentAllocations", {
   id: int("id").autoincrement().primaryKey(),
@@ -4881,12 +4919,23 @@ export const paymentAllocations = mysqlTable("paymentAllocations", {
   amountCents: int("amountCents").notNull(),
   allocatedByUserId: int("allocatedByUserId").notNull(),
   allocatedAt: timestamp("allocatedAt").notNull(),
+  // 0233 — a reversal is a NEGATIVE row naming the allocation it reverses (one per allocation), never an UPDATE.
+  allocationRef: varchar("allocationRef", { length: 40 }).unique(),
+  reversesAllocationId: int("reversesAllocationId").unique(),
+  reason: varchar("reason", { length: 400 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (t) => ({ payment: index("paymentAllocations_payment").on(t.customerPaymentId), invoice: index("paymentAllocations_invoice").on(t.invoiceId) }));
 
 export const customerCredits = mysqlTable("customerCredits", {
   id: int("id").autoincrement().primaryKey(),
-  creditRef: varchar("creditRef", { length: 64 }).notNull().unique(),
+  // 0233 — unique per number scope, as invoices.
+  creditRef: varchar("creditRef", { length: 64 }).notNull(),
+  numberScope: varchar("numberScope", { length: 64 }).default("default").notNull(),
+  numberAllocationRef: varchar("numberAllocationRef", { length: 40 }),
+  currency: varchar("currency", { length: 3 }).default("CAD").notNull(),
+  source: mysqlEnum("source", ["manual", "dispute", "write_off", "billing"]).default("manual").notNull(),
+  disputeCaseId: int("disputeCaseId"),
+  decisionNote: varchar("decisionNote", { length: 400 }),
   financialEntityId: int("financialEntityId").notNull(),
   customer: varchar("customer", { length: 220 }).notNull(),
   // v21.9.1 — identity, not a name.
@@ -4900,7 +4949,7 @@ export const customerCredits = mysqlTable("customerCredits", {
   status: mysqlEnum("status", ["requested", "approved", "refused"]).default("requested").notNull(),
   evidenceRecordId: int("evidenceRecordId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (t) => ({ scopeRef: uniqueIndex("customerCredits_scope_ref_unique").on(t.numberScope, t.creditRef), ref: index("customerCredits_ref").on(t.creditRef), invoice: index("customerCredits_invoice").on(t.invoiceId) }));
 
 export const collectionEvents = mysqlTable("collectionEvents", {
   id: int("id").autoincrement().primaryKey(),
@@ -6252,8 +6301,18 @@ export const invoiceLines = mysqlTable("invoiceLines", {
   rateMillis: int("rateMillis"),
   amountCents: int("amountCents").notNull(),
   basis: varchar("basis", { length: 160 }).notNull(),
+  // 0233 — the charge this line consumes, its job, its explicit tax, and the internal provenance (never printed).
+  billableChargeId: int("billableChargeId"),
+  jobId: int("jobId"),
+  taxCode: varchar("taxCode", { length: 24 }),
+  taxRateBps: int("taxRateBps"),
+  taxCents: int("taxCents"),
+  provenanceJson: text("provenanceJson"),
+  releasedAt: timestamp("releasedAt"),
+  /** Generated (PERSISTENT), never written: the field-ticket line while this line is live on a field-ticket invoice. */
+  liveTicketLineKey: int("liveTicketLineKey"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (t) => ({ liveTicketLine: uniqueIndex("invoiceLines_live_ticket_line_uq").on(t.liveTicketLineKey), invoiceCharge: uniqueIndex("invoiceLines_invoice_charge_uq").on(t.invoiceId, t.billableChargeId), charge: index("invoiceLines_charge").on(t.billableChargeId) }));
 export type InvoiceLineRow = typeof invoiceLines.$inferSelect;
 export type InsertInvoiceLine = typeof invoiceLines.$inferInsert;
 
@@ -10183,7 +10242,9 @@ export const commercialAuditEvents = mysqlTable("commercialAuditEvents", {
   id: int("id").autoincrement().primaryKey(),
   eventRef: varchar("eventRef", { length: 64 }).notNull().unique(),
   financialEntityId: int("financialEntityId").notNull(),
-  subjectType: mysqlEnum("subjectType", ["customer_account", "customer_contact", "customer_contract", "rate_sheet", "rate_sheet_version", "rate_line", "job_commercial_context", "job_commercial_snapshot", "customer_purchase_order"]).notNull(),
+  subjectType: mysqlEnum("subjectType", ["customer_account", "customer_contact", "customer_contract", "rate_sheet", "rate_sheet_version", "rate_line", "job_commercial_context", "job_commercial_snapshot", "customer_purchase_order",
+    // 0233 — billing, invoicing and receivables write to the same ledger.
+    "billing_workspace", "billable_charge", "invoice", "customer_payment", "payment_allocation", "customer_credit", "invoice_adjustment", "dispute_case", "accounting_sync"]).notNull(),
   subjectRef: varchar("subjectRef", { length: 80 }).notNull(),
   subjectId: int("subjectId"),
   eventType: varchar("eventType", { length: 60 }).notNull(),
@@ -10982,3 +11043,136 @@ export const safetyProgramEvents = mysqlTable("safetyProgramEvents", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, t => ({ subjectIdx: index("safetyProgramEvents_subject").on(t.subjectType, t.subjectRef) }));
 export type SafetyProgramEventRow = typeof safetyProgramEvents.$inferSelect;
+
+/* ==================================================================
+ * 0233 — Billing, Invoicing, Accounts Receivable (v23.32)
+ * ================================================================== */
+
+/** The job's billing state, moved only through billingEngine's transition table. */
+export const billingWorkspaces = mysqlTable("billingWorkspaces", {
+  id: int("id").autoincrement().primaryKey(),
+  workspaceRef: varchar("workspaceRef", { length: 40 }).notNull().unique(),
+  jobId: int("jobId").notNull(),
+  financialEntityId: int("financialEntityId").notNull(),
+  state: mysqlEnum("state", ["not_ready", "awaiting_documents", "awaiting_signatures", "awaiting_disposal", "awaiting_commercial", "ready", "under_review", "approved_for_invoicing", "invoiced", "partially_paid", "paid", "disputed", "credited"]).default("not_ready").notNull(),
+  readinessJson: text("readinessJson"),
+  readinessHash: varchar("readinessHash", { length: 64 }),
+  evaluatedAt: timestamp("evaluatedAt"),
+  holdActive: boolean("holdActive").default(false).notNull(),
+  holdReason: varchar("holdReason", { length: 400 }),
+  holdByUserId: int("holdByUserId"),
+  holdAt: timestamp("holdAt"),
+  reviewSubmittedByUserId: int("reviewSubmittedByUserId"),
+  reviewSubmittedAt: timestamp("reviewSubmittedAt"),
+  reviewDecidedByUserId: int("reviewDecidedByUserId"),
+  reviewDecidedAt: timestamp("reviewDecidedAt"),
+  reviewNote: varchar("reviewNote", { length: 600 }),
+  rowVersion: int("rowVersion").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({ job: uniqueIndex("billingWorkspaces_job_unique").on(t.jobId), entityState: index("billingWorkspaces_entity_state").on(t.financialEntityId, t.state) }));
+
+/** The canonical, traceable charge: job → evidence → customer → contract → sheet version → rate line → inputs → amount. */
+export const billableCharges = mysqlTable("billableCharges", {
+  id: int("id").autoincrement().primaryKey(),
+  chargeRef: varchar("chargeRef", { length: 40 }).notNull().unique(),
+  financialEntityId: int("financialEntityId").notNull(),
+  jobId: int("jobId").notNull(),
+  customerAccountId: int("customerAccountId").notNull(),
+  commercialSnapshotId: int("commercialSnapshotId"),
+  commercialSnapshotRef: varchar("commercialSnapshotRef", { length: 40 }),
+  contractRef: varchar("contractRef", { length: 40 }),
+  rateSheetVersionRef: varchar("rateSheetVersionRef", { length: 40 }),
+  sourceKind: mysqlEnum("sourceKind", ["field_ticket_line", "manual"]).notNull(),
+  sourceId: int("sourceId"),
+  sourceRef: varchar("sourceRef", { length: 64 }),
+  fieldTicketId: int("fieldTicketId"),
+  serviceCode: varchar("serviceCode", { length: 60 }),
+  lineKind: varchar("lineKind", { length: 40 }),
+  description: varchar("description", { length: 300 }).notNull(),
+  quantityMillis: bigint("quantityMillis", { mode: "number" }).notNull(),
+  unit: varchar("unit", { length: 20 }).notNull(),
+  measurementSource: varchar("measurementSource", { length: 40 }),
+  definitionRef: varchar("definitionRef", { length: 64 }),
+  definitionVersion: int("definitionVersion"),
+  scopeLevel: varchar("scopeLevel", { length: 40 }),
+  pricingMethod: varchar("pricingMethod", { length: 40 }),
+  rateMillis: int("rateMillis"),
+  billableQuantityMillis: bigint("billableQuantityMillis", { mode: "number" }),
+  pricedAmountCents: bigint("pricedAmountCents", { mode: "number" }),
+  amountCents: bigint("amountCents", { mode: "number" }),
+  currency: varchar("currency", { length: 3 }).notNull(),
+  pricingOutcome: mysqlEnum("pricingOutcome", ["priced", "unknown_rate", "conflict", "conversion_review", "measurement_review", "manual"]).notNull(),
+  formula: varchar("formula", { length: 400 }),
+  inputsJson: text("inputsJson"),
+  reasonsJson: text("reasonsJson").notNull(),
+  status: mysqlEnum("status", ["proposed", "ready", "held", "superseded", "cancelled"]).notNull(),
+  holdReason: varchar("holdReason", { length: 300 }),
+  billedQuantityMillis: bigint("billedQuantityMillis", { mode: "number" }).default(0).notNull(),
+  billedAmountCents: bigint("billedAmountCents", { mode: "number" }).default(0).notNull(),
+  overrideStatus: mysqlEnum("overrideStatus", ["none", "pending", "approved", "refused"]).default("none").notNull(),
+  overrideAmountCents: bigint("overrideAmountCents", { mode: "number" }),
+  overrideQuantityMillis: bigint("overrideQuantityMillis", { mode: "number" }),
+  overrideReason: varchar("overrideReason", { length: 400 }),
+  overrideRequestedByUserId: int("overrideRequestedByUserId"),
+  overrideRequestedAt: timestamp("overrideRequestedAt"),
+  overrideDecidedByUserId: int("overrideDecidedByUserId"),
+  overrideDecidedAt: timestamp("overrideDecidedAt"),
+  supersedesChargeId: int("supersedesChargeId"),
+  createdByUserId: int("createdByUserId").notNull(),
+  approvedByUserId: int("approvedByUserId"),
+  approvedAt: timestamp("approvedAt"),
+  rowVersion: int("rowVersion").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  /** Generated (PERSISTENT), never written: one live charge per evidence line. */
+  liveSourceKey: varchar("liveSourceKey", { length: 80 }),
+}, (t) => ({ liveSource: uniqueIndex("billableCharges_live_source_unique").on(t.liveSourceKey), jobStatus: index("billableCharges_job_status").on(t.jobId, t.status), entityStatus: index("billableCharges_entity_status").on(t.financialEntityId, t.status) }));
+
+export const invoiceJobLinks = mysqlTable("invoiceJobLinks", {
+  id: int("id").autoincrement().primaryKey(),
+  invoiceId: int("invoiceId").notNull(),
+  jobId: int("jobId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({ pair: uniqueIndex("invoiceJobLinks_unique").on(t.invoiceId, t.jobId), job: index("invoiceJobLinks_job").on(t.jobId) }));
+
+/** A signed amount on a receivable, requested by one person and decided by another; never a balance edit. */
+export const invoiceAdjustments = mysqlTable("invoiceAdjustments", {
+  id: int("id").autoincrement().primaryKey(),
+  adjustmentRef: varchar("adjustmentRef", { length: 40 }).notNull(),
+  financialEntityId: int("financialEntityId").notNull(),
+  invoiceId: int("invoiceId").notNull(),
+  amountCents: int("amountCents").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull(),
+  reasonCode: mysqlEnum("reasonCode", ["late_fee", "rounding", "fx", "correction", "other"]).notNull(),
+  reason: varchar("reason", { length: 400 }).notNull(),
+  status: mysqlEnum("status", ["requested", "approved", "refused"]).default("requested").notNull(),
+  requestedByUserId: int("requestedByUserId").notNull(),
+  requestedAt: timestamp("requestedAt").notNull(),
+  decidedByUserId: int("decidedByUserId"),
+  decidedAt: timestamp("decidedAt"),
+  decisionNote: varchar("decisionNote", { length: 400 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({ ref: uniqueIndex("invoiceAdjustments_ref_unique").on(t.adjustmentRef), invoice: index("invoiceAdjustments_invoice").on(t.invoiceId, t.status) }));
+
+/** The accounting integration boundary: what an external ledger is handed, idempotent on (book, entity, ref, payload hash). */
+export const accountingSyncRecords = mysqlTable("accountingSyncRecords", {
+  id: int("id").autoincrement().primaryKey(),
+  syncRef: varchar("syncRef", { length: 40 }).notNull(),
+  financialEntityId: int("financialEntityId").notNull(),
+  entityType: mysqlEnum("entityType", ["invoice", "payment", "credit_note", "adjustment", "allocation"]).notNull(),
+  entityId: int("entityId").notNull(),
+  entityRef: varchar("entityRef", { length: 80 }).notNull(),
+  payloadJson: text("payloadJson").notNull(),
+  payloadHash: varchar("payloadHash", { length: 64 }).notNull(),
+  externalSystem: varchar("externalSystem", { length: 40 }).default("unconfigured").notNull(),
+  status: mysqlEnum("status", ["pending", "exported", "failed", "conflict", "superseded"]).default("pending").notNull(),
+  externalId: varchar("externalId", { length: 120 }),
+  attempts: int("attempts").default(0).notNull(),
+  lastError: varchar("lastError", { length: 600 }),
+  lastAttemptAt: timestamp("lastAttemptAt"),
+  lastSyncedAt: timestamp("lastSyncedAt"),
+  markedByUserId: int("markedByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({ ref: uniqueIndex("accountingSyncRecords_ref_unique").on(t.syncRef), idem: uniqueIndex("accountingSyncRecords_idem_unique").on(t.financialEntityId, t.entityType, t.entityRef, t.payloadHash), entityStatus: index("accountingSyncRecords_entity_status").on(t.financialEntityId, t.status) }));

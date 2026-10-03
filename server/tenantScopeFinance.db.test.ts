@@ -47,7 +47,12 @@ const NOT_FOUND = { code: "NOT_FOUND" };
 
 type World = Awaited<ReturnType<typeof world>>;
 /** One organization's books, created the way that organization's people create them. */
-async function world(orgRef: string | null) {
+/**
+ * `priorCredits`: credit numbers are per organization (v23.32, 0233), so every organization's first credit is
+ * CR-<year>-000001. Giving A an earlier credit makes A's fixture credit a number B never holds — "B decides A's
+ * credit" then names a credit that is not in B's books, rather than B's own credit under the same number.
+ */
+async function world(orgRef: string | null, opts: { priorCredits?: number } = {}) {
   const controller = await member(orgRef, ["controller"]), bookkeeper = await member(orgRef, ["bookkeeper"]);
   const [ent] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (entityRef, legalName, taxpayerType, jurisdiction, orgRef) VALUES (?, ?, 'corporation', 'CA-AB', ?)", [`FE-${rnd()}`, `Books ${orgRef ?? "legacy"}`, orgRef]);
   const entityId = Number(ent.insertId);
@@ -63,6 +68,7 @@ async function world(orgRef: string | null) {
   const billRef = `BILL-${rnd()}`;
   await pool.execute("INSERT INTO vendorBills (billRef, financialEntityId, vendorId, recordedByUserId, approvedByUserId, vendorInvoiceNumber, invoiceDate, receivedAt, currency, subtotalCents, taxAmountCents, totalCents, matchOutcome, status) VALUES (?, ?, ?, ?, ?, ?, '2026-08-10', NOW(), 'CAD', 40000, 2000, 42000, 'match', 'ready_to_pay')", [billRef, entityId, ven.insertId, bookkeeper, bookkeeper, `VI-${rnd()}`]);
   const pay = await callerFor(bookkeeper).ar.paymentRecord({ financialEntityId: entityId, customer: "Acme Energy", receivedAt: new Date("2026-09-10T00:00:00Z"), amountCents: 50_000, method: "eft" });
+  for (let i = 0; i < (opts.priorCredits ?? 0); i++) await callerFor(bookkeeper).ar.creditRequest({ invoiceNumber, amountCents: 1_000, reason: "an earlier credit on the same invoice" });
   const credit = await callerFor(bookkeeper).ar.creditRequest({ invoiceNumber, amountCents: 10_000, reason: "standby hour conceded after review" });
   const bank = await callerFor(bookkeeper).bank.accountRegister({ financialEntityId: entityId, name: "Operating" });
   const gst = await callerFor(bookkeeper).gst.returnPrepare({ financialEntityId: entityId, period: "2026-Q3", jurisdiction: "CA-AB" });
@@ -76,7 +82,7 @@ async function world(orgRef: string | null) {
 d("F1 — Organization B cannot touch Organization A's money", () => {
   let A: World, B: World, attacker: number;
   beforeAll(async () => {
-    A = await world(await org());
+    A = await world(await org(), { priorCredits: 1 });
     B = await world(await org());
     attacker = await member(B.orgRef, ["controller", "management", "office", "shop_lead"]);
   }, 60_000);
@@ -148,8 +154,8 @@ d("F1 — Organization B cannot touch Organization A's money", () => {
   it("leaves every one of A's records exactly as A left it", async () => {
     expect((await one("SELECT status, gstTreatment FROM invoices WHERE invoiceNumber = ?", [A.invoiceNumber]))).toMatchObject({ status: "sent", gstTreatment: "unknown" });
     expect((await one("SELECT status FROM vendorBills WHERE billRef = ?", [A.billRef])).status).toBe("ready_to_pay");
-    expect((await one("SELECT status FROM customerCredits WHERE creditRef = ?", [A.creditRef])).status).toBe("requested");
-    expect((await one("SELECT COUNT(*) AS n FROM commercialApprovals WHERE subjectRef = ?", [A.creditRef])).n).toBe(0);
+    expect((await one("SELECT status FROM customerCredits WHERE creditRef = ? AND financialEntityId = ?", [A.creditRef, A.entityId])).status).toBe("requested");
+    expect((await one("SELECT COUNT(*) AS n FROM commercialApprovals WHERE subjectRef IN (?, ?) AND bookOrgRef = ?", [A.creditRef, `${A.creditRef}@${A.orgRef}`, A.orgRef])).n).toBe(0);
     expect((await one("SELECT COUNT(*) AS n FROM periodCloses WHERE financialEntityId = ?", [A.entityId])).n).toBe(0);
     expect((await one("SELECT status FROM gstReturns WHERE returnRef = ?", [A.gstRef])).status).toBe("prepared");
     expect((await one("SELECT status FROM iftaReturns WHERE returnRef = ?", [A.iftaRef])).status).toBe("prepared");
@@ -181,10 +187,14 @@ d("F1 — the approval ladder counts only grants in force, in the book they belo
     const A = await world(await org());
     const revokedMgr = await member(A.orgRef, ["controller"], ["management"]);   // may decide credits (controller), but management is revoked
     const mgr = await member(A.orgRef, ["management"]);
-    const big = await callerFor(A.bookkeeper).ar.creditRequest({ invoiceNumber: A.invoiceNumber, amountCents: 1_000_000, reason: "rate dispute conceded on the whole month" });
+    // v23.32 — a credit is never approved beyond what the invoice has outstanding, so the $10,000 credit sits on a $20,000 invoice.
+    const bigInvoice = `INV-${rnd()}`;
+    const [[book]] = await pool.query<mysql.RowDataPacket[]>("SELECT id FROM billingBooks WHERE jobId = ?", [A.jobId]);
+    await pool.execute("INSERT INTO invoices (invoiceNumber, financialEntityId, issuedAt, billingBookId, jobId, customer, customerAccountId, subtotalCents, taxCents, totalCents, currency, status, dueAt) VALUES (?, ?, '2026-08-05 00:00:00', ?, ?, 'Acme Energy', ?, 2000000, 0, 2000000, 'CAD', 'sent', '2026-09-04 00:00:00')", [bigInvoice, A.entityId, book!.id, A.jobId, A.accountId]);
+    const big = await callerFor(A.bookkeeper).ar.creditRequest({ invoiceNumber: bigInvoice, amountCents: 1_000_000, reason: "rate dispute conceded on the whole month" });
     // $10,000 is in the management tier of the default ladder. The revoked grant must not be read as management.
     await expect(callerFor(revokedMgr).ar.creditDecide({ creditRef: big.creditRef, decision: "approved" })).rejects.toThrow(/requires role management/);
-    expect((await one("SELECT COUNT(*) AS n FROM commercialApprovalSignatures s JOIN commercialApprovals a ON a.id = s.commercialApprovalId WHERE a.subjectRef = ? AND s.userId = ?", [big.creditRef, revokedMgr])).n).toBe(0);
+    expect((await one("SELECT COUNT(*) AS n FROM commercialApprovalSignatures s JOIN commercialApprovals a ON a.id = s.commercialApprovalId WHERE a.subjectRef = ? AND s.userId = ?", [`${big.creditRef}@${A.orgRef}`, revokedMgr])).n).toBe(0);
     const ok = await callerFor(mgr).ar.creditDecide({ creditRef: big.creditRef, decision: "approved" });
     expect(ok).toMatchObject({ status: "approved", ledger: { outcome: "satisfied" } });
   }, 60_000);

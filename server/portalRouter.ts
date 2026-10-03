@@ -11,7 +11,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { createHash } from "node:crypto";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne, or } from "drizzle-orm";
 import { externalProcedure, router, type ExternalContext } from "./_core/trpc";
 import { getDb } from "./db";
 import { CUSTOMER_ALERT_KINDS, changeOrders, clientAdjustments, customerAccounts, customerCredits, customerPurchaseOrders, disposalTickets, disputeCases, externalAccessLog, externalAlertPreferences, externalIdentities, facilities, fieldTicketDocuments, fieldTicketEvents, fieldTicketRevisions, fieldTickets, invoices, jobs, loads, paymentAllocations, portalSubmissions, quoteLines, quotes, rfis, roadHazardObservations, safetyEvents, trips, vendorBills, vendors, weatherObservations, workflowNotifications, invoiceLines } from "../drizzle/schema";
@@ -515,7 +515,8 @@ export const portalRouter = router({
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
     const acct = (await db.select().from(customerAccounts).where(eq(customerAccounts.id, e.accountId)).limit(1))[0];
     if (!acct) throw new TRPCError({ code: "NOT_FOUND", message: "Account not found" });
-    const inv = await db.select().from(invoices).where(and(eq(invoices.customerAccountId, acct.id), inArray(invoices.status, ["sent", "viewed", "approved", "partially_paid", "paid", "disputed"])));
+    // v23.32 — only what was SENT to the customer: an approved invoice not yet issued is the office's, not the customer's.
+    const inv = await db.select().from(invoices).where(and(eq(invoices.customerAccountId, acct.id), inArray(invoices.status, ["sent", "viewed", "approved", "partially_paid", "paid", "disputed"]), or(ne(invoices.status, "approved"), isNotNull(invoices.sentAt))));
     const ids = inv.map(i => i.id);
     const [allocs, creds, pos, disputes] = await Promise.all([
       ids.length ? db.select().from(paymentAllocations).where(inArray(paymentAllocations.invoiceId, ids)) : [],
@@ -577,8 +578,9 @@ export const portalRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       // The invoice must be THIS account's — resolved from the binding, not the request.
-      const inv = (await db.select({ id: invoices.id, customerAccountId: invoices.customerAccountId, totalCents: invoices.totalCents }).from(invoices).where(eq(invoices.invoiceNumber, input.invoiceNumber)).limit(1))[0];
-      if (!inv || inv.customerAccountId !== e.accountId) throw new TRPCError({ code: "NOT_FOUND", message: "No such invoice on this account" });
+      // v23.32 — numbers are per organization: look the number up on THIS account only; and only an invoice sent to the customer is disputed.
+      const inv = (await db.select({ id: invoices.id, customerAccountId: invoices.customerAccountId, totalCents: invoices.totalCents, status: invoices.status, sentAt: invoices.sentAt }).from(invoices).where(and(eq(invoices.invoiceNumber, input.invoiceNumber), eq(invoices.customerAccountId, e.accountId))).limit(1))[0];
+      if (!inv || inv.customerAccountId !== e.accountId || inv.status === "draft" || inv.status === "void" || inv.status === "in_review" || (inv.status === "approved" && inv.sentAt == null)) throw new TRPCError({ code: "NOT_FOUND", message: "No such invoice on this account" });
       if (input.disputedAmountCents > inv.totalCents) throw new TRPCError({ code: "BAD_REQUEST", message: "Disputed amount exceeds the invoice" });
       return submit(e, "invoice_dispute", { invoiceNumber: input.invoiceNumber, disputedAmountCents: input.disputedAmountCents, reason: input.reason });
     }),

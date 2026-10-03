@@ -6,17 +6,17 @@ here can be added rather than read.
 
 | Measure | Value | Read from |
 |---|---|---|
-| Release | **v23.31** | `LEASEOS_RELEASE` (or explicit argument 1) |
-| Tables | **479** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **205** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **881** | `roleProcedure(` call sites across all routers |
+| Release | **v23.32** | `LEASEOS_RELEASE` (or explicit argument 1) |
+| Tables | **484** | `mysqlTable(` declarations in `drizzle/schema.ts` |
+| Migrations | **206** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Role-authorized procedures | **919** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **40** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
-| Permissions | **427** | the `Permission` union |
-| Sensitive (fail-closed) permissions | **172** | `SENSITIVE_PERMISSIONS` |
+| Permissions | **444** | the `Permission` union |
+| Sensitive (fail-closed) permissions | **180** | `SENSITIVE_PERMISSIONS` |
 | Universal (self-scoped) permissions | **21** | `UNIVERSAL_PERMISSIONS` |
-| Test files / cases | **485 / 6633** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
+| Test files / cases | **488 / 6676** | `it(` occurrences in source — a loop that generates cases counts once here and many at run time, so the runner reports more |
 | Native-only runtime bindings | **7 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
 ## Implemented on the server (each with schema, authorization, audit, tests)

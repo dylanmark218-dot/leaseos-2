@@ -17,6 +17,7 @@ import { sql } from "drizzle-orm";
 import { reconcileBank, reconciliationStatement, type BankLine, type Movement } from "./_core/bankReconciliation";
 import { aging, allocatePayment, invoiceBalanceCents, writeOffDecision, type ArCredit, type ArInvoice } from "./_core/accountsReceivable";
 import { assertPeriodOpen } from "./periodCloseService";
+import { bindNumber, ledgerSubjectRef, mintScopedNumber, prepareSeries } from "./billingNumbers";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -151,7 +152,8 @@ export const arRouter = router({
         const p = (await tx.select().from(customerPayments).where(eq(customerPayments.paymentRef, input.paymentRef)).for("update").limit(1))[0];
         if (!p || !ownsEntity(ctx.money, p.financialEntityId)) throw new TRPCError({ code: "NOT_FOUND", message: "Payment not found" });
         if (p.status === "reversed") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Payment was reversed" });
-        const i = (await tx.select().from(invoices).where(eq(invoices.invoiceNumber, input.invoiceNumber)).for("update").limit(1))[0];
+        // v23.32 — numbers are per organization (0233): the invoice is looked up among the caller's books only.
+        const i = ctx.money.entityIds.length ? (await tx.select().from(invoices).where(and(eq(invoices.invoiceNumber, input.invoiceNumber), inArray(invoices.financialEntityId, ctx.money.entityIds))).for("update").limit(1))[0] : undefined;
         if (!i || !ownsEntity(ctx.money, i.financialEntityId)) throw new TRPCError({ code: "NOT_FOUND", message: "Invoice not found" });
         // An invoice that predates customer accounts takes the payment's account on first application — same entity, same name — and keeps it.
         let invoiceAccountId = i.customerAccountId;
@@ -187,8 +189,14 @@ export const arRouter = router({
         if (!input.financialEntityId || !input.customer) throw new TRPCError({ code: "BAD_REQUEST", message: "A credit not tied to an invoice needs the entity and the customer" });
         financialEntityId = requireOwnedEntity(ctx.money, input.financialEntityId, `Financial entity ${input.financialEntityId}`); customer = input.customer; customerAccountId = await resolveCustomerAccount(financialEntityId, customer);
       }
-      const creditRef = (await nextTrackingNumber(db, { sequenceType: "CR" })).trackingNumber;
-      await db.insert(customerCredits).values({ creditRef, financialEntityId, customer, customerAccountId, invoiceId: inv?.id ?? null, amountCents: input.amountCents, reason: input.reason, requestedByUserId: ctx.user.id, evidenceRecordId: input.evidenceRecordId ?? null });
+      // v23.32 — the organization's CR series on the Document Control ledger, in the same transaction as the credit.
+      await prepareSeries(db, ctx.money.tenantId, "CR");
+      const creditRef = await db.transaction(async tx => {
+        const n = await mintScopedNumber(tx, ctx.money, "CR", { recordType: "customer_credit", actorUserId: ctx.user.id });
+        const ins = await tx.insert(customerCredits).values({ creditRef: n.number, numberScope: n.numberScope, numberAllocationRef: n.allocationRef, financialEntityId, customer, customerAccountId, invoiceId: inv?.id ?? null, amountCents: input.amountCents, reason: input.reason, requestedByUserId: ctx.user.id, evidenceRecordId: input.evidenceRecordId ?? null });
+        await bindNumber(tx, n.allocationRef, Number(ins[0]?.insertId ?? 0));
+        return n.number;
+      });
       return { creditRef, status: "requested" as const, financialEntityId, customer };
     }),
 
@@ -201,10 +209,21 @@ export const arRouter = router({
       if (c.status !== "requested") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Credit is ${c.status}` });
       if (c.requestedByUserId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "The requester may not decide their own credit" });
       // P7.4 — the approval ladder (0133) decides who, and how many people, this amount needs.
-      const ledger = await ledgerDecide(db, { actorUserId: ctx.user.id, category: "credit", subjectType: "customer_credit", subjectRef: c.creditRef, amountCents: c.amountCents, preparedByUserId: c.requestedByUserId, decision: input.decision });
+      const ledger = await ledgerDecide(db, { actorUserId: ctx.user.id, category: "credit", subjectType: "customer_credit", subjectRef: ledgerSubjectRef(c.creditRef, c.numberScope), amountCents: c.amountCents, preparedByUserId: c.requestedByUserId, decision: input.decision });
       if (ledger.outcome === "blocked") throw new TRPCError({ code: ledger.reason.startsWith("REVIEW") ? "PRECONDITION_FAILED" : "FORBIDDEN", message: ledger.reason });
       if (ledger.outcome === "awaiting") return { creditRef: c.creditRef, status: "requested" as const, ledger };
-      await db.update(customerCredits).set({ status: input.decision, approvedByUserId: ctx.user.id, approvedAt: new Date() }).where(eq(customerCredits.id, c.id));
+      // v23.32 — decided under the invoice's lock and re-checked against what is outstanding NOW: two approvals racing to over-credit — one is refused.
+      await db.transaction(async tx => {
+        const inv = c.invoiceId != null ? (await tx.select().from(invoices).where(eq(invoices.id, c.invoiceId)).for("update").limit(1))[0] : undefined;
+        const cur = (await tx.select().from(customerCredits).where(eq(customerCredits.id, c.id)).for("update").limit(1))[0]!;
+        if (cur.status !== "requested") throw new TRPCError({ code: "CONFLICT", message: `Credit was decided meanwhile (${cur.status})` });
+        if (inv && input.decision === "approved") {
+          const [allocs, creds] = await Promise.all([tx.select().from(paymentAllocations).where(eq(paymentAllocations.invoiceId, inv.id)), tx.select().from(customerCredits).where(eq(customerCredits.invoiceId, inv.id))]);
+          const balance = invoiceBalanceCents({ id: inv.id, invoiceNumber: inv.invoiceNumber, customer: inv.customer, totalCents: inv.totalCents, dueAt: inv.dueAt, issuedAt: inv.issuedAt ?? inv.createdAt, status: inv.status, disputed: false }, allocs.map(a => ({ invoiceId: a.invoiceId, amountCents: a.amountCents })), creds.map(x => ({ invoiceId: x.invoiceId, customer: x.customer, amountCents: x.amountCents, status: x.status })) as ArCredit[]);
+          if (cur.amountCents > balance) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `The credit of ${cur.amountCents} cents exceeds the ${balance} cents outstanding on ${inv.invoiceNumber}` });
+        }
+        await tx.update(customerCredits).set({ status: input.decision, approvedByUserId: ctx.user.id, approvedAt: new Date() }).where(eq(customerCredits.id, c.id));
+      });
       return { creditRef: c.creditRef, status: input.decision, ledger };
     }),
 
@@ -256,8 +275,13 @@ export const arRouter = router({
       await db.update(writeOffRequests).set({ status: input.decision, decidedByUserId: ctx.user.id, decidedAt: new Date(), decisionReason: input.reason }).where(eq(writeOffRequests.id, w.id));
       await db.insert(collectionEvents).values({ invoiceId: w.invoiceId, eventType: "write_off_decided", note: `${input.decision}: ${input.reason}`, byUserId: ctx.user.id, at: new Date() });
       if (input.decision === "approved") {
-        const creditRef = (await nextTrackingNumber(db, { sequenceType: "CR" })).trackingNumber;
-        await db.insert(customerCredits).values({ creditRef, financialEntityId: invRow.financialEntityId, customer: invRow.customer, customerAccountId: invRow.customerAccountId, invoiceId: invRow.id, amountCents: w.amountCents, reason: `Write-off ${w.requestRef}: ${w.reason}`, requestedByUserId: w.requestedByUserId, approvedByUserId: ctx.user.id, approvedAt: new Date(), status: "approved" });
+        await prepareSeries(db, ctx.money.tenantId, "CR");
+        const creditRef = await db.transaction(async tx => {
+          const n = await mintScopedNumber(tx, ctx.money, "CR", { recordType: "customer_credit", actorUserId: ctx.user.id });
+          const ins = await tx.insert(customerCredits).values({ creditRef: n.number, numberScope: n.numberScope, numberAllocationRef: n.allocationRef, source: "write_off", financialEntityId: invRow.financialEntityId!, customer: invRow.customer, customerAccountId: invRow.customerAccountId, invoiceId: invRow.id, amountCents: w.amountCents, reason: `Write-off ${w.requestRef}: ${w.reason}`, requestedByUserId: w.requestedByUserId, approvedByUserId: ctx.user.id, approvedAt: new Date(), status: "approved" });
+          await bindNumber(tx, n.allocationRef, Number(ins[0]?.insertId ?? 0));
+          return n.number;
+        });
         if (balance - w.amountCents === 0) await db.update(invoices).set({ status: "paid" }).where(eq(invoices.id, invRow.id));
         return { requestRef: w.requestRef, status: "approved" as const, creditRef, invoiceBalanceAfterCents: balance - w.amountCents };
       }

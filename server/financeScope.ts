@@ -43,14 +43,27 @@ function owned<T>(row: T | undefined, entityOf: (r: T) => number | null | undefi
 export { requireOwnedEntity };
 
 // ── AR ────────────────────────────────────────────────────────────────────────────────────────────
+/**
+ * 0233 — invoice and credit numbers are unique per ORGANIZATION (each mints its own series), so a number is looked
+ * up among the caller's books, never globally: another organization's INV-2026-000001 is not found, and a number
+ * that names two records in the caller's own books (only possible for pre-0233 data) is refused, not guessed.
+ */
+async function oneInBooks<T extends { financialEntityId: number | null }>(rows: T[], fs: FinanceScope, what: string): Promise<T> {
+  const mine = rows.filter(r => ownsEntity(fs, r.financialEntityId));
+  if (mine.length === 0) throw missing(what);
+  if (mine.length > 1) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `${what}: the number names more than one record in your books` });
+  return mine[0]!;
+}
 export async function invoiceInScope(db: Db, fs: FinanceScope, invoiceNumber: string, what = "Invoice") {
-  return owned((await db.select().from(invoices).where(eq(invoices.invoiceNumber, invoiceNumber)).limit(1))[0], r => r.financialEntityId, fs, what);
+  if (!fs.entityIds.length) throw missing(what);
+  return oneInBooks(await db.select().from(invoices).where(and(eq(invoices.invoiceNumber, invoiceNumber), inArray(invoices.financialEntityId, fs.entityIds))).limit(2), fs, what);
 }
 export async function invoiceByIdInScope(db: Db, fs: FinanceScope, invoiceId: number, what = "Invoice") {
   return owned((await db.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1))[0], r => r.financialEntityId, fs, what);
 }
 export async function customerCreditInScope(db: Db, fs: FinanceScope, creditRef: string) {
-  return owned((await db.select().from(customerCredits).where(eq(customerCredits.creditRef, creditRef)).limit(1))[0], r => r.financialEntityId, fs, "Credit");
+  if (!fs.entityIds.length) throw missing("Credit");
+  return oneInBooks(await db.select().from(customerCredits).where(and(eq(customerCredits.creditRef, creditRef), inArray(customerCredits.financialEntityId, fs.entityIds))).limit(2), fs, "Credit");
 }
 export async function writeOffInScope(db: Db, fs: FinanceScope, requestRef: string) {
   const w = (await db.select().from(writeOffRequests).where(eq(writeOffRequests.requestRef, requestRef)).limit(1))[0];
@@ -66,9 +79,15 @@ export async function disputeCaseInScope(db: Db, fs: FinanceScope, caseNumber: s
   const c = (await db.select().from(disputeCases).where(eq(disputeCases.caseNumber, caseNumber)).limit(1))[0];
   if (!c) throw notFound("Dispute case");
   // A case that names no invoice has no book to prove; it is nobody's through this path.
-  if (!c.invoiceNumber) throw notFound("Dispute case");
-  const inv = (await db.select({ financialEntityId: invoices.financialEntityId }).from(invoices).where(eq(invoices.invoiceNumber, c.invoiceNumber)).limit(1))[0];
-  if (!inv || !ownsEntity(fs, inv.financialEntityId)) throw notFound("Dispute case");
+  // 0233 — a case names its invoice by id and carries its book; an older case is proved through its number, in the caller's books.
+  if (c.financialEntityId != null || c.invoiceId != null) {
+    const inv = c.invoiceId != null ? (await db.select({ financialEntityId: invoices.financialEntityId }).from(invoices).where(eq(invoices.id, c.invoiceId)).limit(1))[0] : undefined;
+    if (!ownsEntity(fs, c.financialEntityId ?? inv?.financialEntityId)) throw notFound("Dispute case");
+    return c;
+  }
+  if (!c.invoiceNumber || !fs.entityIds.length) throw notFound("Dispute case");
+  const inv = (await db.select({ financialEntityId: invoices.financialEntityId }).from(invoices).where(and(eq(invoices.invoiceNumber, c.invoiceNumber), inArray(invoices.financialEntityId, fs.entityIds))).limit(1))[0];
+  if (!inv) throw notFound("Dispute case");
   return c;
 }
 

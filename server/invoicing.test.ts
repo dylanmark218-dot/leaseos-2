@@ -175,7 +175,7 @@ d("an invoice from the ticket's decisions, end to end", () => {
     const accepted = await portalCaller(token).portal.invoiceAccept({ invoiceNumber: drafted.invoiceNumber, acceptedByRole: "AP lead" });
     expect(accepted).toMatchObject({ acceptedByName: "ABC AP", already: false });
     expect((await portalCaller(token).portal.invoiceAccept({ invoiceNumber: drafted.invoiceNumber, acceptedByRole: "AP lead" })).already).toBe(true);
-    const [row] = await pool.execute<mysql.RowDataPacket[]>("SELECT status, acceptedByName, acceptedByRole, acceptanceToken FROM invoices WHERE invoiceNumber = ?", [drafted.invoiceNumber]);
+    const [row] = await pool.execute<mysql.RowDataPacket[]>("SELECT status, acceptedByName, acceptedByRole, acceptanceToken FROM invoices WHERE invoiceNumber = ? AND numberScope = 'default'", [drafted.invoiceNumber]);
     expect(row[0]).toMatchObject({ status: "viewed", acceptedByName: "ABC AP", acceptedByRole: "AP lead" });   // acceptance is in its fields; the status stays the delivery state
     expect(row[0].acceptanceToken).toContain(":");
   });
@@ -198,10 +198,10 @@ d("an invoice from the ticket's decisions, end to end", () => {
     expect((await portalCaller(otherToken).portal.invoices()).invoices.map(i => i.invoiceNumber)).not.toContain(invoiceNumber);
     await expect(portalCaller(otherToken).portal.invoiceView({ invoiceNumber })).rejects.toThrow(/No such invoice for this account/);
     await portalCaller(token).portal.invoiceDispute({ invoiceNumber, disputedAmountCents: 10_000, reason: "Standby hours were not authorized by our supervisor" });
-    const [after] = await pool.execute<mysql.RowDataPacket[]>("SELECT status FROM invoices WHERE invoiceNumber = ?", [invoiceNumber]);
+    const [after] = await pool.execute<mysql.RowDataPacket[]>("SELECT status FROM invoices WHERE invoiceNumber = ? AND numberScope = 'default'", [invoiceNumber]);
     if (after[0].status === "disputed") await expect(portalCaller(token).portal.invoiceAccept({ invoiceNumber, acceptedByRole: "AP" })).rejects.toThrow(/disputed/);
     else expect(after[0].status).toBe("sent");                                                    // a dispute submission may await office review before the status moves; either way nothing was accepted
-    const [acc] = await pool.execute<mysql.RowDataPacket[]>("SELECT acceptedAt FROM invoices WHERE invoiceNumber = ?", [invoiceNumber]);
+    const [acc] = await pool.execute<mysql.RowDataPacket[]>("SELECT acceptedAt FROM invoices WHERE invoiceNumber = ? AND numberScope = 'default'", [invoiceNumber]);
     expect(acc[0].acceptedAt).toBeNull();
   });
 
@@ -280,12 +280,12 @@ d("an invoice from the ticket's decisions, end to end", () => {
     await fin.finalize({ invoiceNumber: second.invoiceNumber });
     const voided = await fin.void({ invoiceNumber: second.invoiceNumber, reason: "Standby to be invoiced with next month's work" });
     expect(voided).toMatchObject({ voided: true, releasedLines: 1 });
-    const [v] = await pool.execute<mysql.RowDataPacket[]>("SELECT status, voidReason, voidedByUserId FROM invoices WHERE invoiceNumber = ?", [second.invoiceNumber]);
+    const [v] = await pool.execute<mysql.RowDataPacket[]>("SELECT status, voidReason, voidedByUserId FROM invoices WHERE invoiceNumber = ? AND numberScope = 'default'", [second.invoiceNumber]);
     expect(v[0]).toMatchObject({ status: "void", voidReason: "Standby to be invoiced with next month's work", voidedByUserId: controller });
     const third = await inv.draftFromTicket({ ticketNumber: t.ticketNumber });                            // the released line drafts again
     expect(third.drafted).toBe(true); if (!third.drafted) return;
     expect(third).toMatchObject({ subtotalCents: 19_000, lines: 1 });
-    const [snap] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM billingSnapshots WHERE invoiceId = (SELECT id FROM invoices WHERE invoiceNumber = ?)", [second.invoiceNumber]);
+    const [snap] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM billingSnapshots WHERE invoiceId = (SELECT id FROM invoices WHERE invoiceNumber = ? AND numberScope = 'default')", [second.invoiceNumber]);
     expect(Number(snap[0].n)).toBe(1);                                                                    // the void keeps the snapshot
   });
 });
