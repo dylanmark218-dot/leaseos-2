@@ -126,8 +126,10 @@ Scanned at the registry commit against `main` = `48a64e1` (head `0227`), and aga
 The registry was drafted as `0228`, free on `main` and on every branch at the morning scan; the pre-commit rescan
 found `0228` claimed by payroll P3 and `0229`–`0232` by the integration hub, so it moved to `0233` before any
 environment applied it. Main has since taken `0228` itself (#99); `0233` was still free on main and every branch
-at the rescan. No ref holds anything at or above `0234`. **Next free number for new work: `0234`** (re-check with
-the scan before committing).
+at the rescan. No ref then held anything at or above `0234`. Main has since taken `0236` (#135, which counted
+`0233` among the claimed slots); `0233` stays, below main's head, and the ledger applies it by name. Next free
+number for new work: see the latest section below (`0237` at the #135 merge; re-check with the scan before
+committing).
 
 ## Claim: 0227 (payroll P2 — pay schedules and the pay-period machine, 2026-10-03)
 
@@ -412,3 +414,16 @@ every slot in use, so it moved to `0228`. The migration creates only new tables 
 ## Change log (continued)
 
 * **2026-10-01 (SA1 merge)**: Sign & Attest `0214`–`0216` recorded against `main` `ce27fec`; next free `0220`.
+
+## State at the Driver Portfolio security hardening (2026-10-03, `main` = `60de8c2`)
+
+`main` migration head: **`0228_safety_program_builder.sql`**. The security-hardening branch
+(`security/driver-portfolio-hardening`, PR #135) takes **`0236_compliance_document_recorder.sql`** — one
+nullable column, `complianceDocuments.recordedByUserId`, no back-fill (NULL = recorder unknown). Drafted as
+`0229`; the scan across all 144 remote branches found `0229` claimed by
+`claude/integration-hub-subsystem-6nzrkw` and `0230`–`0235` by other open branches, so it moved to `0236`
+before it was ever applied on main. The ledger runner applies it by name.
+
+**Next free number after this: `0237`** (re-check with the scan before committing).
+
+* **2026-10-03 (Driver Portfolio hardening)**: drafted `0229`, renumbered to `0236` on merging `main` `60de8c2` (0229–0235 claimed by open branches); next free `0237`.

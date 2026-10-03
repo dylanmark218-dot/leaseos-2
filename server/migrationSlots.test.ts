@@ -76,9 +76,14 @@ describe("the real tree", () => {
     // The approved external source registry took 0233. Drafted as 0228 when that was free, it moved before any
     // environment applied it when the pre-commit scan found 0228 claimed by payroll P3 and 0229–0232 by the
     // integration hub; main has since taken 0228 itself (the program builder, #99). 0233 was still free on main
-    // and on all 133 remote branches at the rescan before rebasing onto it.
+    // and on all 133 remote branches at the rescan before rebasing onto it, and stays below main's 0236,
+    // whose author counted it among the claimed slots; the ledger applies by name.
     expect(files).toContain("0233_external_source_registry.sql");
-    expect(headSlot(files)).toBe("0233");
+    // Driver Portfolio security hardening took 0236 (compliance document recorder). Drafted as 0229; on
+    // merging main, 0229 was claimed by the integration hub and 0230–0235 by other open branches, so it
+    // moved to 0236, the first slot free on main and on all 144 remote branches at the scan.
+    expect(files).toContain("0236_compliance_document_recorder.sql");
+    expect(headSlot(files)).toBe("0236");
   });
 
   it("keeps the reserved slots empty", () => {
