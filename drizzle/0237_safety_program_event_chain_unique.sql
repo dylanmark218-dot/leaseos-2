@@ -2,7 +2,7 @@
 --
 -- Slot: 0228 (the Safety & Compliance Program Builder) merged to main as #99 on 2026-10-03. This follow-up
 -- was first numbered 0233, then 0236, each the first slot above every slot in use at its scan; each was
--- claimed by other branches before this merged (0233: external-source-registry and billing-invoicing-ar,
+-- claimed by other branches before this merged (0233: external-source-registry, merged as #133, and billing-invoicing-ar,
 -- recorded in main's SPINE reconciliation; 0234–0235: payroll P4; 0236: marketplace-main-reconcile and
 -- security/driver-portfolio-hardening, which merged it to main as #135). Under the register's rule a checkpoint takes the first slot above
 -- every slot in use in any lineage, so it is 0237 at the PR's final scan of 141 remote branches. It had not

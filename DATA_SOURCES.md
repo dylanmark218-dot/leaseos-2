@@ -5,13 +5,13 @@ Every field below was checked against the publisher and is now seeded into
 `externalDataSources` by `seedExternalDataSources()`. This document describes
 what the runtime enforces; it is not the enforcement itself.
 
-## Ten verified, eighteen not
+## Ten verified, twenty not
 
 | | Count |
 |---|---|
 | Verified — usable per their licence | **10** |
-| Unverified — inspection only | **18** |
-| Total | **28** |
+| Unverified — inspection only | **20** |
+| Total | **30** |
 
 > **Correction.** The research summary stated "nine of eleven are clean" while
 > separately flagging three as unresolved. Eleven minus three is eight. Seeding
@@ -55,8 +55,10 @@ what the runtime enforces; it is not the enforcement itself.
 | `bc_resource_road_maps` | The province states these are planning tools and that the posted road sign takes precedence. |
 | `statcan_boundaries` | The provincial/territorial boundary file. Licence not reviewed here, so nothing imports from it — which is exactly why a coordinate still cannot establish a province. |
 | `crtc_coverage` | Modelled coverage layers published for regulatory purposes, not a guarantee of service at a position. |
+| `sk_petroleum_gis` | The facility directory's Saskatchewan Petroleum facilities layer (0143), registered in 0233 so the approved-source registry governs its importer. The licence is named (Standard Unrestricted Use Data Licence v2.0); commercial use, redistribution and attribution are recorded here only when a person clears it. The importer's own licence gate reads the facility licence register, where 0143 recorded the grant. |
+| `bcer_gis` | The BC Energy Regulator's facility-point and sump layers (0143). Same treatment: licence named (BCER Open Data Licence), not cleared here. |
 
-All ten carry `attributionText: null` deliberately, as a second barrier: a
+Every unverified source carries `attributionText: null` deliberately, as a second barrier: a
 source cannot reach operational use by editing `status` and the permission flags
 alone — somebody has to have actually recorded what the publisher requires shown.
 Test-pinned.
