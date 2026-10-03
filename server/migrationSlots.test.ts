@@ -54,6 +54,7 @@ describe("the real tree", () => {
     expect(files).toContain("0208_organization_invitations.sql");   // renumbered from 0175 on merging main, which took 0175
     // Main has since taken 0209 (0209_operating_zone_scope, P0-A2.1), above this checkpoint's two; the
     // ledger applies by name, so 0207/0208 still run on a database that already has 0209.
+    // The driver portfolio (#16) then took 0210–0212, yielding 0202–0204 to Live Assist, which merged first.
     // SA1 (Sign & Attest) holds 0214–0216 on this branch, below v23.31's 0217–0219, which were renumbered
     // around them; both lineages apply by name.
     // v23.31 took 0217–0219 (Customer, Contract and Rate Management): 0210–0216 are claimed by open
@@ -65,7 +66,9 @@ describe("the real tree", () => {
     // Payroll P1 took 0226 (compensation agreements): 0220–0225 are claimed by open branches (ELD, integration
     // hub, CI stabilization), so head+1 would have collided twice; drafted as 0224 and moved before it was applied.
     expect(files).toContain("0226_payroll_compensation_agreements.sql");
-    expect(headSlot(files)).toBe("0226");
+    // Payroll P2 took 0227 (pay schedules): 0223–0225 are still claimed by open branches, below main's 0226.
+    expect(files).toContain("0227_payroll_pay_schedules.sql");
+    expect(headSlot(files)).toBe("0227");
   });
 
   it("keeps the reserved slots empty", () => {
