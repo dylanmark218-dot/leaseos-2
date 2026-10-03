@@ -183,6 +183,9 @@ export const requirementRouter = router({
       await assertCallerOwnsEntity(db as never, ctx.user.id, input.financialEntityId);
       const scope = await actingScopeFor(ctx.user.id);
       if (!(await userInScope(input.userId, scope))) throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+      // The employer's act is someone else's: nobody authorizes themselves on equipment (it clears a
+      // mandatory equipment requirement in dispatch readiness).
+      if (input.userId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "You may not authorize yourself on equipment" });
       for (const e of [input.trainingEvidenceId, input.competencyEvidenceId]) if (e != null && !(await evidenceInScope(e, scope))) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence record not found" });
       const now = new Date();
       const complete = input.trainingEvidenceId != null && (input.competencyEvidenceId != null || input.competencyAssessedAt != null) && input.instructionsAcknowledgedAt != null;
