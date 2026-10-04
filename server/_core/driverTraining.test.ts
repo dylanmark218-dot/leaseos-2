@@ -50,7 +50,7 @@ describe("driver qualification gate", () => {
   it("allows provincially restricted Class 1 for Alberta-only movement", () => {
     const result = evaluateDriverQualification(
       profile({ licenceClass: "1", class1ProvincialRestriction: true, credentials: [{ code: "Q", verification: "verified" }] }),
-      { requiredLicenceClass: "1", airBrakes: true, destinationJurisdiction: "CA-AB" },
+      { requiredLicenceClass: "1", airBrakes: true, originJurisdiction: "CA-AB", destinationJurisdiction: "CA-AB" },
       now,
     );
     expect(result.status).toBe("qualified_for_dispatch");
@@ -64,6 +64,57 @@ describe("driver qualification gate", () => {
     );
     expect(result.status).toBe("blocked");
     expect(result.blockers.join(" ")).toContain("provincially restricted");
+  });
+
+  /*
+   * The Alberta Class 1 provincial restriction: an unknown end of the movement is unknown, never
+   * Alberta. Only a movement known at both ends to be in Alberta satisfies it; a known end outside
+   * Alberta blocks; anything not established goes to review.
+   */
+  describe("Class 1 provincial restriction never assumes Alberta", () => {
+    const restricted = () => profile({ licenceClass: "1", class1ProvincialRestriction: true, credentials: [{ code: "Q", verification: "verified" }] });
+    const move = (origin: string | null | undefined, destination: string | null | undefined) =>
+      evaluateDriverQualification(restricted(), { requiredLicenceClass: "1", airBrakes: true, originJurisdiction: origin, destinationJurisdiction: destination }, now);
+
+    it("AB → AB: the restriction is satisfied", () => {
+      const r = move("CA-AB", "CA-AB");
+      expect(r.status).toBe("qualified_for_dispatch");
+      expect(r.satisfied.join(" ")).toContain("Alberta-only movement");
+    });
+    it("AB → BC: blocked", () => {
+      const r = move("CA-AB", "CA-BC");
+      expect(r.status).toBe("blocked");
+      expect(r.blockers.join(" ")).toContain("provincially restricted");
+    });
+    it("BC → AB: blocked — a known origin outside Alberta is not an Alberta-only movement", () => {
+      expect(move("CA-BC", "CA-AB").status).toBe("blocked");
+    });
+    it("destination unknown: review, not Alberta", () => {
+      const r = move("CA-AB", null);
+      expect(r.status).toBe("needs_review");
+      expect(r.satisfied.join(" ")).not.toContain("Alberta-only");
+      expect(r.reviewItems.join(" ")).toContain("destination jurisdiction is not established");
+    });
+    it("origin unknown: review, not Alberta", () => {
+      const r = move(undefined, "CA-AB");
+      expect(r.status).toBe("needs_review");
+      expect(r.reviewItems.join(" ")).toContain("origin jurisdiction is not established");
+    });
+    it("both unknown: review, never 'compatible with an Alberta-only movement'", () => {
+      const r = move(null, null);
+      expect(r.status).toBe("needs_review");
+      expect(r.satisfied.join(" ")).not.toContain("Alberta-only");
+    });
+    it("conflicting or unrecognized geography is unknown, not Alberta and not a guess", () => {
+      // An unrecognized code is not evidence of anything — not of Alberta, and not of elsewhere.
+      for (const bad of ["Alberta", "AB?", "", "XX-YY-ZZ"]) {
+        const r = move("CA-AB", bad);
+        expect(r.status, bad).toBe("needs_review");
+        expect(r.satisfied.join(" "), bad).not.toContain("Alberta-only");
+      }
+      // A known out-of-Alberta end still blocks even when the other end is unrecognized.
+      expect(move("garbage", "CA-SK").status).toBe("blocked");
+    });
   });
 
   it("blocks an expired licence", () => {

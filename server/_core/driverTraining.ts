@@ -208,7 +208,11 @@ export type MovementQualificationRequirement = {
   /** Use only when a trained TDG certificate holder will be physically present. */
   tdgDirectSupervision?: boolean;
   tdgSupervisorCertificateVerified?: boolean;
-  /** e.g. CA-AB, CA-SK. Used only to enforce a known Alberta C1 provincial restriction. */
+  /**
+   * e.g. CA-AB, CA-SK. Used only to enforce a known Alberta C1 provincial restriction. An end that is
+   * missing or not a recognizable country-province code is UNKNOWN — never taken to be Alberta.
+   */
+  originJurisdiction?: string | null;
   destinationJurisdiction?: string | null;
   requiredEmployerCompetencies?: string[];
 };
@@ -266,15 +270,21 @@ export function evaluateDriverQualification(
     blockers.push("Driver licence is expired");
   }
 
-  if (
-    requirement.requiredLicenceClass === "1" &&
-    profile.class1ProvincialRestriction &&
-    requirement.destinationJurisdiction &&
-    requirement.destinationJurisdiction !== "CA-AB"
-  ) {
-    blockers.push("Class 1 licence is provincially restricted to Alberta for this movement");
-  } else if (requirement.requiredLicenceClass === "1" && profile.class1ProvincialRestriction) {
-    satisfied.push("Class 1 provincial restriction is compatible with an Alberta-only movement");
+  if (requirement.requiredLicenceClass === "1" && profile.class1ProvincialRestriction) {
+    // A movement is Alberta-only only when both ends are known to be in Alberta. A known end outside
+    // Alberta blocks; an end that is missing or unrecognizable is unknown and goes to review — it is
+    // never assumed to be Alberta.
+    const ends = [["origin", requirement.originJurisdiction], ["destination", requirement.destinationJurisdiction]] as const;
+    const known = (j: string | null | undefined) => typeof j === "string" && /^[A-Z]{2}-[A-Z]{2}$/.test(j);
+    if (ends.some(([, j]) => known(j) && j !== "CA-AB")) {
+      blockers.push("Class 1 licence is provincially restricted to Alberta for this movement");
+    } else if (ends.every(([, j]) => j === "CA-AB")) {
+      satisfied.push("Class 1 provincial restriction is compatible with an Alberta-only movement");
+    } else {
+      for (const [end, j] of ends) {
+        if (!known(j)) reviewItems.push(`Class 1 licence is provincially restricted to Alberta and the movement's ${end} jurisdiction is not established`);
+      }
+    }
   }
 
   if (requirement.airBrakes) {
