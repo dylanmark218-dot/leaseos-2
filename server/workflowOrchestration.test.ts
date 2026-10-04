@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
+import { createWorkerPorts, type PoolLike, type SqlParam } from "./_core/workflowRuntime";
 
 // A unit id no test creates. These rows only need a unitId to satisfy the column;
 // the literal 1 used here before collided with whichever suite happened to create
@@ -29,11 +30,29 @@ beforeAll(async () => {
 const uid = (p: string) =>
   `${p}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 
+/**
+ * Where a fixture event is parked so only this suite can reach it.
+ *
+ * Every suite shares one database, and a sibling suite that starts the real
+ * worker drains the outbox with no eventId filter — `claimBatch` takes
+ * whatever is oldest and unclaimed, which includes the row this suite is
+ * about to race two workers for. Both workers then find nothing and the
+ * failure reads `expected [] to have a length of 1`, which looks like a
+ * broken claim and is not one.
+ *
+ * `claimBatch` skips a row whose retry is not yet due, so a far-future
+ * `retryAvailableAt` puts the fixture out of its reach. `drainOnce` below
+ * does not filter on the retry window — it is testing the SKIP LOCKED claim,
+ * not the retry schedule — so the race it runs is exactly the same race.
+ * TIMESTAMP tops out in 2038, so "far future" is 2037.
+ */
+const PARKED = "2037-01-01 00:00:00";
+
 async function insertEvent(eventId: string, unitId: string) {
   await pool.execute(
     `INSERT INTO domainEventOutbox
-       (eventId, eventType, aggregateType, aggregateId, tenantId, payloadJson, occurredAt)
-     VALUES (?,?,?,?,?,?,NOW())`,
+       (eventId, eventType, aggregateType, aggregateId, tenantId, payloadJson, occurredAt, retryAvailableAt)
+     VALUES (?,?,?,?,?,?,NOW(),?)`,
     [
       eventId,
       "unit.critical_defect_opened",
@@ -41,6 +60,7 @@ async function insertEvent(eventId: string, unitId: string) {
       unitId,
       "T1",
       JSON.stringify({ severity: "critical" }),
+      PARKED,
     ]
   );
 }
@@ -126,6 +146,18 @@ async function drainOnce(
   }
 }
 
+/**
+ * Which worker holds the row. The count of successful returns says how many
+ * workers *believe* they claimed it; this says who the database agrees with.
+ */
+const claimerOf = async (eventId: string) => {
+  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+    "SELECT claimedBy FROM domainEventOutbox WHERE eventId = ?",
+    [eventId]
+  );
+  return (rows[0]?.claimedBy as string | null) ?? null;
+};
+
 const openTasksFor = async (unitId: string) => {
   const [rows] = await pool.execute<mysql.RowDataPacket[]>(
     "SELECT COUNT(*) AS n FROM operationalTasks WHERE subjectId = ? AND status = 'open'",
@@ -145,9 +177,9 @@ d("outbox atomicity", () => {
       [NO_SUCH_UNIT, `Critical defect on ${unit}`, "critical", "open"]
     );
     await conn.execute(
-      `INSERT INTO domainEventOutbox (eventId, eventType, aggregateType, aggregateId, tenantId, payloadJson, occurredAt)
-       VALUES (?,?,?,?,?,?,NOW())`,
-      [eventId, "unit.critical_defect_opened", "unit", unit, "T1", "{}"]
+      `INSERT INTO domainEventOutbox (eventId, eventType, aggregateType, aggregateId, tenantId, payloadJson, occurredAt, retryAvailableAt)
+       VALUES (?,?,?,?,?,?,NOW(),?)`,
+      [eventId, "unit.critical_defect_opened", "unit", unit, "T1", "{}", PARKED]
     );
     await conn.commit();
     conn.release();
@@ -196,8 +228,12 @@ d("two workers draining the same outbox", () => {
       drainOnce("worker-b", 150, eventId),
     ]);
 
-    const claimed = [a, b].filter(Boolean);
-    expect(claimed).toHaveLength(1);
+    const winners = (["worker-a", "worker-b"] as const).filter(
+      (_, i) => [a, b][i] !== null
+    );
+    expect(winners).toHaveLength(1);
+    // And the database agrees with the one that thinks it won.
+    expect(await claimerOf(eventId)).toBe(winners[0]);
     expect(await openTasksFor(unit)).toBe(1);
   });
 
@@ -206,11 +242,12 @@ d("two workers draining the same outbox", () => {
     const eventId = uid("EVT-QUAD");
     await insertEvent(eventId, unit);
 
-    const results = await Promise.all(
-      ["w1", "w2", "w3", "w4"].map(w => drainOnce(w, 120, eventId))
-    );
+    const workers = ["w1", "w2", "w3", "w4"];
+    const results = await Promise.all(workers.map(w => drainOnce(w, 120, eventId)));
 
-    expect(results.filter(Boolean)).toHaveLength(1);
+    const winners = workers.filter((_, i) => results[i] !== null);
+    expect(winners).toHaveLength(1);
+    expect(await claimerOf(eventId)).toBe(winners[0]);
     expect(await openTasksFor(unit)).toBe(1);
   });
 
@@ -316,5 +353,44 @@ d("notification deduplication", () => {
       );
     await insert();
     await expect(insert()).rejects.toThrow();
+  });
+});
+
+/**
+ * The shared drain worker — `createWorkerPorts(...).claimBatch`, which a sibling suite starts for real —
+ * takes the oldest unprocessed outbox rows with no eventId filter. If this suite's race fixture is one of
+ * them, the worker claims it first and both of this suite's racing workers find nothing: the failure
+ * reads `expected [] to have a length of 1`, which looks like a broken claim and is not one.
+ *
+ * Run here deterministically rather than by hoping two suites collide: the worker's own claim query,
+ * unchanged, with one clause added so it can only ever see this test's event — the shared database is
+ * not touched beyond it. If the claim query changes shape, this refuses to run it unscoped.
+ */
+const CLAIM_QUERY = /FROM domainEventOutbox\s+WHERE processedAt IS NULL[\s\S]*ORDER BY id LIMIT/;
+const scopedTo = (eventId: string): PoolLike => ({
+  execute: ((sql: string, params?: SqlParam[]) => pool.execute(sql, params as never)) as PoolLike["execute"],
+  getConnection: async () => {
+    const conn = await pool.getConnection();
+    const execute = ((sql: string, params?: SqlParam[]) => {
+      if (/^\s*SELECT[\s\S]*FROM domainEventOutbox/.test(sql)) {
+        if (!CLAIM_QUERY.test(sql)) throw new Error("the worker's claim query changed shape; refusing to run it unscoped against a shared database");
+        return conn.execute(sql.replace("ORDER BY id LIMIT", "AND eventId = ? ORDER BY id LIMIT"), [...(params ?? []), eventId] as never);
+      }
+      return conn.execute(sql, params as never);
+    }) as PoolLike["execute"];
+    return { execute, beginTransaction: () => conn.beginTransaction(), commit: () => conn.commit(), rollback: () => conn.rollback(), release: () => conn.release() };
+  },
+});
+
+d("this suite's fixtures are out of the shared drain worker's reach", () => {
+  it("the real worker's claim, run from a sibling suite, does not take the race fixture", async () => {
+    const eventId = uid("EVT-REACH");
+    await insertEvent(eventId, String(NO_SUCH_UNIT));
+
+    const claimed = await createWorkerPorts(scopedTo(eventId)).claimBatch("sibling-suite-drain", 10);
+
+    expect(claimed.map(c => c.eventId)).toEqual([]);
+    const [rows] = await pool.execute<mysql.RowDataPacket[]>("SELECT claimedBy FROM domainEventOutbox WHERE eventId = ?", [eventId]);
+    expect(rows[0]?.claimedBy ?? null).toBeNull();
   });
 });
