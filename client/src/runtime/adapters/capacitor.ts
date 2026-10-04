@@ -33,6 +33,8 @@ import {
   type BarcodeScanner, type DocumentScanner, type FileVault, type Keystore, type LocalStore, type OcrEngine,
 } from "../contracts";
 
+import type { HardwareCapability } from "@shared/hardwareCapability";
+
 type PluginLoader<T> = () => Promise<T | null>;
 
 async function load<T>(name: string): Promise<T | null> {
@@ -98,3 +100,17 @@ export function capacitorBarcodeScanner(): { available: () => Promise<boolean>; 
 }
 
 export const NATIVE_ONLY_CAPABILITIES = ["encrypted_sqlite", "encrypted_file_vault", "hardware_keystore", "camera", "gps", "biometric_signing", "local_notifications", "document_scanner", "on_device_ocr", "barcode_scanner"] as const;
+
+/**
+ * SPINE item 3 — HS1 probes for the native shell: the per-binding `available()` checks above, and
+ * false for a capability with no binding in this repository yet (camera, GPS, a native connectivity
+ * listener). False means "will throw NotOnDeviceError", never "will degrade".
+ */
+export function capacitorProbes(): Record<HardwareCapability, () => Promise<boolean>> {
+  return {
+    localStore: () => capacitorStore().available(),
+    fileVault: () => capacitorVault().available(),
+    keystore: () => capacitorKeystore().available(),
+    camera: async () => false, location: async () => false, network: async () => false,
+  };
+}
