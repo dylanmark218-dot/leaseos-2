@@ -438,6 +438,7 @@ export const complianceRouter = router({
         dangerousGoods: z.boolean().optional(),
         tdgDirectSupervision: z.boolean().optional(),
         tdgSupervisorCertificateVerified: z.boolean().optional(),
+        originJurisdiction: z.string().max(80).nullable().optional(),
         destinationJurisdiction: z.string().max(80).nullable().optional(),
         requiredEmployerCompetencies: z.array(z.string().min(1).max(100)).optional(),
       }).strict(),
