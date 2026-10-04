@@ -80,10 +80,12 @@ refuse (NotOnDeviceError | server-required) — or save: saved_locally → queue
       ▼
 reconnect: sync.receivePackage / evidence.upload / direct procedure
       ▼
-server: session → resolveActingScope (device org binding) → roleProcedure permission → domain → accept / refuse / conflict
+server: session → resolveActingScope (device org binding) → roleProcedure permission → hashes
+      → offline policy re-check (sync.receivePackage) → domain → accept / refuse / conflict
 ```
 
-**Declarations** (`CAPTURE_OPERATIONS`, one per `CaptureKind`):
+**Declarations** (`CAPTURE_OPERATIONS`, one per `CaptureKind`; since the server re-check below, the
+policy fields live in `server/_core/captureOperations.ts` and the device adds only the hardware):
 - **Evidence** captures (inspections, tickets, a photographed out-of-service order, and so on) may run without the server. That is the outbox's existing behaviour: what the evidence permits is decided on sync.
 - `board_message`, `board_acknowledgement` and `shift_response` are requests a server procedure decides. They `requiresOnline` and are drafted, never done on the device.
 - **Hardware** named per kind:
@@ -108,7 +110,7 @@ server: session → resolveActingScope (device org binding) → roleProcedure pe
 | `queued` | complete, waiting for a connection | none | none |
 | `syncing` | being sent | none | none; connectivity only |
 | `synchronized` | the server verified it | none | the server authorized it on reconnect |
-| `failed` | the server refused it, or the hash did not match | **never** set for missing hardware | **never** set by offline policy; a server-required refusal creates no capture |
+| `failed` | the server refused it, or the hash did not match | **never** set for missing hardware | never set by the device's gate (a server-required refusal creates no capture); set by the **server's re-check** when a capture the policy forbids reaches it anyway — a stale or modified client |
 | `conflict` | the server had a different version | none | none (unreachable today: `markConflict` has no caller, and the engine sends empty `recordUpdates`) |
 
 No state means both "hardware unavailable" and "server refused". Both kinds of `unavailable` stop before the outbox, so no new state was needed and none was added.
@@ -179,3 +181,38 @@ Marking it reached would claim a production caller that does not exist. It leave
 - The native shell itself: camera, GPS, biometric, notification and connectivity bindings; the encrypted SQLite vault; the hardware keystore.
 - The HS3 command ledger. `conflict` stays unreachable until it exists.
 - HS5 (#120). It touches `syncEngine.ts`, `runtimeBootstrap.ts` and `HS_CONTRACTS.md`. This checkpoint changes one line of `runtimeBootstrap.ts` and does not touch `HS_CONTRACTS.md`: the frozen `CapabilityMatrix` it specifies is implemented as written.
+
+## Follow-up — the server re-checks the policy at sync
+
+The gate above is the device keeping itself correct offline; it is not authority. The follow-up to
+this checkpoint puts the same question to the server, from the same fact:
+
+- **One declaration.** `CAPTURE_OPERATIONS`' policy fields (`key`, `riskLevel`, `requiresOnline`,
+  `draftable`) moved unchanged to `server/_core/captureOperations.ts`. The device builds
+  `CAPTURE_OPERATIONS` from it and adds only `requiredHardware`; it no longer states `requiresOnline`.
+  `requiresOnline` is still read only through `actionGateway.mayRunWithoutServer`.
+- **The seam.** `sync.receivePackage` (`server/deviceRouter.ts`), where queued field evidence becomes
+  received. After admission (device, user, revocation, key), the acting scope (device bound to the
+  active organization), the evidence-ownership check and the three-way hash checks, each item is
+  re-checked by `fieldDevice.applyOperationPolicy` → `revalidatePackagedCapture`.
+- **The operation identity is the server's.** It is the `recordType` in the seal manifest the server
+  built and hashed at seal time (`recordTypeOfSealManifest`). A sealed record cannot be sealed again as
+  another operation ("already sealed — amend instead"), and the package carries no operation, class or
+  flag: any such field a client adds is stripped by the schema and never read.
+- **Outcomes.** No seal, an unreadable manifest or an undeclared kind → `UNKNOWN_OPERATION`. A
+  connected-required kind (a board request) arriving as offline evidence → `CONNECTED_REQUIRED`. Each
+  is a rejected item recorded as a row (`syncReceipts.failureDetail`, "Refused by the offline policy
+  (…)"), using the existing `mismatch` / `matched = false` states — no migration. The re-check only
+  rejects; it never verifies an item, and a pass is not authorization.
+- **Current policy wins.** The server decides on reconnect, so the declaration as it stands at sync
+  applies, not what the device believed at capture. No offline policy is versioned per capture.
+- **HS1 stays on the device.** Neither `deviceRouter` nor `fieldDevice` imports `hardwareCapability`
+  or `offlineCapability`; the server cannot know a device's hardware and does not ask.
+- **Tests.** `server/offlineSyncRecheck.test.ts` (pure: one declaration, manifest reading, the
+  re-check, current-policy-wins, folding, placement) and `server/spineItem3SyncRecheck.db.test.ts`
+  (through the gated outbox and the real router: stale client, unknown operation, ignored client
+  metadata, policy changed after capture, relabel refused, replay not duplicated, wrong actor and
+  missing permission still refused). Organization change and permission revocation are
+  `spineItem3Reconnect.db.test.ts`'s. `server/fieldDevice.test.ts`'s fixtures now seal their uploads as
+  a device does, and an unsealed item is refused.
+

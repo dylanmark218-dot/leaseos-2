@@ -23,6 +23,8 @@
  */
 
 import { syncPermitsDeviceRelease, type SyncState } from "./evidenceSync";
+import { mayRunWithoutServer } from "./actionGateway";
+import { capturePolicyFor, type CaptureOperationPolicy } from "./captureOperations";
 
 /* ------------------------------------------------------------------ */
 /* Device admission                                                     */
@@ -166,6 +168,67 @@ export function verifyPackageItems(args: {
   });
   const allOk = verdicts.every(v => v.outcome === "verified");
   return { packageOutcome: allOk ? "hash_verified" : "failed", verdicts };
+}
+
+/* ------------------------------------------------------------------ */
+/* The offline policy, re-checked on arrival (SPINE item 3)             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The operation an item was sealed as, from the seal manifest the server itself built and hashed at
+ * seal time (`evidenceSeal.canonicalManifest`). Never anything the package says. Unreadable is null,
+ * and null is refused.
+ */
+export function recordTypeOfSealManifest(canonicalManifest: string | null | undefined): string | null {
+  if (typeof canonicalManifest !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(canonicalManifest);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const recordType = (parsed as { recordType?: unknown }).recordType;
+    return typeof recordType === "string" && recordType.length > 0 ? recordType : null;
+  } catch {
+    return null;
+  }
+}
+
+export type PackagedCaptureCheck = { accepted: true } | { accepted: false; code: "UNKNOWN_OPERATION" | "CONNECTED_REQUIRED"; reason: string };
+
+/**
+ * Was this an operation a device may record without the server — asked again here, because the
+ * device's own gate is not authority.
+ *
+ * The answer comes from the one declaration (`captureOperations.ts`) through
+ * `actionGateway.mayRunWithoutServer`, the same question the device's gate asked, about the operation
+ * the server's seal recorded. It is the declaration as it stands now: the server decides on
+ * reconnect, so a policy that changed after capture applies as changed. A pass is not
+ * authorization — admission, the acting scope and the procedure permission have already run and are
+ * not overridden; it only means the device stayed inside the policy.
+ */
+export function revalidatePackagedCapture(recordType: string | null | undefined, policyFor: (kind: string | null | undefined) => CaptureOperationPolicy | null = capturePolicyFor): PackagedCaptureCheck {
+  const policy = policyFor(recordType);
+  if (!policy) {
+    return { accepted: false, code: "UNKNOWN_OPERATION", reason: recordType ? `${recordType} is not an operation the offline policy declares` : "the item carries no sealed operation the server can classify" };
+  }
+  if (!mayRunWithoutServer(policy)) {
+    return { accepted: false, code: "CONNECTED_REQUIRED", reason: `${policy.key} is connected-required: it is decided by its own server procedure and cannot arrive as evidence recorded offline` };
+  }
+  return { accepted: true };
+}
+
+/**
+ * Fold the re-check into the hash verdicts. A hash rejection stands as it was; a verified item the
+ * policy refuses becomes rejected with the policy's reason; nothing is ever promoted to verified.
+ */
+export function applyOperationPolicy(args: {
+  verdicts: readonly ItemVerdict[];
+  recordTypeById: ReadonlyMap<number, string | null>;
+}): { packageOutcome: "hash_verified" | "failed"; verdicts: ItemVerdict[] } {
+  const verdicts = args.verdicts.map((v): ItemVerdict => {
+    if (v.outcome !== "verified") return v;
+    const check = revalidatePackagedCapture(args.recordTypeById.get(v.evidenceRecordId) ?? null);
+    return check.accepted ? v : { evidenceRecordId: v.evidenceRecordId, outcome: "rejected", reason: `Refused by the offline policy (${check.code}): ${check.reason}` };
+  });
+  return { packageOutcome: verdicts.every(v => v.outcome === "verified") ? "hash_verified" : "failed", verdicts };
 }
 
 /* ------------------------------------------------------------------ */
