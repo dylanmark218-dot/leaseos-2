@@ -58,6 +58,16 @@ export type SegmentAttribute = {
   /** Absent means the map has no data — which is `unknown`, never `pass`. */
   limitValue?: number | null;
   textValue?: string | null;
+  /** The unit the limit was recorded in. Absent means the check's own unit (kg or m). */
+  unit?: string | null;
+  /**
+   * T2 (P2) — a structured road ban, resolved: the allowance for each axle-group type, already the
+   * ban's fraction of the jurisdiction's verified legal allowance. Each axle group is compared with
+   * the allowance for its own type.
+   */
+  groupLimitsKg?: Partial<Record<AxleGroupType, number>>;
+  /** Evidence exists but could not be resolved into a comparable limit. Always UNKNOWN, with this reason. */
+  unresolvedReason?: string | null;
   jurisdiction?: string | null;
   source?: string | null;
   sourceVersion?: string | null;
@@ -107,10 +117,29 @@ export type RouteVerdict = {
   explanation: string;
 };
 
+/** Axle-group types a legal allowance is stated for. */
+export type AxleGroupType = "single" | "tandem" | "tridem";
+export const axleGroupType = (axles: number | null | undefined): AxleGroupType | null =>
+  axles === 1 ? "single" : axles === 2 ? "tandem" : axles === 3 ? "tridem" : null;
+
+/** One measured or declared axle group. */
+export type VehicleAxleGroup = { key: string; label: string; weightKg: number; axles?: number | null };
+
+/**
+ * What the weights rest on (T2, P1). `declared` is the unit's profile; `measured_legal` is a reading
+ * LoadSense determined legal when it was taken; `measured_not_legal` is a reading that was not — it
+ * may tighten a check, and a check it passes is REVIEW, never PASS.
+ */
+export type WeightBasis = "declared" | "measured_legal" | "measured_not_legal";
+
 /** The vehicle values a check compares against. */
 export type VehicleValues = {
   grossWeightKg: number;
   maxAxleGroupKg: number;
+  /** Every axle group, when known. `maxAxleGroupKg` is the heaviest of these. */
+  axleGroups?: VehicleAxleGroup[];
+  /** Absent means `declared`, which is what every caller before T2 supplied. */
+  weightBasis?: WeightBasis;
   heightM: number;
   widthM: number;
   lengthM: number;
@@ -160,6 +189,35 @@ function evaluateCheck(
     };
   }
 
+  // Evidence that exists but could not be made comparable is UNKNOWN, and says why.
+  if (attr.unresolvedReason) {
+    return { ...base, result: "unknown", reason: attr.unresolvedReason, inputs: {} };
+  }
+
+  // T2 (P2) — a resolved road ban: every axle group against the allowance for its own type.
+  if (attr.groupLimitsKg) {
+    const groups = vehicle.axleGroups ?? [];
+    if (!groups.length) {
+      return { ...base, result: "unknown", reason: `${segment.label} has a road ban, and the vehicle's axle groups are not known`, inputs: {} };
+    }
+    const judged = groups.map(g => {
+      const type = axleGroupType(g.axles);
+      const limit = type ? attr.groupLimitsKg![type] : undefined;
+      return { g, type, limit, result: (limit == null ? "unknown" : g.weightKg <= limit ? "pass" : "fail") as CheckResult };
+    });
+    const worst = judged.reduce((a, j) => (RESULT_SEVERITY[j.result] > RESULT_SEVERITY[a.result] ? j : a));
+    const notEstablished = vehicle.weightBasis === "measured_not_legal";
+    const result: CheckResult = worst.result === "pass" && (base.confidence === "unverified" || notEstablished) ? "review" : worst.result;
+    const reason = worst.result === "unknown"
+      ? worst.type
+        ? `${segment.label} road ban: the governing rule states no ${worst.type} allowance, so the ${worst.g.label} axle group's allowance is UNKNOWN`
+        : `${segment.label} road ban: the ${worst.g.label} axle group's axle count is not recorded, so its type and allowance are UNKNOWN`
+      : worst.result === "fail"
+        ? `${worst.g.label} ${worst.type} axle group ${worst.g.weightKg} kg exceeds the ${worst.limit} kg road-ban allowance on ${segment.label}`
+        : `every axle group within its road-ban allowance on ${segment.label}${notEstablished ? " (measured, not a legal determination — review)" : ""}`;
+    return { ...base, result, reason, inputs: { vehicleValue: worst.g.weightKg, limitValue: worst.limit ?? null, unit: "kg" } };
+  }
+
   const numeric = NUMERIC_CHECKS[check];
   if (numeric) {
     const vehicleValue = vehicle[numeric.field] as number;
@@ -171,19 +229,39 @@ function evaluateCheck(
         inputs: { vehicleValue, limitValue: null, unit: numeric.unit },
       };
     }
+    // Units are compared only when they are the check's own. A limit recorded in tonnes or feet is
+    // real evidence that this evaluator cannot read, so it is UNKNOWN — never silently treated as kg/m.
+    if (attr.unit != null && attr.unit.trim() !== "" && canonicalUnit(attr.unit) !== numeric.unit) {
+      return {
+        ...base,
+        result: "unknown",
+        reason: `${segment.label} records its ${check.replace(/_/g, " ")} limit as ${attr.limitValue} ${attr.unit}; only ${numeric.unit} is compared, so it is not read`,
+        inputs: { vehicleValue, limitValue: null, unit: numeric.unit },
+      };
+    }
     const passes = vehicleValue <= attr.limitValue;
+    const isWeight = numeric.field === "grossWeightKg" || numeric.field === "maxAxleGroupKg";
+    // A weight reading that is not a legal determination can tighten a check but cannot satisfy one.
+    const weightNotEstablished = isWeight && vehicle.weightBasis === "measured_not_legal";
+    // Name the axle group that governs, so "exceeds" says which one.
+    const heaviest = numeric.field === "maxAxleGroupKg" && vehicle.axleGroups?.length
+      ? vehicle.axleGroups.reduce((a, g) => (g.weightKg > a.weightKg ? g : a))
+      : null;
+    const what = heaviest ? `${heaviest.label} axle group ${vehicleValue} ${numeric.unit}` : `${vehicleValue} ${numeric.unit}`;
+    const basisNote = isWeight && vehicle.weightBasis === "measured_legal" ? " (measured, legally determined)"
+      : weightNotEstablished ? " (measured, not a legal determination — review)" : "";
     return {
       ...base,
       // An unverified limit that the vehicle satisfies is still not a clean
       // pass — a human should confirm the number before relying on it.
       result: passes
-        ? base.confidence === "unverified"
+        ? base.confidence === "unverified" || weightNotEstablished
           ? "review"
           : "pass"
         : "fail",
       reason: passes
-        ? `${vehicleValue} ${numeric.unit} within ${attr.limitValue} ${numeric.unit} on ${segment.label}`
-        : `${vehicleValue} ${numeric.unit} exceeds ${attr.limitValue} ${numeric.unit} on ${segment.label}`,
+        ? `${what} within ${attr.limitValue} ${numeric.unit} on ${segment.label}${basisNote}`
+        : `${what} exceeds ${attr.limitValue} ${numeric.unit} on ${segment.label}${basisNote}`,
       inputs: { vehicleValue, limitValue: attr.limitValue, unit: numeric.unit },
     };
   }
@@ -258,6 +336,44 @@ function combineAxis(results: CheckResult[]): CheckResult {
   return "pass";
 }
 
+/** "kg", "kilograms", "M", "metres"… → the check's own unit, or the input lower-cased when it is not one. */
+function canonicalUnit(unit: string): string {
+  const u = unit.trim().toLowerCase();
+  if (["kg", "kgs", "kilogram", "kilograms"].includes(u)) return "kg";
+  if (["m", "metre", "metres", "meter", "meters"].includes(u)) return "m";
+  return u;
+}
+
+const RESULT_SEVERITY: Record<CheckResult, number> = { fail: 3, unknown: 2, review: 1, pass: 0 };
+
+/**
+ * T2 (defect 1A) — the controlling entry for one check on one segment.
+ *
+ * Every attribute handed in for the check is evaluated, and the worst result governs: a FAIL from
+ * any applicable limit is a FAIL, an UNKNOWN limit is never outvoted by a passing one, and among
+ * equal results the tightest numeric limit is the one cited. Applicability — the right segment,
+ * in force at the evaluation instant, not superseded — is settled before evidence reaches here
+ * (`applicableRestrictions`, `structureAttributes`), so this compares only like with like.
+ *
+ * That is `sourcePrecedence`'s asymmetric rule in evaluator terms: a lower-authority source can
+ * tighten a limit (its FAIL governs) and can never loosen one (its PASS cannot outvote another
+ * source's FAIL). It used to take whichever attribute was listed first, so a 5.0 m road clearance
+ * listed before a 4.2 m overpass passed a 4.5 m truck.
+ */
+function controllingEntry(check: RequiredCheck, attrs: SegmentAttribute[], vehicle: VehicleValues, segment: RoadSegmentInput): EvidenceEntry {
+  if (attrs.length === 0) return evaluateCheck(check, undefined, vehicle, segment);
+  const entries = attrs.map(a => evaluateCheck(check, a, vehicle, segment));
+  const governing = entries.reduce((best, e) => {
+    const d = RESULT_SEVERITY[e.result] - RESULT_SEVERITY[best.result];
+    if (d !== 0) return d > 0 ? e : best;
+    const el = e.inputs.limitValue, bl = best.inputs.limitValue;
+    return el != null && (bl == null || el < bl) ? e : best;
+  });
+  return entries.length > 1
+    ? { ...governing, reason: `${governing.reason} (controlling of ${entries.length} applicable ${check.replace(/_/g, " ")} records)` }
+    : governing;
+}
+
 export function evaluateRoute(
   requiredChecks: RequiredCheck[],
   segments: RoadSegmentInput[],
@@ -266,9 +382,16 @@ export function evaluateRoute(
   const evidence: EvidenceEntry[] = [];
 
   for (const segment of segments) {
-    for (const check of requiredChecks) {
-      const attr = segment.attributes.find(a => a.check === check);
-      evidence.push(evaluateCheck(check, attr, vehicle, segment));
+    /*
+     * The checks asked for, plus every legal or physical check this segment holds recorded evidence
+     * for. A posted 45,000 kg bridge on the segment is a fact about this truck on this road whether
+     * or not the caller listed `bridge_capacity`; leaving it out because nobody asked is how a road
+     * gross limit of 63,500 kg passed a 50,000 kg truck over it.
+     */
+    const evidenced = segment.attributes.map(a => a.check).filter(c => CHECK_AXIS[c] === "legal" || CHECK_AXIS[c] === "feasible");
+    const checks = Array.from(new Set([...requiredChecks, ...evidenced]));
+    for (const check of checks) {
+      evidence.push(controllingEntry(check, segment.attributes.filter(a => a.check === check), vehicle, segment));
     }
   }
 
