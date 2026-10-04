@@ -46,7 +46,9 @@ const walk = (dir: string): string[] =>
  * raw INSERT in an import script bypasses the gate exactly as an ORM call does. */
 const TREES = ["server", "scripts", "drizzle", "client/src"].filter(existsSync);
 const files = TREES.flatMap(walk);
-const CORPUS = ["knowledgeSources", "knowledgeDocuments", "knowledgeChunks"];
+/* 0197 added the two provenance tables. A version or a snapshot written anywhere else is a record of
+ * "what the publisher said" that no licence check and no hash comparison stood behind. */
+const CORPUS = ["knowledgeSources", "knowledgeDocuments", "knowledgeChunks", "knowledgeVersions", "knowledgeSnapshots"];
 
 /** The chosen paths. Anything else writing these tables is the finding. */
 const ALLOWED: Record<string, string> = {

@@ -358,6 +358,22 @@ anywhere is `0193`, so `0194` is the first free everywhere.
   holds (every number 0175–0201 but 0190 is claimed). The three move together because 0203's triggers
   and 0204's ALTERs act on 0202's tables. The driver-portfolio rows above are superseded by this entry.
 
+## State at the Intelligence Engine Checkpoint 1 claim (2026-09-25, `main` = `a9a7246`, after PR #50)
+
+`main` migration head: **`0194_webhook_secret_ref.sql`**. Re-scanned across `main` and all 88 remote
+branches at the moment of claiming, with the scan above: the highest number held anywhere is `0196`
+(`0195_document_control_register.sql` and `0196_document_control_numbering.sql`, PR #29), so `0197` is
+the first free everywhere.
+
+| Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|
+| 0197 | `0197_knowledge_provenance.sql` | `claude/leaseos-intelligence-engine-cr2fg1` | none yet | claiming | none | keeps 0197 |
+
+## Change log
+
+* **2026-09-25 (Intelligence Engine Checkpoint 1)**: claimed `0197` and recorded it in the commit that
+  creates the migration, per the S2-E correction above. `0195`/`0196` are PR #29's and are left alone.
+
 ## State at the P0-A2.1 claim (2026-10-01, `main` = `64f784d`, after PR #73)
 
 `main` migration head: **`0198_requirement_verification.sql`**, 181 migrations (0197 unused). Re-scanned
@@ -443,6 +459,11 @@ with the scan before committing).
 ## Change log (continued)
 
 * **2026-10-01 (SA1 merge)**: Sign & Attest `0214`–`0216` recorded against `main` `ce27fec`; next free `0220`.
+* **2026-10-01 (Intelligence Engine, merge of `main` = `b35bac4`)**: re-scanned `main` and every remote
+  branch. `0197` is still held only by `claude/leaseos-intelligence-engine-cr2fg1` (the P0-A2.1 entry's
+  "0197 unused" is about `main`, where it is indeed absent). It now sits below `main`'s head (`0219`), the
+  same position as LA-1a's `0202`/`0203`: `migrationLedger` applies any unapplied file by name, and no
+  migration on `main` touches the columns or the table 0197 adds, so it keeps `0197` rather than moving.
 * **2026-10-03 (Integration Hub renumber, PR #116)**: `0220`–`0223` → `0229`–`0232`, contents unchanged.
   Scan of `main` (`48a64e1`) and every remote ref: `main` holds `0221`/`0222` (defect lifecycle) and
   `0226`/`0227` (payroll P1/P2); `claude/eld-compliance-intelligence-ramlrd` holds `0220` and `0224`; an

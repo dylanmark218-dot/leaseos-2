@@ -127,7 +127,20 @@ const DECLARED_UNWIRED: Record<string, string> = {
    */
   "knowledge/evaluationState": "distinguishes the two silences for the knowledge evaluator; nothing downstream reads the distinction yet, which is what its own header says it was written to fix",
   "knowledge/perimeter": "the AI request perimeter and learning intake; assistantAskRouter gates through sourceGate, not through this, so the two-gate design is only half wired",
-  "knowledge/repository": "declares itself the only way rows reach the knowledge corpus, and nothing calls it — knowledgeWritePaths.test.ts enforces that rule vacuously, since no write path exists at all yet",
+  "knowledge/repository": "the only way rows reach the knowledge corpus. Since Intelligence Engine Checkpoint 2 its caller is knowledge/ingestion, which an operator runs from scripts/knowledge-ingest.ts; no router reaches either, by design (see knowledge/ingestion)",
+  /*
+   * Intelligence Engine Checkpoint 1 (0197): the source catalogue and provenance model, landed as
+   * one unit beneath the repository and deliberately wired to nothing. Checkpoint 1's brief was the
+   * model, not a crawler — no collector is implemented and nothing may be fetched until a person has
+   * assessed a source's licence — so a router over these would be a surface with no data behind it.
+   * They leave this list when Checkpoint 2's ingestion job calls repository.recordSnapshot.
+   */
+  "knowledge/collectors": "Checkpoint 1 — the collector contract, RFC 9309 robots evaluation and the fail-closed fetch decision; every collector is a refusing stub until Checkpoint 2 builds and reviews one",
+  "knowledge/industryTaxonomy": "Checkpoint 1 — the closed industry topic list and the A–E view over admission's authority levels; read by the catalogue and the repository, both unwired",
+  "knowledge/provenance": "Checkpoint 1 — hashing, URL safety, retrieval classification, effective-date, jurisdiction, contradiction and tenant-scope rules; enforced by the repository, which nothing calls yet",
+  "knowledge/sourceCatalogue": "Checkpoint 1 — six seed sources, all unassessed and therefore unfetchable; seeding waits for Checkpoint 2's ingestion job so no row claims a source is ready to read before its licence has been assessed",
+  "knowledge/extraction": "Checkpoint 2 — the HTML text extractor and its fingerprint; read by knowledge/ingestion, which an operator runs from scripts/knowledge-ingest.ts rather than a router",
+  "knowledge/ingestion": "Checkpoint 2 — one ingestion run per source, operator-run from scripts/knowledge-ingest.ts. Deliberately not mounted on a router or the worker: a crawl started by a web request, or on a timer before any source has a licence assessment, is not something to expose. It leaves this list when a controller-only schedule is approved",
   safetyBinder: "per-unit binder completeness and the office task queue; needs unitBinderSnapshots and safetyBinderRouter before anything reaches it",
   boundaryConfirmation: "SPINE item 1 — the one resolver of which tripStops timestamps a person stands behind, read from committed receipt manifests; pure. Its receipt reader cannot exist here until tripStops carries updatedAt (this repository has no trip-stop provenance migration), and siteBaseline has no router yet",
   boundaryEvidence: "SPINE item 1 — the chain rule over a stop's assistantCommitReceipts and the receipt reader over tripStops provenance (0179), the sibling repository's code unchanged; refuses a broken chain (edited after commit, another writer, broken seal, unreadable manifest) and reads the stop through orgScopeWhere(trips). Its caller is the stop-timing router, which is SPINE item 4 and does not exist yet",
@@ -329,13 +342,27 @@ describe("every engine is reached, or says why not", () => {
       "ai/tools/registry",
       "ai/validate/normalizers",
       "ai/validate/validator",
+      // Intelligence Engine Checkpoint 1: the catalogue and provenance model beneath
+      // knowledge/repository, which is itself declared. Nothing else in the tree answers
+      // "which retrieval of which document is this text from", so there is no live second
+      // copy to drift from. They leave together when Checkpoint 2's ingestion job calls in.
+      "knowledge/collectors",
+      "knowledge/industryTaxonomy",
+      "knowledge/provenance",
+      "knowledge/sourceCatalogue",
+      // Checkpoint 2: the ingestion run imports the extractor and the repository, and nothing in
+      // server/ imports the run — an operator starts it from scripts/knowledge-ingest.ts. So the
+      // repository, unreached until now, joins its own subsystem's cluster rather than the census
+      // pretending a script is a router.
+      "knowledge/extraction",
+      "knowledge/repository",
     ].sort());
   });
 
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(73);   // merge of main (b35bac4) into #59: main's 73 already counts openShifts as reached (SPINE item 2), the one engine #59 wired;   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
+    expect(unwired).toHaveLength(79);   // Intelligence Engine Checkpoint 2: +2 knowledge/extraction and knowledge/ingestion, declared above; operator-run from scripts/knowledge-ingest.ts   // Intelligence Engine Checkpoint 1: +4 knowledge/* (collectors, industryTaxonomy, provenance, sourceCatalogue), declared above; unwired until Checkpoint 2 calls the repository   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
     expect(engines.length).toBeGreaterThan(130);
   });
 });

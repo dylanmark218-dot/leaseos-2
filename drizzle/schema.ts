@@ -8400,6 +8400,24 @@ export const knowledgeSources = mysqlTable("knowledgeSources", {
   conditionsToUnblockJson: json("conditionsToUnblockJson"),
   officialSourcesJson: json("officialSourcesJson"),
 
+  /* 0197: the catalogue half — what the source is. Written by registerCatalogueEntry, which never touches the licence half. */
+  sourceKind: mysqlEnum("sourceKind", ["api", "html", "pdf", "xml", "json", "csv", "geojson", "warc", "rss", "sitemap"]),
+  authorityLevel: mysqlEnum("authorityLevel", [
+    "law", "official_guidance", "recognized_standard", "manufacturer",
+    "company_policy", "operational", "unverified",
+  ]).default("unverified").notNull(),
+  domainsJson: json("domainsJson"),
+  topicsJson: json("topicsJson"),
+  refreshIntervalHours: int("refreshIntervalHours"),
+  crawlPolicyJson: json("crawlPolicyJson"),
+  termsUrl: varchar("termsUrl", { length: 500 }),
+  accessControlled: boolean("accessControlled").default(false).notNull(),
+  robotsStatus: mysqlEnum("robotsStatus", ["unchecked", "fetched", "absent", "unreachable"]).default("unchecked").notNull(),
+  robotsCheckedAt: timestamp("robotsCheckedAt"),
+  licenceNotes: text("licenceNotes"),
+  active: boolean("active").default(true).notNull(),
+  deactivatedReason: varchar("deactivatedReason", { length: 300 }),
+
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -8476,9 +8494,56 @@ export const knowledgeChunks = mysqlTable("knowledgeChunks", {
   section: varchar("section", { length: 200 }),
   page: int("page"),
   authorizedByAssessmentId: varchar("authorizedByAssessmentId", { length: 64 }).notNull(),
+  /* 0197: which retrieval, what the text hashes to, what it is about. Null only on pre-0197 rows. */
+  snapshotRef: varchar("snapshotRef", { length: 64 }),
+  contentHash: varchar("contentHash", { length: 64 }),
+  topicsJson: json("topicsJson"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type KnowledgeChunkRow = typeof knowledgeChunks.$inferSelect;
+
+/**
+ * One row per retrieval attempt, failures included (0197).
+ *
+ * Append-only, enforced by triggers: no DELETE, and no UPDATE except recording
+ * the extraction outcome once. `contentSha256` is recomputed by LeaseOS from
+ * the bytes; the collector's claim is kept in `declaredSha256` for the record.
+ */
+export const knowledgeSnapshots = mysqlTable("knowledgeSnapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  snapshotRef: varchar("snapshotRef", { length: 64 }).notNull().unique(),
+  sourceId: varchar("sourceId", { length: 64 }).notNull(),
+  documentRef: varchar("documentRef", { length: 64 }).notNull(),
+  url: varchar("url", { length: 1000 }).notNull(),
+  retrievedAt: timestamp("retrievedAt").notNull(),
+  collectorKind: mysqlEnum("collectorKind", ["api", "html", "pdf", "browser", "geodata", "sitemap", "rss", "common_crawl"]).notNull(),
+  collectorVersion: varchar("collectorVersion", { length: 40 }).notNull(),
+  outcome: mysqlEnum("outcome", ["first_seen", "unchanged", "changed", "unavailable", "hash_mismatch", "unparseable"]).notNull(),
+  outcomeReason: varchar("outcomeReason", { length: 500 }),
+  httpStatus: int("httpStatus"),
+  contentType: varchar("contentType", { length: 120 }),
+  etag: varchar("etag", { length: 200 }),
+  lastModified: varchar("lastModified", { length: 64 }),
+  byteLength: bigint("byteLength", { mode: "number" }),
+  contentSha256: varchar("contentSha256", { length: 64 }),
+  declaredSha256: varchar("declaredSha256", { length: 128 }),
+  rawObjectKey: varchar("rawObjectKey", { length: 300 }),
+  previousSnapshotRef: varchar("previousSnapshotRef", { length: 64 }),
+  versionRef: varchar("versionRef", { length: 64 }),
+  publishedAt: timestamp("publishedAt"),
+  effectiveFrom: timestamp("effectiveFrom"),
+  effectiveUntil: timestamp("effectiveUntil"),
+  parserVersion: varchar("parserVersion", { length: 40 }),
+  extractionStatus: mysqlEnum("extractionStatus", ["pending", "extracted", "failed", "not_applicable"]).default("pending").notNull(),
+  extractionError: varchar("extractionError", { length: 500 }),
+  provenanceJson: json("provenanceJson"),
+  recordedByUserId: int("recordedByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  documentIdx: index("knowledgeSnapshots_document_idx").on(t.documentRef, t.retrievedAt),
+  sourceIdx: index("knowledgeSnapshots_source_idx").on(t.sourceId),
+}));
+export type KnowledgeSnapshotRow = typeof knowledgeSnapshots.$inferSelect;
 
 
 
