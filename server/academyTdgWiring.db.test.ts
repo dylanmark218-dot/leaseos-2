@@ -12,6 +12,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import mysql from "mysql2/promise";
 import { appRouter } from "./routers";
 
+/** SEC-1: the exception loader reads one organization; tests read it as the person whose view they assert. */
+const scopeOf = async (userId: number) => (await import("./_core/entityScope")).financeScopeFor((await (await import("./db")).getDb()) as never, userId);
+
 const DB_URL = process.env.DATABASE_URL;
 const d = DB_URL ? describe : describe.skip;
 let pool: mysql.Pool;
@@ -28,6 +31,20 @@ async function person(role: string) {
   const orgRef = `ORG-${rnd()}`;
   const userId = seq++;
   await pool.execute("INSERT INTO organizations (orgRef, name, status) VALUES (?,?,'active')", [orgRef, `o ${orgRef}`]);
+  await pool.execute(
+    "INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'employee','active','2020-01-01',1)",
+    [`MEM-${rnd()}`, orgRef, userId]);
+  await pool.execute("INSERT INTO userRoleAssignments (userId, role, scopeType, grantedByUserId, grantedAt) VALUES (?,?,'global',1,NOW())", [userId, role]);
+  return userId;
+}
+/**
+ * SEC-1: someone in the same organization as `of`. `person` gives everyone a company of their own,
+ * which is right for most cases here and wrong for an inspector request, which is about a learner in
+ * the office's own organization.
+ */
+async function colleague(of: number, role: string) {
+  const [[{ orgRef }]] = (await pool.query("SELECT orgRef FROM organizationMemberships WHERE userId = ? LIMIT 1", [of])) as unknown as [[{ orgRef: string }]];
+  const userId = seq++;
   await pool.execute(
     "INSERT INTO organizationMemberships (membershipRef, orgRef, userId, membershipType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,'employee','active','2020-01-01',1)",
     [`MEM-${rnd()}`, orgRef, userId]);
@@ -165,7 +182,7 @@ d("an inspector's fifteen days", () => {
   it("runs the clock from the request and stores the deadline", async () => {
     const office = await person("safety");
     const f = await fixtureCourse();
-    const learner = await person("driver");
+    const learner = await colleague(office, "driver");
     const certificateRef = await certificate(f.versionId, f.courseId, learner);
     const r = await callerFor(office).academy.inspectorRequestCreate({
       certificateRef, issuingAuthority: "Transport Canada", requestDatedAt: new Date("2026-09-01T00:00:00Z"), requestReceivedAt: null,
@@ -178,7 +195,7 @@ d("an inspector's fifteen days", () => {
   it("assembles a complete package when the chain survived — and never a partial one", async () => {
     const office = await person("safety");
     const f = await fixtureCourse();
-    const learner = await person("driver");
+    const learner = await colleague(office, "driver");
     const certificateRef = await certificate(f.versionId, f.courseId, learner);
     // The record of training: an assessment attempt behind the certificate's assignment.
     await pool.execute(
@@ -199,7 +216,7 @@ d("an inspector's fifteen days", () => {
   it("names what is missing when the material is gone", async () => {
     const office = await person("safety");
     const f = await fixtureCourse();
-    const learner = await person("driver");
+    const learner = await colleague(office, "driver");
     const certificateRef = await certificate(f.versionId, f.courseId, learner);
     // Material gone, and the certificate is recent: a bug to chase, not an irrecoverable loss.
     await pool.execute("SET FOREIGN_KEY_CHECKS=0"); // fixture only: the guards refuse this delete on a live certificate, which is the point of 0121
@@ -253,7 +270,9 @@ d("the inspector clock reaches the exception centre", () => {
   it("surfaces an open request from five days out, critical once overdue, with a deep link", async () => {
     const office = await person("safety");
     const f = await fixtureCourse();
-    const learner = await person("driver");
+    // SEC-1: the learner works for the office's organization; this case passed only while the
+    // exception centre read across organizations.
+    const learner = await colleague(office, "driver");
     const certificateRef = `ACAD-CERT-${rnd()}`;
     await pool.execute(
       `INSERT INTO academyCertificates (certificateRef, userId, courseId, courseVersionId, assignmentId, qualificationCode, credentialBoundary, issuedByUserId, issuedAt, sourceSnapshotRef, policySnapshotHash, certificateHash, retentionUntil)
@@ -265,7 +284,7 @@ d("the inspector clock reaches the exception centre", () => {
     const late = await callerFor(office).academy.inspectorRequestCreate({ certificateRef, issuingAuthority: "Transport Canada", requestDatedAt: new Date(Date.now() - 20 * 86_400_000) });
     const { deriveExceptions } = await import("./_core/exceptionCentre");
     const { loadExceptionSources } = await import("./surfacesService");
-    const all = deriveExceptions(await loadExceptionSources());
+    const all = deriveExceptions(await loadExceptionSources(await scopeOf(office)));
     const a = all.find(x => x.key === `inspector:${soon.requestRef}`);
     const b = all.find(x => x.key === `inspector:${late.requestRef}`);
     expect(a?.severity).toBe("high");
@@ -273,5 +292,30 @@ d("the inspector clock reaches the exception centre", () => {
     expect(a?.deepLink.route).toContain(soon.requestRef);
     expect(b?.severity).toBe("critical");
     expect(b?.title).toMatch(/overdue/);
+  }, 20_000);
+
+  /*
+   * SEC-1: an inspector request is about a learner, and the learner belongs to an organization.
+   * inspectorRequestCreate found the certificate by reference, inspectorRequestAssemble the request
+   * by reference, and inspectorRequestList returned every request — so another company could open,
+   * assemble and read requests about this company's people. Across the boundary: not found.
+   */
+  it("an inspector request is about a learner in the caller's organization, and only that organization sees it", async () => {
+    const office = await person("safety");
+    const outsider = await person("safety");
+    const f = await fixtureCourse();
+    const learner = await colleague(office, "driver");
+    const certificateRef = `ACAD-CERT-${rnd()}`;
+    await pool.execute(
+      `INSERT INTO academyCertificates (certificateRef, userId, courseId, courseVersionId, assignmentId, qualificationCode, credentialBoundary, issuedByUserId, issuedAt, sourceSnapshotRef, policySnapshotHash, certificateHash, retentionUntil)
+       VALUES (?,?,?,?,?,?,?,?,NOW(),?,?,?,?)`,
+      [certificateRef, learner, f.courseId, f.versionId, 1, "TDG_ROAD", "employer_certificate", 1, "S1", "p", "c", new Date("2031-01-01")]);
+    const req = { certificateRef, issuingAuthority: "Transport Canada", requestDatedAt: new Date() };
+
+    await expect(callerFor(outsider).academy.inspectorRequestCreate(req)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const mine = await callerFor(office).academy.inspectorRequestCreate(req);
+    await expect(callerFor(outsider).academy.inspectorRequestAssemble({ requestRef: mine.requestRef })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await callerFor(outsider).academy.inspectorRequestList()).some(r => r.requestRef === mine.requestRef)).toBe(false);
+    expect((await callerFor(office).academy.inspectorRequestList()).some(r => r.requestRef === mine.requestRef)).toBe(true);
   }, 20_000);
 });

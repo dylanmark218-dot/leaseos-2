@@ -5,19 +5,19 @@ Every field below was checked against the publisher and is now seeded into
 `externalDataSources` by `seedExternalDataSources()`. This document describes
 what the runtime enforces; it is not the enforcement itself.
 
-## Ten verified, twenty-five not
+## Ten verified, twenty-seven not
 
 | | Count |
 |---|---|
 | Verified — usable per their licence | **10** |
-| Unverified — inspection only | **25** |
-| Total | **35** |
+| Unverified — inspection only | **27** |
+| Total | **37** |
 
 > **Correction.** The research summary stated "nine of eleven are clean" while
 > separately flagging three as unresolved. Eleven minus three is eight. Seeding
 > nine would have marked a blocked source usable. `externalSourceSeeds.test.ts`
-> holds the counts — now 10 / 25 / 35 after the transport tranche and later
-> inspection-only catalogue candidates below.
+> holds the counts — now 10 / 27 / 37 after the 511 tranche, the federal and
+> provincial candidates and the facility layers below.
 
 ## Verified sources
 
@@ -56,6 +56,8 @@ what the runtime enforces; it is not the enforcement itself.
 | `bc_resource_road_maps` | The province states these are planning tools and that the posted road sign takes precedence. |
 | `statcan_boundaries` | The provincial/territorial boundary file. Licence not reviewed here, so nothing imports from it — which is exactly why a coordinate still cannot establish a province. |
 | `crtc_coverage` | Modelled coverage layers published for regulatory purposes, not a guarantee of service at a position. |
+| `sk_petroleum_gis` | The facility directory's Saskatchewan Petroleum facilities layer (0143), registered in 0233 so the approved-source registry governs its importer. The licence is named (Standard Unrestricted Use Data Licence v2.0); commercial use, redistribution and attribution are recorded here only when a person clears it. The importer's own licence gate reads the facility licence register, where 0143 recorded the grant. |
+| `bcer_gis` | The BC Energy Regulator's facility-point and sump layers (0143). Same treatment: licence named (BCER Open Data Licence), not cleared here. |
 | `tc_vehicle_recalls` | Transport Canada Vehicle Recalls Database, last 60 days, daily. Catalogue states OGL – Canada; not yet reviewed. A match is information for a person, never a safe/unsafe determination. |
 | `hc_recalls_safety_alerts` | Government of Canada Recalls and Safety Alerts feed. Catalogue states OGL – Canada; not yet reviewed. |
 | `goc_open_data_api` | The federal CKAN catalogue. Catalogue states OGL – Canada for itself; each dataset it lists is its own source with its own licence. |
@@ -64,18 +66,16 @@ what the runtime enforces; it is not the enforcement itself.
 | `bc_data_catalogue` | BC's CKAN catalogue. Licensing is per dataset and not uniformly OGL – BC, so the row names no licence. |
 | `qc_reseau_camionnage` | Québec heavy-truck network (a different dataset from the cleared `qc_mtmd_roadworks`). Données Québec lists CC BY 4.0; the attribution wording is recorded on review. |
 
-Every one carries `attributionText: null` deliberately, as a second barrier: a
+Every unverified source carries `attributionText: null` deliberately, as a second barrier: a
 source cannot reach operational use by editing `status` and the permission flags
 alone — somebody has to have actually recorded what the publisher requires shown.
 Test-pinned.
 
 **Required to unblock:** written confirmation from AER (Terms of Use) and from
-Alberta, Manitoba, New Brunswick, Yukon and Newfoundland-and-Labrador 511
-(developer terms) covering (a) commercial fleet use and (b) offline
-redistribution to field tablets. Saskatchewan Highway Hotline still needs a
-published API or written permission path. For the seven 2026-09-24 catalogue
-candidates a reviewer reads the named licence and records its attribution. None
-needs a written request unless that reading leaves commercial fleet use
+Alberta 511 (developer terms) covering (a) commercial fleet use and (b) offline
+redistribution to field tablets. For the seven federal and provincial
+candidates a reviewer reads the named licence and records its attribution;
+none needs a written request unless that reading leaves commercial fleet use
 unclear.
 
 ## Integration states
@@ -89,7 +89,7 @@ every seeded source.
 |---|---|---|
 | `APPROVED_FREE_COMMERCIAL` | Cleared for commercial use, no attribution owed | none |
 | `APPROVED_WITH_ATTRIBUTION` | Cleared for commercial use; show the attribution text | the 10 verified |
-| `PERMISSION_REQUIRED` | Unreviewed, commercial terms unknown, or attribution unrecorded | the 25 unverified |
+| `PERMISSION_REQUIRED` | Unreviewed, commercial terms unknown, or attribution unrecorded | the 27 unverified |
 | `DO_NOT_USE` | Withdrawn, superseded, or commercial use recorded as not permitted | none |
 
 "Approved" answers commercial use only. Offline bundling and redistribution

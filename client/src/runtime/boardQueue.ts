@@ -43,6 +43,7 @@
  * restart; over the browser fallback's memory store it lasts as long as the page, and the screen says
  * so. This class behaves the same over both, which is what the restart tests exercise.
  */
+import type { CaptureGate } from "./capabilities";
 import { Outbox } from "./outbox";
 import { isDirectCapture, sameScope, type CaptureScope, type Clock, type Connectivity, type FileVault, type LocalCapture, type LocalStore } from "./contracts";
 
@@ -91,8 +92,9 @@ export class BoardQueue {
   private flushing: Promise<FlushOutcome> | null = null;
   private current: CaptureScope | null = null;
 
-  constructor(private deps: { store: LocalStore; vault: FileVault; clock: Clock; connectivity: Connectivity; transport: BoardTransport }) {
-    this.outbox = new Outbox(deps.store, deps.vault, deps.clock);
+  /** `gate` (SPINE item 3): HS1 and the one offline rule, consulted before a board capture is saved. */
+  constructor(private deps: { store: LocalStore; vault: FileVault; clock: Clock; connectivity: Connectivity; transport: BoardTransport; gate?: CaptureGate }) {
+    this.outbox = new Outbox(deps.store, deps.vault, deps.clock, deps.gate);
   }
 
   /** The scope the queue is open under, or null. */

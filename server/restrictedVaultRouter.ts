@@ -9,7 +9,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { actingScopeFor, getDb, incidentIdInScope } from "./db";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { incidentMatters, incidentReports, investigationProposals, restrictedAccessEvents, restrictedAccessGrants } from "../drizzle/schema";
 import {
@@ -55,7 +55,8 @@ export const restrictedVaultRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const orgRef = await orgOf(ctx.user.id);
-      const incident = (await db.select({ id: incidentReports.id }).from(incidentReports).where(eq(incidentReports.id, input.incidentReportId)).limit(1))[0];
+      // SEC-1: the incident must be the caller's (through its job, unit or operator), not merely exist.
+      const incident = await incidentIdInScope(input.incidentReportId, await actingScopeFor(ctx.user.id));
       if (!incident) throw new TRPCError({ code: "NOT_FOUND", message: `Incident ${input.incidentReportId} not found` });
 
       const [{ n }] = await db.select({ n: sql<number>`COUNT(*)` }).from(incidentMatters).where(scopeWhere(incidentMatters.orgRef as never, orgRef));
@@ -151,7 +152,9 @@ export const restrictedVaultRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const orgRef = await orgOf(ctx.user.id);
-      const incident = (await db.select().from(incidentReports).where(eq(incidentReports.id, input.incidentReportId)).limit(1))[0];
+      // SEC-1: in scope first; only then is the row read for the rule.
+      const inScope = await incidentIdInScope(input.incidentReportId, await actingScopeFor(ctx.user.id));
+      const incident = inScope ? (await db.select().from(incidentReports).where(eq(incidentReports.id, inScope.id)).limit(1))[0] : undefined;
       if (!incident) throw new TRPCError({ code: "NOT_FOUND", message: `Incident ${input.incidentReportId} not found` });
       const trigger = proposeInternalInvestigation(incident as never);
       if (!trigger) return { proposalId: null, proposed: false as const, note: "No rule fires on this incident, so nothing is proposed. The absence of a proposal is not a finding that nothing happened." };
@@ -225,7 +228,8 @@ export const restrictedVaultRouter = router({
   /** §6.1 — the prompt. A purpose that would not explain the access a year later is refused. */
   breakGlass: roleProcedure("restrictedVault.breakGlass")
     .input(z.object({
-      recordType: z.string().min(2).max(40),
+      // SEC-1: the one record type restrictedRead serves. A grant on anything else was a record about nothing.
+      recordType: z.enum(["incidentMatter"]),
       recordId: z.number().int().positive(),
       purpose: z.string().min(1).max(500),
       minutes: z.number().int().min(5).max(480).default(DEFAULT_GRANT_MINUTES),
@@ -235,6 +239,9 @@ export const restrictedVaultRouter = router({
       const orgRef = await orgOf(ctx.user.id);
       const v = validatePurpose(input.purpose);
       if (!v.ok) throw new TRPCError({ code: "BAD_REQUEST", message: v.reason });
+      // SEC-1: the matter must exist in the caller's organization — the same predicate restrictedRead applies.
+      const target = (await db.select({ id: incidentMatters.id }).from(incidentMatters).where(and(eq(incidentMatters.id, input.recordId), scopeWhere(incidentMatters.orgRef as never, orgRef))).limit(1))[0];
+      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Record not found" });
       const expiresAt = new Date(Date.now() + input.minutes * 60_000);
       const ins = await db.insert(restrictedAccessGrants).values({
         orgRef, userId: ctx.user.id, recordType: input.recordType, recordId: input.recordId,

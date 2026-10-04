@@ -7,7 +7,7 @@
  * null or `"unknown"` and the licence gate treats it as a refusal rather than a
  * permission.
  *
- * **Ten sources are verified. Twenty-five are not.** Ontario 511 and Québec's
+ * **Ten sources are verified. Twenty-seven are not.** Ontario 511 and Québec's
  * roadworks cleared on their published licences in the later transport tranche.
  * Alberta 511 and the other unresolved providers stay `unverified`, which
  * under `evaluateSourceUsage` means inspection only, as do every later
@@ -24,16 +24,6 @@ import type { ExternalDataSource } from "./externalDataRegistry";
 /** Every field below was checked against the publisher on this date. */
 export const SOURCE_RETRIEVAL_DATE = new Date("2026-09-09T00:00:00Z");
 
-/**
- * The federal and provincial catalogue candidates added 2026-09-24. What is
- * recorded for them is what the publisher's own page or catalogue entry stated
- * on this date — licence named, rate limit, key requirement, update frequency.
- * That is research, not a licence review, so all seven seed `unverified` and
- * are cleared (or refused) by a person through `geo.sourceReview`, which
- * records who and what they read.
- */
-export const CANDIDATE_RETRIEVAL_DATE = new Date("2026-09-24T00:00:00Z");
-
 const OGL_CANADA_ATTRIBUTION =
   "Contains information licensed under the Open Government Licence – Canada";
 const OGL_ALBERTA_ATTRIBUTION =
@@ -49,6 +39,18 @@ const OGL_ONTARIO_ATTRIBUTION =
  * retrieval date is quietly moved to cover the other.
  */
 export const TRANSPORT_RETRIEVAL_DATE = new Date("2026-09-24T00:00:00Z");
+
+/**
+ * The federal and provincial catalogue candidates added 2026-09-24. What is
+ * recorded for them is what the publisher's own page or catalogue entry stated
+ * on this date — licence named, rate limit, key requirement, update frequency.
+ * That is research, not a licence review, so all seven seed `unverified` and
+ * are cleared (or refused) by a person through `geo.sourceReview`, which
+ * records who and what they read.
+ */
+export const CANDIDATE_RETRIEVAL_DATE = new Date("2026-09-24T00:00:00Z");
+/** When the facility directory's regulator layers and their licences were researched (0143). */
+export const FACILITY_LAYER_RETRIEVAL_DATE = new Date("2026-09-17T00:00:00Z");
 
 /**
  * Sources whose licence, attribution, commercial-use and redistribution terms
@@ -237,7 +239,6 @@ export const VERIFIED_DATA_SOURCES: readonly ExternalDataSource[] = [
     sourceKey: "on511",
     displayName: "Ontario 511 Developer API",
     authority: "Government of Ontario — Ministry of Transportation",
-    sourceUrl: "https://511on.ca/developers/doc",
     category: "road_conditions",
     jurisdiction: "CA-ON",
     licenceName: "Open Government Licence – Ontario",
@@ -706,6 +707,56 @@ export const UNVERIFIED_DATA_SOURCES: readonly ExternalDataSource[] = [
     verifiedAt: null,
     status: "unverified",
   },
+  {
+    /*
+     * The facility directory's ArcGIS layers (0143), registered so the approved-source registry
+     * (0233) can govern the importer that reads them. The licence is named so a reviewer knows what
+     * to read; everything a reviewer must confirm stays as every unverified seed keeps it — commercial
+     * use and redistribution unknown, no attribution text — until a person clears it here with
+     * `geo.sourceReview`. The facility licence register (`facilitySourceLicences`, 0143) already
+     * records the grant ("including for commercial purposes", retrieved 2026-09-17), and the
+     * importer's own licence gate reads that register, unchanged.
+     */
+    sourceKey: "sk_petroleum_gis",
+    displayName: "Saskatchewan Petroleum GIS — Facilities layer",
+    authority: "Government of Saskatchewan — Ministry of Energy and Resources",
+    category: "oilfield_assets",
+    jurisdiction: "CA-SK",
+    licenceName: "Government of Saskatchewan Standard Unrestricted Use Data Licence (Version 2.0)",
+    licenceUrl: "https://gisappl.saskatchewan.ca/Html5Ext/Resources/GOS_Standard_Unrestricted_Use_Data_Licence_v2.0.pdf",
+    attributionRequired: true,
+    attributionText: null,
+    shareAlikeObligation: false,
+    commercialUsePermitted: "unknown",
+    redistributionPermitted: "unknown",
+    rateLimitCalls: null,
+    rateLimitWindowSeconds: null,
+    updateIntervalHours: null,
+    retrievedAt: FACILITY_LAYER_RETRIEVAL_DATE,
+    verifiedAt: null,
+    status: "unverified",
+  },
+  {
+    /* The BC Energy Regulator's GIS service: facility points and sump locations (0143). Same treatment as above. */
+    sourceKey: "bcer_gis",
+    displayName: "BC Energy Regulator GIS — facility and sump layers",
+    authority: "BC Energy Regulator",
+    category: "oilfield_assets",
+    jurisdiction: "CA-BC",
+    licenceName: "BC Energy Regulator Open Data Licence",
+    licenceUrl: "https://www.bc-er.ca/files/gis/BCER-Open-Data-Licence.pdf",
+    attributionRequired: true,
+    attributionText: null,
+    shareAlikeObligation: false,
+    commercialUsePermitted: "unknown",
+    redistributionPermitted: "unknown",
+    rateLimitCalls: null,
+    rateLimitWindowSeconds: null,
+    updateIntervalHours: null,
+    retrievedAt: FACILITY_LAYER_RETRIEVAL_DATE,
+    verifiedAt: null,
+    status: "unverified",
+  },
   /*
    * 2026-09-24 catalogue candidates. Each licence named below is the one the publisher's
    * page or catalogue entry states; commercial use and redistribution stay `unknown`
@@ -902,7 +953,7 @@ export const SOURCE_CAVEATS: Record<string, string> = {
   ab511:
     "Throttled at ten calls per sixty seconds. Poll into a central cache; never proxy the raw API to devices.",
   on511:
-    "Throttled at ten calls per sixty seconds and requires a developer key, although the licence is open. Poll into a central cache; never proxy the raw API to devices. The publisher calls the Ontario 511 logo mandatory while OGL – Ontario excludes logos and official marks from the grant, so the logo is not used until Ontario says in writing where it may appear; the licence attribution line is shown instead.",
+    "Throttled at ten calls per sixty seconds and requires a developer key, although the licence is open. The publisher calls the Ontario 511 logo mandatory while OGL – Ontario excludes logos and official marks from the grant, so the logo is not used until Ontario says in writing where it may appear; the licence attribution line is shown instead.",
   qc_mtmd_roadworks:
     "Records are in French with an English description field. CC BY 4.0 requires that changes be indicated — the attribution says the records were normalized.",
   sk_highway_hotline:

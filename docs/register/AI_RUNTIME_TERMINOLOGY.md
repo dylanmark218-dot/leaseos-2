@@ -738,17 +738,21 @@ and is stronger for it: a live, durable, deterministic coordinator already exist
 
 The full survey is `docs/register/AI_AGENT_RUNTIME_ARCHITECTURE.md` §23, which uses that
 document's six-word status set. PR #7 has merged since §22 was written, so `server/_core/ai/` is
-in this tree. It is still `DECLARED_UNWIRED` under the moratorium.
+in this tree. It is still `DECLARED_UNWIRED` under the moratorium. Re-verified 2026-10-03 against
+`main` at `9895188`.
 
 **Rule: a Tool carries authority and executes; a Skill carries procedure and grants zero
-authority.**
+authority. Tool availability does not equal Tool authorization.** Effective authority comes only
+from the existing path (`TrpcContext` → `resolveActingScope()` → `roleProcedure` / `authorize()`
+→ `decide()` → automation policy). It never comes from a Skill, task key, agent declaration,
+prompt or model decision.
 
 | Term | LeaseOS definition | Repository home | Status |
 |---|---|---|---|
-| **Tool** | One narrowly defined executable capability: a model-facing key bound server-side to exactly one existing `ProcedureName`. | `ToolDefinition`, `SECRETARY_TOOLS` (11), `resolveTool()`, `invokeTool()` in `server/_core/ai/tools/` | **DECLARED_UNWIRED** |
+| **Tool** | One narrowly defined executable capability: a model-facing key bound server-side to exactly one existing `ProcedureName`. | `ToolDefinition`, `SECRETARY_TOOLS` (11), `resolveTool()` → `agentMayNotCall()`, `invokeTool()` in `server/_core/ai/tools/` | **DECLARED_UNWIRED** (implemented as code; no production caller) |
 | **Tool request / execution / result / receipt** | One requested invocation; its attempted run; the structured outcome; the durable evidence. Kept as four shapes. | `ToolInvocation`; `invokeTool()`; `ToolResult` (not persisted); `authorizationDecisions` row per call, `assistantCommitReceipts` for commits | **PARTIAL** |
-| **Skill** | A reusable, versioned operating procedure for one class of task: objective, required information, expected tools, decision rules, verification, clarification, approval checkpoints, completion criteria, escalation. **Grants no authority.** | Not a named type. Decomposed across `FORMS` (fields, `precisionSensitive`), `TaskAllowlist` (tools, budget; `taskKey` is the natural Skill key), `PromptVersion` (procedure prose), and the validator / `detectGaps()` / `checkCommit()` (verification) | **PARTIAL**, with no binding type. The minimum future shape is §8's `PromptContract` |
-| **Skill selection** | Choosing which procedure applies. Done by the server from the entry point or form key, never by the model. An unknown Skill refuses (the existing `ToolNotAllowed` / perimeter refusal), so no `SKILL_NOT_AVAILABLE` code is needed. | `runSecretaryExtractionJob()` is handed its form; `assistant.draft` takes `formKey` from a server route | **IMPLEMENTED** (deterministic) |
+| **Skill** | A reusable, versioned operating procedure for one class of task: objective, required information, expected tools, decision rules, verification, clarification, approval checkpoints, completion criteria, escalation. **Grants no authority.** | Not a named type. Decomposed across `FORMS` (fields, `precisionSensitive`), `TaskAllowlist` (tools, budget; `taskKey` is the natural Skill key), `PromptVersion` (procedure prose), and the validator / `detectGaps()` / `checkCommit()` (verification) | **PARTIAL — architecturally defined, runtime DEFERRED.** No Skill type, registry, loader or selection exists in code. Future identity: `taskKey` + `skillVersion`; minimum shape: §8's `PromptContract` |
+| **Skill selection** | Choosing which procedure applies: by the server, never by the model. When built, an unknown Skill should reuse the existing refusals (`ToolNotAllowed`, perimeter refusal), not a new `SKILL_NOT_AVAILABLE` code. | No Skill is selected today. Only *form* selection exists: `assistant.draft` takes `formKey` from a server route; `runSecretaryExtractionJob()` (unwired) is handed its form | **MISSING → DEFERRED** (form selection is server-side and deterministic) |
 | **MCP** | A transport for exposing tools. Never an authorization model; connecting a server never grants its tools. | none | **MISSING → DEFERRED** |
 | **Offline tool class** | Declared, never inferred. Reuse the existing classes; do not add a second set. | `OfflineClass` (`local_safe`, `local_capture`, `local_prepare`, `server_authoritative`) in `offlineCapability.ts`; `CapabilityDefinition.requiresOnline` | **DECLARED_UNWIRED**; `requiresOnline` **IMPLEMENTED** in `decide()` |
 
@@ -1271,7 +1275,8 @@ classification, and every status a Voice Profile might be tempted to round up.
 A **Skill** is defined in §23: a versioned procedure that grants no authority, today
 decomposed across `FORMS`, `TaskAllowlist` and `PromptVersion`, with its minimum future shape
 in `AI_AGENT_RUNTIME_ARCHITECTURE.md` §23.16 (one `PromptContract` / `SkillDefinition` type
-keyed by `taskKey` + `version`, a constant registry, registration-time tests). Part II adds two
+keyed by `taskKey` + `skillVersion` (architecture §23.19–§23.20), a constant registry,
+registration-time tests). Part II adds two
 references to that same record and nothing else: a **Voice Profile** key and an **output
 claims contract** (which evidence classes from §28 the Skill's output must carry, and whether
 it may quote at length, §32). Both fit §23.16's structural test: neither can name a

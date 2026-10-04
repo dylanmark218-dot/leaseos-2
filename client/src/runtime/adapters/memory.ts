@@ -13,6 +13,7 @@ import {
   type DocumentScanner, type FileVault, type Keystore, type LocalCapture, type LocalPackage,
   type LocalStore, type OcrEngine, type ScannedPage, type SyncState,
 } from "../contracts";
+import type { HardwareCapability } from "@shared/hardwareCapability";
 import { decryptWithRawKey, encryptWithRawKey, generateRawKey, sha256Hex, toBase64 } from "../crypto";
 
 export class MemoryStore implements LocalStore {
@@ -147,4 +148,16 @@ export class ScriptedBarcodeScanner implements BarcodeScanner {
     if (!this.isAvailable) throw new NotOnDeviceError("Barcode scanner");
     return this.byContentHash.get(await sha256Hex(bytes)) ?? [];
   }
+}
+
+/**
+ * SPINE item 3 — HS1 probes for the browser fallback. It has a real local store, vault and keystore
+ * (in memory, real encryption) and a connectivity flag; it has no camera or GPS binding, so those are
+ * false and a capture that needs them is refused rather than faked.
+ */
+export function memoryProbes(): Record<HardwareCapability, () => Promise<boolean>> {
+  return {
+    localStore: async () => true, fileVault: async () => true, keystore: async () => true,
+    camera: async () => false, location: async () => false, network: async () => true,
+  };
 }

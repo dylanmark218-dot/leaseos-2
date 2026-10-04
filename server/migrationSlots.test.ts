@@ -73,7 +73,30 @@ describe("the real tree", () => {
     // the first slot free on main and on all 131 remote branches at the scan.
     expect(files).toContain("0228_safety_program_builder.sql");
     expect(files.filter(f => f.startsWith("0182_"))).toEqual([]);
-    expect(headSlot(files)).toBe("0228");
+    // The Integration Hub took 0220–0223 (connectors/contracts, sync, dead letters, conflicts + the nullable
+    // connector links); renumbered 2026-10-03 to 0229–0232 when main took 0221/0222 and 0226/0227 and other
+    // branches held 0220 and 0228 (0228 is now #99's, on main).
+    expect(files).toContain("0232_integration_hub_conflicts_and_links.sql");
+    // The approved external source registry took 0233. Drafted as 0228 when that was free, it moved before any
+    // environment applied it when the pre-commit scan found 0228 claimed by payroll P3 and 0229–0232 by the
+    // integration hub; main has since taken 0228 itself (the program builder, #99). 0233 was still free on main
+    // and on all 133 remote branches at the rescan before rebasing onto it, and stays below main's 0236,
+    // whose author counted it among the claimed slots; the ledger applies by name.
+    expect(files).toContain("0233_external_source_registry.sql");
+    // Driver Portfolio security hardening took 0236 (compliance document recorder). Drafted as 0229; on
+    // merging main, 0229 was claimed by the integration hub and 0230–0235 by other open branches, so it
+    // moved to 0236, the first slot free on main and on all 144 remote branches at the scan.
+    expect(files).toContain("0236_compliance_document_recorder.sql");
+    // The Safety Program Builder's follow-up, the event-chain uniqueness guard, took 0241. Drafted as 0233, then 0236, then 0237;
+    // other branches claimed each before it merged (0233: the external source registry above, which merged it, and
+    // billing-invoicing-ar; 0234–0235: payroll P4; 0236: marketplace-main-reconcile and the driver portfolio hardening
+    // above, which merged it; 0237–0240: fleet-equipment-portfolio-design and the marketplace branches), so it
+    // moved above them. It is a new file because the ledger refuses an edited 0228.
+    expect(files).toContain("0241_safety_program_event_chain_unique.sql");
+    expect(files).not.toContain("0233_safety_program_event_chain_unique.sql");
+    expect(files).not.toContain("0236_safety_program_event_chain_unique.sql");
+    expect(files).not.toContain("0237_safety_program_event_chain_unique.sql");
+    expect(headSlot(files)).toBe("0241");
   });
 
   it("keeps the reserved slots empty", () => {

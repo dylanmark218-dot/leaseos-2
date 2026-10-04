@@ -311,6 +311,12 @@ export type Permission =
   | "live_assist.use" | "live_assist.administer" | "live_assist.review"
   // v22.20 — clearing a government data source for operational use.
   | "geo.source.review"
+  // 0233 — the approved external source registry (server/_core/sourceRegistry.ts). Reading, proposing,
+  // editing what may be contacted, binding a credential reference, and each decision (reject, approve,
+  // suspend, revoke) are separate, so no permission both proposes a source and authorises it.
+  | "source.directory.read" | "source.registry.submit" | "source.registry.review" | "source.registry.approve"
+  | "source.registry.suspend" | "source.registry.revoke" | "source.endpoint.edit" | "source.credential_ref.edit"
+  | "source.health.review"
   // v22.19 — the package a truck carries when nothing can be fetched.
   | "comms.package.build" | "comms.package.fetch"
   // v22.20 — hours of service as versioned rules. A verified figure is what a
@@ -345,6 +351,10 @@ export type Permission =
   | "project.read" | "project.quote.manage" | "project.quote.issue" | "project.change.manage" | "project.rfi.manage" | "project.budget.manage" | "project.budget.approve"
   // v21.18 — the gateway. Registering a machine or a webhook is a door; both are sensitive.
   | "integration.read" | "integration.client.manage" | "integration.webhook.manage"
+  // Integration Hub — configuring a connector, issuing/rotating a credential, requeueing a dead letter,
+  // resetting a sync cursor, resolving a conflict and publishing a contract each change what LeaseOS
+  // will accept from, or send to, another system. Reading stays under integration.read.
+  | "integration.connector.manage" | "integration.credential.rotate" | "integration.deadletter.manage" | "integration.sync.manage" | "integration.conflict.resolve" | "integration.contract.manage"
   // v21.19 — telematics. Reading telemetry is operational; acknowledging a fault is the mechanic's determination;
   // reviewing a driving event is safety's; viewing video identifies a person and is its own permission.
   | "telematics.read" | "telematics.fault.acknowledge" | "safety.event.review" | "safety.video.read"
@@ -623,6 +633,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "project.change.manage",
     "project.rfi.manage",
     "integration.read",
+    "integration.deadletter.manage",
+    "integration.sync.manage",
     "telematics.read",
     "hr.probation.recommend",
     "spatial.read",
@@ -825,6 +837,9 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   safety: [
     "portfolio.read",
     "portfolio.requirement.manage",
+    // 0233 — safety runs the facility directory's regulator imports: it proposes and configures a source,
+    // can stop one at once, and reads health. Approving, rejecting, revoking and binding credentials are not its.
+    "source.directory.read", "source.registry.submit", "source.endpoint.edit", "source.registry.suspend", "source.health.review",
     // SA1 — Sign & Attest
     "attest.read",
     "attest.document.open",
@@ -1274,6 +1289,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "oos.policy.manage",
     "oos.policy.approve",
     "geo.source.review",
+    // 0233 — the approved external source registry: the whole lifecycle, as for licence review.
+    "source.directory.read", "source.registry.submit", "source.registry.review", "source.registry.approve",
+    "source.registry.suspend", "source.registry.revoke", "source.endpoint.edit", "source.credential_ref.edit",
+    "source.health.review",
     "hos.read",
     "hos.rule.manage",
     "hos.rule.verify",
@@ -1446,6 +1465,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "integration.read",
     "integration.client.manage",
     "integration.webhook.manage",
+    "integration.connector.manage",
+    "integration.credential.rotate",
+    "integration.deadletter.manage",
+    "integration.sync.manage",
+    "integration.conflict.resolve",
+    "integration.contract.manage",
     "telematics.read",
     "safety.event.review",
     "safety.video.read",
@@ -1560,6 +1585,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "closeout.terms.approve",
   ],
   auditor: [
+    // 0233 — the source registry, read-only: what is approved, by whom, and how it is answering.
+    "source.directory.read", "source.health.review",
     // SA1 — Sign & Attest
     "attest.read",
     "attest.export",
@@ -1775,6 +1802,10 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "oos.policy.manage",
     "oos.policy.approve",
     "geo.source.review",
+    // 0233 — the approved external source registry: the whole lifecycle, as for licence review.
+    "source.directory.read", "source.registry.submit", "source.registry.review", "source.registry.approve",
+    "source.registry.suspend", "source.registry.revoke", "source.endpoint.edit", "source.credential_ref.edit",
+    "source.health.review",
     "hos.read",
     "hos.rule.manage",
     "hos.rule.verify",
@@ -1921,6 +1952,12 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "integration.read",
     "integration.client.manage",
     "integration.webhook.manage",
+    "integration.connector.manage",
+    "integration.credential.rotate",
+    "integration.deadletter.manage",
+    "integration.sync.manage",
+    "integration.conflict.resolve",
+    "integration.contract.manage",
     "audit.package.prepare",
     "audit.package.release",
     "audit.package.read",
@@ -2151,6 +2188,15 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // Clearing a source decides whether the company may commercially use a
   // government dataset. That is a determination, not an edit.
   "geo.source.review",
+  // 0233 — reviewing, approving, suspending or revoking a source decides whether the server may contact
+  // it; editing an endpoint or the credential it presents changes where the server connects and what it
+  // sends. A registry decision with no audit row is refused.
+  "source.registry.review",
+  "source.registry.approve",
+  "source.registry.suspend",
+  "source.registry.revoke",
+  "source.endpoint.edit",
+  "source.credential_ref.edit",
   // v22.20 — a verified HOS figure becomes a legal determination about a person.
   "hos.rule.verify",
   // v22.1 — approved terms decide what a customer is billed.
@@ -2176,6 +2222,14 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   // v21.18 — a machine's key and a webhook's secret are doors.
   "integration.client.manage",
   "integration.webhook.manage",
+  // Integration Hub — so are a connector, a credential, a requeue, a cursor reset, a conflict
+  // decision and a contract.
+  "integration.connector.manage",
+  "integration.credential.rotate",
+  "integration.deadletter.manage",
+  "integration.sync.manage",
+  "integration.conflict.resolve",
+  "integration.contract.manage",
   // v21.17 — a price given to a customer and an approved budget are commitments.
   "project.quote.issue",
   "project.budget.approve",
@@ -2902,6 +2956,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "commercialOffice.categoryCreate": "commercial.write",
   "securityIncidents.open": "incident.create",
   "securityIncidents.timelineAppend": "incident.create",
+  "securityIncidents.statusChange": "incident.review",
   "securityIncidents.organizationAffect": "incident.review",
   "securityIncidents.breachAssess": "incident.review",
   "securityIncidents.obligationCreate": "incident.review",
@@ -3334,6 +3389,25 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "geo.sourceReview": "geo.source.review",
   "geo.transportFeeds": "geo.source.review",
 
+  /* ---- 0233: approved external source registry (server/sourceRegistryRouter.ts) ---- */
+  "sourceRegistry.list": "source.directory.read",
+  "sourceRegistry.get": "source.directory.read",
+  "sourceRegistry.health": "source.health.review",
+  "sourceRegistry.seed": "source.registry.submit",
+  "sourceRegistry.create": "source.registry.submit",
+  "sourceRegistry.update": "source.registry.submit",
+  "sourceRegistry.requestReview": "source.registry.submit",
+  "sourceRegistry.endpointAdd": "source.endpoint.edit",
+  "sourceRegistry.endpointUpdate": "source.endpoint.edit",
+  "sourceRegistry.credentialBind": "source.credential_ref.edit",
+  "sourceRegistry.reject": "source.registry.review",
+  "sourceRegistry.approve": "source.registry.approve",
+  // Resuming re-authorises contact, so it is an approver's act; anyone who may suspend may only stop.
+  "sourceRegistry.resume": "source.registry.approve",
+  "sourceRegistry.suspend": "source.registry.suspend",
+  "sourceRegistry.revoke": "source.registry.revoke",
+  "sourceRegistry.retire": "source.registry.revoke",
+
   /* ---- v22.17: communications on the route ---- */
   "comms.channelSeed": "comms.channel.manage",
   "comms.channelList": "comms.read",
@@ -3545,6 +3619,37 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "integration.webhookSetStatus": "integration.webhook.manage",
   "integration.webhookDispatch": "integration.webhook.manage",
   "integration.deliveries": "integration.read",
+
+  /* ---- Integration Hub ---- */
+  "integrationHub.definitionsList": "integration.read",
+  "integrationHub.connectorsList": "integration.read",
+  "integrationHub.connectorGet": "integration.read",
+  "integrationHub.connectorCreate": "integration.connector.manage",
+  "integrationHub.connectorUpdate": "integration.connector.manage",
+  "integrationHub.connectorSetStatus": "integration.connector.manage",
+  "integrationHub.connectionTest": "integration.connector.manage",
+  "integrationHub.credentialIssue": "integration.credential.rotate",
+  "integrationHub.credentialRotate": "integration.credential.rotate",
+  "integrationHub.credentialRevoke": "integration.credential.rotate",
+  "integrationHub.subscriptionCreate": "integration.webhook.manage",
+  "integrationHub.subscriptionSetStatus": "integration.webhook.manage",
+  "integrationHub.subscriptionsList": "integration.read",
+  "integrationHub.deliveriesList": "integration.read",
+  "integrationHub.deliveryAttempts": "integration.read",
+  "integrationHub.inboundList": "integration.read",
+  "integrationHub.deadLettersList": "integration.read",
+  "integrationHub.deadLetterGet": "integration.read",
+  "integrationHub.deadLetterAct": "integration.deadletter.manage",
+  "integrationHub.syncRunsList": "integration.read",
+  "integrationHub.syncRunGet": "integration.read",
+  "integrationHub.syncTrigger": "integration.sync.manage",
+  "integrationHub.syncCursorReset": "integration.sync.manage",
+  "integrationHub.conflictsList": "integration.read",
+  "integrationHub.conflictResolve": "integration.conflict.resolve",
+  "integrationHub.contractsList": "integration.read",
+  "integrationHub.contractCreate": "integration.contract.manage",
+  "integrationHub.health": "integration.read",
+  "integrationHub.auditList": "integration.read",
 
   /* ---- v21.19: telematics and video safety ---- */
   "telematics.unit": "telematics.read",

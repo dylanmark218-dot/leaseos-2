@@ -31,8 +31,8 @@ import { seedExternalDataSources, listExternalDataSources } from "../db";
 const byKey = (k: string) =>
   ALL_DATA_SOURCES.find(s => s.sourceKey === k)!;
 
-describe("the merged registry keeps one Ontario 511 and all later candidates", () => {
-  it("has thirty-five sources, ten verified and twenty-five not", () => {
+describe("the count is eight, not nine", () => {
+  it("has thirty-seven sources, ten verified and twenty-seven not", () => {
     // The research summary said "nine of eleven are clean" while separately
     // flagging three as unresolved. Eleven minus three is eight. Seeding nine
     // would have marked a blocked source usable.
@@ -45,11 +45,19 @@ describe("the merged registry keeps one Ontario 511 and all later candidates", (
     //
     // The Canadian 511 tranche (2026-09-24) added seven. Two clear on a published open licence —
     // Ontario 511 under OGL – Ontario, Québec's roadworks under CC BY 4.0 — so eight becomes ten.
-    // The later catalogue candidates keep their named licences and source URLs, but no reviewer has
-    // cleared their commercial-use and attribution requirements yet, so they stay unverified.
-    expect(ALL_DATA_SOURCES).toHaveLength(35);
+    // Manitoba, New Brunswick, Yukon and Newfoundland and Labrador publish no licence beside their
+    // keys, exactly like Alberta, and Saskatchewan publishes no API. Those five seed unverified.
+    // 0233 registered the facility directory's two regulator GIS services (Saskatchewan Petroleum,
+    // BC Energy Regulator) so the approved-source registry can govern their importer. Their licences
+    // are named; nothing a reviewer confirms is recorded, so both seed unverified.
+    //
+    // The federal and provincial candidates of 2026-09-24 added seven more —
+    // Transport Canada recalls, the recalls-and-alerts feed, two StatCan
+    // services, two open-data catalogues and Québec's heavy-truck network.
+    // Research named their licences; nobody has reviewed one, so ten stays ten.
+    expect(ALL_DATA_SOURCES).toHaveLength(37);
     expect(VERIFIED_DATA_SOURCES).toHaveLength(10);
-    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(25);
+    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(27);
   });
 
   it("names exactly the ones that could not be verified", () => {
@@ -60,6 +68,7 @@ describe("the merged registry keeps one Ontario 511 and all later candidates", (
       "aer_st37",
       "bc_data_catalogue",
       "bc_resource_road_maps",
+      "bcer_gis",
       "crtc_coverage",
       "goc_open_data_api",
       "hc_recalls_safety_alerts",
@@ -74,6 +83,7 @@ describe("the merged registry keeps one Ontario 511 and all later candidates", (
       "qc_reseau_camionnage",
       "sk_highway_hotline",
       "sk_iris",
+      "sk_petroleum_gis",
       "statcan_boundaries",
       "statcan_rdaas",
       "statcan_wds",
@@ -270,6 +280,7 @@ describe("attribution is collected, and gaps are named", () => {
       "aer_st37",
       "bc_data_catalogue",
       "bc_resource_road_maps",
+      "bcer_gis",
       "crtc_coverage",
       "goc_open_data_api",
       "hc_recalls_safety_alerts",
@@ -284,6 +295,7 @@ describe("attribution is collected, and gaps are named", () => {
       "qc_reseau_camionnage",
       "sk_highway_hotline",
       "sk_iris",
+      "sk_petroleum_gis",
       "statcan_boundaries",
       "statcan_rdaas",
       "statcan_wds",
@@ -448,22 +460,28 @@ beforeAll(async () => {
   // the database persists between runs. Without this reset the second run of
   // the file reads the first run's mutations and fails for the wrong reason.
   await pool.execute("DELETE FROM externalDataSources");
+  // The approval registry (0233) hangs off those rows by id. Its endpoints carry a unique
+  // `endpointRef`, so a re-seed after the reset would collide with the orphans; they and their
+  // approvals go too. Its events are append-only (the database refuses a DELETE) and stay, as
+  // history of rows that no longer exist — nothing reads an event to authorise anything.
+  await pool.execute("DELETE FROM externalSourceEndpoints");
+  await pool.execute("DELETE FROM externalSourceApprovals");
 });
 
 d("seeding into the database", () => {
-  it("inserts all thirty-five and is idempotent on a second run", async () => {
+  it("inserts all thirty-seven and is idempotent on a second run", async () => {
     const first = await seedExternalDataSources();
-    expect(first.inserted.length + first.existing.length).toBe(35);
+    expect(first.inserted.length + first.existing.length).toBe(37);
 
     const second = await seedExternalDataSources();
     expect(second.inserted).toEqual([]);
-    expect(second.existing).toHaveLength(35);
+    expect(second.existing).toHaveLength(37);
   });
 
-  it("persists status, source URL, rate limit and retrieval date", async () => {
+  it("persists status, rate limit and retrieval date", async () => {
     await seedExternalDataSources();
     const [rows] = await pool.execute<mysql.RowDataPacket[]>(
-      "SELECT sourceKey, status, sourceUrl, rateLimitCalls, rateLimitWindowSeconds, requiresApiKey, retrievedAt, verifiedAt FROM externalDataSources WHERE sourceKey IN ('ab511','on511','osm','aer_st37')"
+      "SELECT sourceKey, status, rateLimitCalls, rateLimitWindowSeconds, requiresApiKey, retrievedAt, verifiedAt FROM externalDataSources WHERE sourceKey IN ('ab511','osm','aer_st37')"
     );
     const map = new Map(rows.map(r => [r.sourceKey, r]));
 
@@ -477,23 +495,7 @@ d("seeding into the database", () => {
     expect(map.get("osm")!.verifiedAt).not.toBeNull();
     expect(map.get("osm")!.retrievedAt).not.toBeNull();
 
-    expect(map.get("on511")!.sourceUrl).toBe("https://511on.ca/developers/doc");
-
     expect(map.get("aer_st37")!.status).toBe("unverified");
-  });
-
-  it("backfills a seeded source URL when an existing row still has NULL", async () => {
-    await seedExternalDataSources();
-    await pool.execute(
-      "UPDATE externalDataSources SET sourceUrl=NULL WHERE sourceKey='on511'"
-    );
-
-    await seedExternalDataSources();
-
-    const [rows] = await pool.execute<mysql.RowDataPacket[]>(
-      "SELECT sourceUrl FROM externalDataSources WHERE sourceKey='on511'"
-    );
-    expect(rows[0].sourceUrl).toBe("https://511on.ca/developers/doc");
   });
 
   it("does not downgrade a row somebody has since verified", async () => {

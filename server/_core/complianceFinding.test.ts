@@ -202,36 +202,125 @@ describe("9. an unevaluated required capability no longer relies on a cast", () 
 });
 
 /* ------------------------------------------------------------------ */
-/* C1a-7 — dangerous goods from structure, never from text            */
+/* C1a-7 / RI-0.6 — dangerous goods from structured loads, and only   */
+/* from them                                                          */
 /* ------------------------------------------------------------------ */
 
-describe("dangerous goods: structured authority only", () => {
-  const load = (over: Partial<Parameters<typeof dangerousGoodsAuthority>[0][number]> = {}) => ({ id: 1, unNumber: null, dgClass: null, packingGroup: null, classificationStatus: "verified" as const, verifiedAt: AT, ...over });
+describe("RI-0.6: structured load classification is the only dangerous-goods authority", () => {
+  type Row = Parameters<typeof dangerousGoodsAuthority>[0][number];
+  const load = (over: Partial<Row> = {}): Row => ({ id: 1, unNumber: null, dgClass: null, packingGroup: null, classificationStatus: "verified", verifiedAt: AT, ...over });
+  const dg = (id = 1) => load({ id, unNumber: "UN1203", dgClass: "3" });
+  const notDg = (id = 2) => load({ id });
+  const unverified = (id = 3) => load({ id, classificationStatus: "needs_verification" });
+  const refused = (id = 4) => load({ id, classificationStatus: "blocked" });
 
-  it("10. free text cannot establish compliance: 'hazard' in the job type over verified non-DG loads is not DG", () => {
-    expect(dangerousGoodsAuthority([load()], true).state).toBe("not_dg");
+  it("A. a verified UN load is dangerous goods whatever the job is called — no text reaches the decision", () => {
+    // The function takes loads and nothing else: there is no parameter a job description could arrive through.
+    expect(dangerousGoodsAuthority.length).toBe(1);
+    const a = dangerousGoodsAuthority([dg()]);
+    expect(a).toMatchObject({ state: "dg", dangerousGoods: true, reason: "verified_dg", blockers: [] });
+    expect(a.loads).toEqual([{ loadId: 1, state: "dg" }]);
   });
-  it("10. free text cannot establish DG either: a verified UN load is DG whatever the job is called", () => {
-    const a = dangerousGoodsAuthority([load({ unNumber: "UN1203", dgClass: "3" })], false);
-    expect(a.state).toBe("dg");
-    expect(a.blockers).toEqual([]);
+
+  it("B. hazmat-looking words cannot create dangerous goods: a verified non-DG load is not_dg, whatever the job says", () => {
+    const a = dangerousGoodsAuthority([notDg()]);
+    expect(a).toMatchObject({ state: "not_dg", dangerousGoods: false, reason: "verified_not_dg", blockers: [] });
   });
-  it("11. a load whose classification is not verified is UNKNOWN, and blocks", () => {
-    const a = dangerousGoodsAuthority([load({ classificationStatus: "needs_verification", unNumber: "UN1203" })], false);
-    expect(a.state).toBe("unknown");
-    expect(f(a.blockers[0]).dispatchEffect).toBe("BLOCK");
+
+  it("C. a load whose classification is not verified is UNKNOWN with its reason, and blocks — the absence of a UN number proves nothing", () => {
+    const a = dangerousGoodsAuthority([unverified()]);
+    expect(a).toMatchObject({ state: "unknown", dangerousGoods: false, reason: "classification_unverified" });
+    expect(a.blockers.map(b => b.code)).toEqual(["dg_classification_unverified"]);
+    expect(f(a.blockers[0]!)).toMatchObject({ result: "UNKNOWN", dispatchEffect: "BLOCK" });
   });
-  it("11. no load recorded but the job suggests DG — classification missing, UNKNOWN", () => {
-    const a = dangerousGoodsAuthority([], true);
-    expect(a.state).toBe("unknown");
-    expect(a.blockers[0].code).toBe("dg_classification_missing");
+
+  it("D. no load recorded is UNKNOWN with reason no_load — never not-applicable, and never a pass because nothing looked hazardous", () => {
+    const a = dangerousGoodsAuthority([]);
+    expect(a).toMatchObject({ state: "unknown", dangerousGoods: false, reason: "no_load", loads: [] });
+    expect(a.blockers.map(b => b.code)).toEqual(["dg_classification_missing"]);
+    expect(f(a.blockers[0]!)).toMatchObject({ result: "UNKNOWN", dispatchEffect: "BLOCK" });
+    expect(a.explanation).toMatch(/no load/i);
   });
-  it("no load and no signal at all — not applicable, and says so", () => {
-    expect(dangerousGoodsAuthority([], false)).toMatchObject({ state: "not_applicable", blockers: [] });
+
+  it("E. multiple loads: any verified dangerous-goods load governs, and what is unresolved is still surfaced", () => {
+    // DG beside verified non-DG → DG.
+    expect(dangerousGoodsAuthority([dg(1), notDg(2)])).toMatchObject({ state: "dg", dangerousGoods: true, blockers: [] });
+    // DG beside an unverified load → DG requirements apply AND the unknown is on the record.
+    const mixed = dangerousGoodsAuthority([dg(1), unverified(3)]);
+    expect(mixed).toMatchObject({ state: "dg", dangerousGoods: true, reason: "verified_dg" });
+    expect(mixed.blockers.map(b => b.code)).toEqual(["dg_classification_unverified"]);
+    expect(mixed.loads).toEqual([{ loadId: 1, state: "dg" }, { loadId: 3, state: "unverified" }]);
+    // Verified non-DG beside an unverified load → UNKNOWN: the verified one cannot vouch for the other.
+    expect(dangerousGoodsAuthority([notDg(2), unverified(3)])).toMatchObject({ state: "unknown", dangerousGoods: false, reason: "classification_unverified" });
+    // A refused classification beside a verified DG load: blocked, non-overridably — and DG requirements still apply.
+    const blockedMix = dangerousGoodsAuthority([refused(4), dg(1)]);
+    expect(blockedMix).toMatchObject({ state: "blocked", dangerousGoods: true, reason: "classification_blocked" });
+    expect(blockedMix.blockers.map(b => b.code)).toEqual(["dg_classification_blocked"]);
+    expect(f(blockedMix.blockers[0]!).overrideClass).toBe("NEVER_OVERRIDABLE");
+    // Blocked beside unverified: both facts are reported, the blocking one first.
+    expect(dangerousGoodsAuthority([refused(4), unverified(3)]).blockers.map(b => b.code)).toEqual(["dg_classification_blocked", "dg_classification_unverified"]);
   });
+
+  it("F. every load verified and none dangerous goods: not_dg, no requirement, no blocker", () => {
+    const a = dangerousGoodsAuthority([notDg(2), notDg(5)]);
+    expect(a).toMatchObject({ state: "not_dg", dangerousGoods: false, reason: "verified_not_dg", blockers: [] });
+    expect(a.loads.every(l => l.state === "not_dg")).toBe(true);
+  });
+
+  it("G. the explanation says why the answer is what it is, load by load", () => {
+    expect(dangerousGoodsAuthority([]).explanation).toMatch(/no load is recorded/i);
+    expect(dangerousGoodsAuthority([unverified(3)]).explanation).toMatch(/1 load classification\(s\) not verified/);
+    expect(dangerousGoodsAuthority([dg(1)]).explanation).toMatch(/UN1203/);
+    expect(dangerousGoodsAuthority([refused(4)]).explanation).toMatch(/refused/);
+  });
+
+  /*
+   * The owner's eight-case table, in one place (RI-0.6 on current main). `applies` is whether DG
+   * requirements apply; `state` is the answer readiness reports. The rule the table exists for: an
+   * authoritative TRUE is never downgraded by another load, and nothing short of every load verified
+   * not-DG reads as not-DG.
+   */
+  it("H. the full truth table: TRUE governs, FALSE needs every load verified, anything unresolved is UNKNOWN", () => {
+    const table: [string, Row[], { state: string; applies: boolean; unresolvedSurfaced: boolean }][] = [
+      ["TRUE", [dg(1)], { state: "dg", applies: true, unresolvedSurfaced: false }],
+      ["FALSE", [notDg(2)], { state: "not_dg", applies: false, unresolvedSurfaced: false }],
+      ["UNKNOWN", [unverified(3)], { state: "unknown", applies: false, unresolvedSurfaced: true }],
+      ["no structured load", [], { state: "unknown", applies: false, unresolvedSurfaced: true }],
+      ["TRUE + FALSE", [dg(1), notDg(2)], { state: "dg", applies: true, unresolvedSurfaced: false }],
+      ["TRUE + UNKNOWN", [dg(1), unverified(3)], { state: "dg", applies: true, unresolvedSurfaced: true }],
+      ["FALSE + UNKNOWN", [notDg(2), unverified(3)], { state: "unknown", applies: false, unresolvedSurfaced: true }],
+      ["UNKNOWN + UNKNOWN", [unverified(3), unverified(6)], { state: "unknown", applies: false, unresolvedSurfaced: true }],
+    ];
+    for (const [name, rows, want] of table) {
+      const a = dangerousGoodsAuthority(rows);
+      expect({ name, state: a.state, applies: a.dangerousGoods, unresolvedSurfaced: a.blockers.length > 0 }).toEqual({ name, ...want });
+      // Nothing unresolved is ever reported as not-DG, whatever else is on the job.
+      if (want.unresolvedSurfaced && !want.applies) expect(a.state).not.toBe("not_dg");
+    }
+    // UNKNOWN + UNKNOWN reports both loads, not a summary that could hide one.
+    expect(dangerousGoodsAuthority([unverified(3), unverified(6)]).loads).toEqual([{ loadId: 3, state: "unverified" }, { loadId: 6, state: "unverified" }]);
+    expect(dangerousGoodsAuthority([unverified(3), unverified(6)]).explanation).toMatch(/2 load classification\(s\) not verified/);
+  });
+
   it("a refused classification blocks, non-overridably", () => {
-    const a = dangerousGoodsAuthority([load({ classificationStatus: "blocked" })], false);
-    expect(f(a.blockers[0]).overrideClass).toBe("NEVER_OVERRIDABLE");
+    const a = dangerousGoodsAuthority([refused()]);
+    expect(f(a.blockers[0]!).overrideClass).toBe("NEVER_OVERRIDABLE");
+  });
+
+  it("the classification version that reaches the eligibility fingerprint moves with the loads, not with the job's wording", () => {
+    const v = (rows: Row[]) => dangerousGoodsAuthority(rows).version;
+    expect(v([])).not.toBe(v([notDg()]));
+    expect(v([notDg()])).not.toBe(v([unverified(2)]));
+    expect(v([unverified(2)])).not.toBe(v([load({ id: 2, unNumber: "UN1203", dgClass: "3", classificationStatus: "needs_verification" })]));
+    expect(v([dg(1), notDg(2)])).toBe(v([notDg(2), dg(1)]));
+  });
+
+  it("the composer holds no free-text dangerous-goods inference at all", () => {
+    const src = readFileSync("server/readinessComposer.ts", "utf8");
+    // Neither the old regex nor any string test over the job's type or mode may decide, suggest or suppress dangerous goods.
+    expect(src).not.toMatch(/\/tdg\|dangerous\|hazard\//);
+    expect(src).not.toMatch(/(tdg|dangerous|hazard|hazmat)[^\n]*\.test\(\s*`?\$?\{?\s*job/i);
+    expect(src).not.toMatch(/job\??\.(type|mode)[^\n]*(tdg|dangerous|hazard|hazmat)/i);
   });
 });
 
