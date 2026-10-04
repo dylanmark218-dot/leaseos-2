@@ -96,7 +96,10 @@ describe("the real tree", () => {
     expect(files).not.toContain("0233_safety_program_event_chain_unique.sql");
     expect(files).not.toContain("0236_safety_program_event_chain_unique.sql");
     expect(files).not.toContain("0237_safety_program_event_chain_unique.sql");
-    expect(headSlot(files)).toBe("0241");
+    // Document Control G (manual) took 0244, the disposal record's verification columns: main's head was 0241 and
+    // 0242–0243 were claimed by the fleet branches at the scan, so head+1 would have collided twice.
+    expect(files).toContain("0244_disposal_ticket_verification.sql");
+    expect(headSlot(files)).toBe("0244");
   });
 
   it("keeps the reserved slots empty", () => {

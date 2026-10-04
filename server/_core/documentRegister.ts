@@ -44,6 +44,8 @@ export const DOCUMENT_EVENT_TYPES = [
   "document.captured", "document.classified", "document.proposed", "document.confirmed", "document.issued", "document.superseded", "document.withdrawn", "document.voided",
   "document.amended", "document.reference_added", "document.reference_confirmed", "document.reference_rejected", "document.link_added", "document.link_confirmed", "document.link_removed",
   "document.number_reserved", "document.number_issued", "document.number_voided", "document.printed", "document.reprinted", "document.viewed", "document.downloaded", "document.template_bound",
+  // DC-G: the domain a document is linked to verified its own record (a disposal ticket); the register hears, it does not decide.
+  "document.domain_verified",
 ] as const;
 export type DocumentEventType = (typeof DOCUMENT_EVENT_TYPES)[number];
 
@@ -114,6 +116,8 @@ export function registerRefusals(input: RegisterInput): string[] {
   if (d.externalReferencePolicy === "forbidden" && input.externalReferences.length) out.push(`definition ${d.definitionKey} carries no external references`);
   if (d.externalReferencePolicy === "required" && ["confirmed", "issued"].includes(input.requestedState) && !input.externalReferences.length) out.push(`definition ${d.definitionKey} requires the issuer's reference before it is confirmed`);
   for (const r of input.externalReferences) if (!d.allowedExternalReferenceTypes.includes(r.referenceType as ExternalReferenceType)) out.push(`reference type ${r.referenceType} is not allowed on ${d.definitionKey}`);
+  // An issuer's number with no letter or digit in it is no number: it would match every other blank and identify nothing.
+  for (const r of input.externalReferences) if (!/[A-Z0-9]/.test(normaliseReferenceValue(r.referenceValue))) out.push(`reference ${r.referenceType} "${r.referenceValue.trim()}" has no letter or digit; an issuer's number is never blank`);
   for (const l of input.links) if (!d.allowedLinkKinds.includes(l.recordType as DocumentLinkKind)) out.push(`link kind ${l.recordType} is not allowed on ${d.definitionKey}`);
   if (!input.evidenceRecordId && !input.fieldTicketDocumentId && !input.storageKey) out.push("a document needs a pointer to its bytes: an evidence record, a generated field-ticket document, or a storage key");
   if (external && !input.evidenceRecordId) out.push("an external document's bytes are the original evidence: it needs the evidence record, not a bare storage key");
@@ -161,6 +165,34 @@ export function referenceDuplicateVerdict(args: { sameIssuerSameValue: { documen
   const exact = args.sameIssuerSameValue.filter(m => m.contentHash === args.contentHash);
   if (exact.length) return { outcome: "exact_duplicate", matches: exact.map(m => m.documentId) };
   return { outcome: "possible_duplicate", matches: args.sameIssuerSameValue.map(m => m.documentId) };
+}
+
+/** The disposal record's own facts, as the disposal domain wrote them (its job resolved through the load when it has none). */
+export type DisposalRecordFacts = { id: number; ticketNumber: string; loadId: number | null; jobId: number | null; facilityId: number | null; facilityTicketNumber: string | null };
+
+/**
+ * DC-G: whether a disposal-owned document may evidence the disposal record it names. The record is the
+ * domain's fact and stays authoritative; the paper must agree with it — the same load, the same job, the
+ * facility that wrote the record, and the facility's number as the record carries it. A facility's paper that
+ * does not name the facility cannot be assessed (for duplicates or for this) and is refused rather than
+ * treated as unique. A scale ticket's number is never compared with the facility's.
+ */
+export function disposalEvidenceRefusals(input: { issuer: IssuerInput; references: { referenceType: string; referenceValue: string }[]; links: { recordType: string; recordId: number | null }[]; record: DisposalRecordFacts }): string[] {
+  const out: string[] = [];
+  const r = input.record;
+  for (const l of input.links) {
+    if (l.recordType === "load" && r.loadId != null && l.recordId != null && l.recordId !== r.loadId) out.push(`the document is linked to load #${l.recordId} but disposal record ${r.ticketNumber} is for load #${r.loadId}`);
+    if (l.recordType === "job" && r.jobId != null && l.recordId != null && l.recordId !== r.jobId) out.push(`the document is linked to job #${l.recordId} but disposal record ${r.ticketNumber} is on job #${r.jobId}`);
+  }
+  if (input.issuer.issuerKind === "facility") {
+    if (input.issuer.issuerFacilityId == null) out.push(`a facility's paper that does not name the facility cannot be assessed against disposal record ${r.ticketNumber}; name the facility it came from`);
+    else if (r.facilityId != null && input.issuer.issuerFacilityId !== r.facilityId) out.push(`the paper is issued by facility #${input.issuer.issuerFacilityId} but disposal record ${r.ticketNumber} names facility #${r.facilityId}`);
+  }
+  if (r.facilityTicketNumber) {
+    const recorded = normaliseReferenceValue(r.facilityTicketNumber);
+    for (const ref of input.references) if (ref.referenceType === "facility_ticket_number" && normaliseReferenceValue(ref.referenceValue) !== recorded) out.push(`the facility's number ${ref.referenceValue.trim()} is not the number on disposal record ${r.ticketNumber} (${r.facilityTicketNumber})`);
+  }
+  return out;
 }
 
 /** What a reader is told about where a document came from — one sentence, never inferred from a mutable field. */

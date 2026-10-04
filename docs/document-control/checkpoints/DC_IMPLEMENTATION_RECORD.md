@@ -1,9 +1,10 @@
 # Document Control — implementation record
 
 > **On `main`: checkpoints A–C** (adopted 2026-09-24; migrations built as 0178/0179/0180 land as
-> 0178/0195/0196). The sections for D and later live on `claude/document-control-architecture-jlffzk`
-> until the owner rules them in. SHAs below are the original branch's; the adopted commits carry the
-> same content.
+> 0178/0195/0196), and **G as ruled 2026-10-04: the manual slice on A–C** (migration 0244; its section
+> is at the end of this record). D, E, F and H stay on `claude/document-control-architecture-jlffzk`
+> until the owner rules them in. SHAs in the A–C sections are the original branch's; the adopted commits
+> carry the same content.
 
 One record for the implementation checkpoints of `docs/document-control/document-control-design.md`.
 Each section names the SHA it was built on, the migration it added, what it reused, what it tested,
@@ -207,3 +208,71 @@ cannot cut blocks.
 **Gates.** See the commit: `tsc` clean, test-file type errors 0, parity 416/416, census 657,
 reachability, reserved-word, migration-ledger, tracking-number coverage, commercial-office and
 Document Control suites green, current state regenerated, build clean.
+
+---
+
+## Checkpoint G (manual) — the facility's paper against the disposal record (migration 0244)
+
+**Ruling (2026-10-04).** G as built on the adopted branch (`f6b95f2`) needs F — its scan-to-record link runs
+through `documentExtractions.documentId` and `documentDerivatives`, which only F's `0182` adds — and D/E
+for its company-template scenario; it also edited `0178`, which `main` has applied. The owner ruled the
+manual slice the design's own §8 names: a person enters the facility's number; no extraction, no template,
+no screen. D, E, F and H stay held. Built on `main` `d41407f`.
+
+**What it does.**
+* **The paper agrees with the record it names.** A disposal-owned document (`external_disposal_receipt`,
+  `scale_ticket`, any definition whose `primaryDomainOwner` is `disposal`) linked to a disposal record is
+  refused unless its load and job links are the record's, its facility issuer is the facility the record
+  names, and its `facility_ticket_number` is the number on the record (`disposalEvidenceRefusals`, pure, in
+  `documentRegister.ts`; run at registration and at confirmation). A facility's paper that does not name the
+  facility cannot be assessed and is refused — never treated as unique.
+* **The facility's number is mirrored, not copied.** On a match the reference is marked as a mirror of
+  `disposalTickets.facilityTicketNumber` (`DISPOSAL_MIRROR`, declared in B, now used). The disposal record's
+  facts are never written by the register. A scale ticket's number stays `scale_ticket_number` and is never
+  compared with or mirrored as the facility's.
+* **Duplicates keep the load in the key**, as the disposal fingerprint does (`documentFingerprint.ts:126`):
+  identical bytes are the same document wherever they are linked; different bytes with the same facility and
+  number are a possible duplicate only on the same load (a recorded reason confirms it); the same number on
+  another load is another disposal. With no load known the judgement stays issuer-wide — stricter, never looser.
+* **A blank issuer number is refused everywhere** (`registerRefusals`): a value with no letter or digit
+  identifies nothing.
+* **Verification is the disposal domain's act** (`commercialOffice.disposal.verifyTicket`, permission
+  `disposal.verify`, new and sensitive, office and management only — not `commercial.write`, which an external
+  accountant holds). In scope through the record's job; another business's record is not found. Verifying
+  requires a confirmed, current, externally-originated document of a disposal-owned definition issued by the
+  facility or a third party, linked to the record — carrying the record's number as its mirror where the record
+  has one. It writes the record's own new columns (`verifiedByUserId`, `verifiedAt`, `verificationNote`, 0244)
+  under a row lock, tells every live linked document (`document.domain_verified`), and is final here: the same
+  outcome again is a no-op, a different one is refused. A rejection records its reason.
+* **Closeout bills a verified record of its own job** (`closeout.lineAdd`): a disposal line naming one of this
+  business's DSP records is refused until it is verified, and refused if the record is on another job. A number
+  that is no record here — a facility's own number, or another business's record — is kept as typed, so the
+  answer reveals nothing across the boundary.
+
+**Not done, deliberately.** `loads.chainState` is not advanced (no production path drives it; the adopted
+branch's verifier did, G does not start it). `reconcileDisposal`, `evaluateBillingReadiness` and the facility
+directory are untouched: verification consults no map pin, listing, capability or assessment, and writes none.
+No offline path changes: a device-block number is consumed only when the office issues the document after
+sync (owner ruling: drivers stay `document.intake`-only), through every server check — and proves the
+document's identity, not acceptance, verification or closeout. The audit package is unchanged: its queries
+were already ordered on `main` by #144 (`834a8b7`).
+
+**Identifiers, kept apart.** Register `documentRef` (DOC, archival) and `controlNumber` (LeaseOS series; never
+on an external document); `disposalTickets.ticketNumber` (DSP); `disposalTickets.facilityTicketNumber` and the
+`facility_ticket_number` reference (the facility's evidence); `scale_ticket_number` (the scale's);
+`manifests.manifestNumber`; `fieldTickets.ticketNumber` (FT); `billingBooks.bookNumber` (BB). There is no
+disposal-trip tracking number on `main`; G does not invent one.
+
+**Tests.** `server/documentControlDisposal.db.test.ts` (15, written first and seen failing for the missing
+behaviour on `d41407f`): the number separation and the mirror; scale ticket kept apart; wrong load, facility,
+number and another business's record refused; blank number refused with nothing written; exact duplicate
+across loads, possible duplicate on one load with and without a reason, the same number on another load,
+cannot-assess; two loads to one facility kept two; verification needs the confirmed paper (captured and void
+scans do not count), records who and when, tells the document, changes no fact and no load; driver, external
+accountant and another business refused, client `orgRef` ignored, rejection needs a reason; an approximate,
+unlisted facility neither grants nor blocks and nothing is written to the directory; closeout refuses an
+unverified and another job's record, keeps another business's number as typed, and billing a verified record
+leaves the record and the document unchanged; tenant boundary on read, void and link; a driver's device block
+issued by the office after sync, refused to the driver and to another business, not spendable twice, gaps
+explained on retirement; concurrent issues distinct; a voided receipt kept in the register and the ledger.
+Pins: census +1, operational permissions +1, migration head 0244.

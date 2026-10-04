@@ -18,7 +18,7 @@ import type { MySql2Database } from "drizzle-orm/mysql2";
 import { commercialDocumentLinks, commercialDocuments, disposalTickets, documentControlEvents, documentDefinitions, documentExternalReferences, evidenceRecords, facilities, fieldTicketDocuments, fieldTickets, jobs, loads, numberAllocations, recordAmendments, retentionPolicies, trackingReferences, trips, units } from "../../drizzle/schema";
 import { SINGLE_TENANT_ID } from "./actingScope";
 import { applyOverlay, rowToDefinition, type DocumentDefinitionRow, type DocumentLinkKind, type EffectiveDefinition, type ExternalReferenceType, type IssuerKind, type OriginKind } from "./documentDefinitions";
-import { factsMutable, issuerScopeKey, nextControlState, normaliseReferenceValue, provenanceSentence, referenceDuplicateVerdict, registerRefusals, type ControlState, type DocumentEventType, type ImportChannel, type IssuerInput, type LinkRole, type LinkSource, type ReferenceSource } from "./documentRegister";
+import { disposalEvidenceRefusals, factsMutable, issuerScopeKey, nextControlState, normaliseReferenceValue, provenanceSentence, referenceDuplicateVerdict, registerRefusals, type ControlState, type DisposalRecordFacts, type DocumentEventType, type ImportChannel, type IssuerInput, type LinkRole, type LinkSource, type ReferenceSource } from "./documentRegister";
 import { consumeFromBlock, ensureSeriesRow, mintNumberInTx, NumberSeriesRefusal, voidNumber } from "./numberSeries";
 import { MINTING_POLICIES } from "./documentDefinitions";
 
@@ -104,6 +104,58 @@ export async function linkTargetInScope(db: Db | Tx, book: Book, link: { recordT
   }
 }
 
+/** DC-G: the disposal records a document names, with their facts as the disposal domain wrote them. Links are resolved (in scope) before this runs. */
+async function disposalRecordsFor(tx: Tx, links: { recordType: string; recordId: number | null }[]): Promise<DisposalRecordFacts[]> {
+  const ids = links.filter(l => l.recordType === "disposal_ticket" && l.recordId != null).map(l => l.recordId as number);
+  if (!ids.length) return [];
+  const rows = await tx.select({ id: disposalTickets.id, ticketNumber: disposalTickets.ticketNumber, loadId: disposalTickets.loadId, jobId: disposalTickets.jobId, facilityId: disposalTickets.facilityId, facilityTicketNumber: disposalTickets.facilityTicketNumber }).from(disposalTickets).where(inArray(disposalTickets.id, ids)).orderBy(disposalTickets.id);
+  const out: DisposalRecordFacts[] = [];
+  for (const r of rows) out.push({ ...r, jobId: r.jobId ?? (r.loadId != null ? (await tx.select({ jobId: loads.jobId }).from(loads).where(eq(loads.id, r.loadId)).limit(1))[0]?.jobId ?? null : null) });
+  return out;
+}
+
+/**
+ * DC-G: the load a disposal-owned document is about — its load link, else its disposal record's load. The duplicate
+ * judgement keeps the load in the key, as the disposal fingerprint does (documentFingerprint.ts): a facility's number
+ * recurs across loads, not within one.
+ */
+function disposalLoadOf(links: { recordType: string; recordId: number | null }[], records: DisposalRecordFacts[]): number | null {
+  return links.find(l => l.recordType === "load" && l.recordId != null)?.recordId ?? records.find(r => r.loadId != null)?.loadId ?? null;
+}
+
+/** Of these documents, the ones about this load: linked to it, or to a disposal record for it. */
+async function documentsOnLoad(tx: Tx, documentIds: number[], loadId: number): Promise<Set<number>> {
+  if (!documentIds.length) return new Set();
+  const direct = await tx.select({ documentId: commercialDocumentLinks.documentId }).from(commercialDocumentLinks).where(and(inArray(commercialDocumentLinks.documentId, documentIds), eq(commercialDocumentLinks.recordType, "load"), eq(commercialDocumentLinks.recordId, loadId)));
+  const viaRecord = await tx.select({ documentId: commercialDocumentLinks.documentId }).from(commercialDocumentLinks).innerJoin(disposalTickets, eq(disposalTickets.id, commercialDocumentLinks.recordId)).where(and(inArray(commercialDocumentLinks.documentId, documentIds), eq(commercialDocumentLinks.recordType, "disposal_ticket"), eq(disposalTickets.loadId, loadId)));
+  return new Set([...direct, ...viaRecord].map(r => r.documentId));
+}
+
+/**
+ * The prior documents a reference is judged against. Identical bytes are the same document wherever they are
+ * linked; for a disposal-owned document about a known load, different bytes are a possible duplicate only on that
+ * load. With no load the judgement stays issuer-wide — stricter, never looser.
+ */
+async function duplicatePriors(tx: Tx, priors: { documentId: number; contentHash: string }[], contentHash: string, disposalLoad: number | null): Promise<{ documentId: number; contentHash: string }[]> {
+  if (disposalLoad == null) return priors;
+  const onLoad = await documentsOnLoad(tx, priors.map(p => p.documentId), disposalLoad);
+  return priors.filter(p => p.contentHash === contentHash || onLoad.has(p.documentId));
+}
+
+/**
+ * DC-G: the facility's number on a disposal-owned document is the disposal record's column, mirrored. The domain stays
+ * authoritative (DISPOSAL_MIRROR); the reference says where its value lives. Only a confirmed reference from the facility
+ * the record names, carrying the record's own number, is marked.
+ */
+async function mirrorDisposalReferences(tx: Tx, documentId: number, records: DisposalRecordFacts[]): Promise<void> {
+  for (const r of records) {
+    if (!r.facilityTicketNumber) continue;
+    await tx.update(documentExternalReferences).set({ mirrorOfTable: DISPOSAL_MIRROR.table, mirrorOfId: r.id, mirrorOfColumn: DISPOSAL_MIRROR.column })
+      .where(and(eq(documentExternalReferences.documentId, documentId), eq(documentExternalReferences.referenceType, "facility_ticket_number"), eq(documentExternalReferences.referenceValue, normaliseReferenceValue(r.facilityTicketNumber)), eq(documentExternalReferences.confirmationStatus, "confirmed"), isNull(documentExternalReferences.mirrorOfTable),
+        r.facilityId != null ? eq(documentExternalReferences.issuerFacilityId, r.facilityId) : sql`TRUE`));
+  }
+}
+
 async function nextEventSequence(tx: Tx, documentId: number): Promise<number> {
   const last = (await tx.select({ sequence: documentControlEvents.sequence }).from(documentControlEvents).where(eq(documentControlEvents.documentId, documentId)).orderBy(desc(documentControlEvents.sequence)).limit(1))[0];
   return (last?.sequence ?? 0) + 1;
@@ -182,6 +234,14 @@ export async function registerControlledDocument(db: Db, args: RegisterArgs): Pr
       if (!r.ok) throw new DocumentControlRefusal("NOT_FOUND", `BLOCKED — ${r.reason}`);
       resolvedLinks.push({ recordType: l.recordType, recordRef: r.recordRef, recordId: r.recordId, role: l.role ?? null, source: l.source ?? "human", confirmed: l.confirmed ?? true });
     }
+    // DC-G: a disposal-owned document must agree with the disposal record it names; the record stays the domain's fact.
+    const disposalOwned = definition.primaryDomainOwner === "disposal";
+    const disposalRecords = disposalOwned ? await disposalRecordsFor(tx, resolvedLinks.filter(l => l.confirmed)) : [];
+    for (const record of disposalRecords) {
+      const p = disposalEvidenceRefusals({ issuer: args.issuer, references: refs.map(r => ({ referenceType: String(r.referenceType), referenceValue: r.referenceValue })), links: resolvedLinks.filter(l => l.confirmed), record });
+      if (p.length) refuse("PRECONDITION_FAILED", `BLOCKED — ${p.join("; ")}`);
+    }
+    const disposalLoad = disposalOwned ? disposalLoadOf(resolvedLinks.filter(l => l.confirmed), disposalRecords) : null;
     const scopeKey = scopeKeyOf(args.book);
     // Duplicate references within one issuer are judged before the row exists, so a refusal writes nothing.
     const preparedRefs = refs.map(r => {
@@ -191,7 +251,7 @@ export async function registerControlledDocument(db: Db, args: RegisterArgs): Pr
     for (const r of preparedRefs) {
       const priors = await tx.select({ documentId: documentExternalReferences.documentId, contentHash: commercialDocuments.contentHash }).from(documentExternalReferences).innerJoin(commercialDocuments, eq(commercialDocuments.id, documentExternalReferences.documentId))
         .where(and(eq(documentExternalReferences.bookScopeKey, scopeKey), eq(documentExternalReferences.referenceType, String(r.referenceType)), eq(documentExternalReferences.issuerScopeKey, r.issuerScope), eq(documentExternalReferences.referenceValue, r.value), sql`${commercialDocuments.status} <> 'withdrawn'`, sql`${commercialDocuments.controlState} <> 'void'`));
-      const verdict = referenceDuplicateVerdict({ sameIssuerSameValue: priors, contentHash: args.contentHash });
+      const verdict = referenceDuplicateVerdict({ sameIssuerSameValue: await duplicatePriors(tx, priors, args.contentHash, disposalLoad), contentHash: args.contentHash });
       if (verdict.outcome === "exact_duplicate") refuse("CONFLICT", `BLOCKED — ${r.referenceType} ${r.referenceValue} from this issuer is already registered as document #${verdict.matches[0]} with identical bytes; this is the same document`);
       if (verdict.outcome === "possible_duplicate" && !r.duplicateOverrideReason) refuse("CONFLICT", `REVIEW — ${r.referenceType} ${r.referenceValue} from this issuer is already registered as document #${verdict.matches[0]} with different bytes; confirm it is a different document with a recorded reason`);
       (r as { duplicateOf?: number }).duplicateOf = verdict.outcome === "possible_duplicate" ? verdict.matches[0] : undefined;
@@ -239,6 +299,7 @@ export async function registerControlledDocument(db: Db, args: RegisterArgs): Pr
       await tx.insert(documentExternalReferences).values({ referenceRef, bookOrgRef: args.book.bookOrgRef, bookScopeKey: scopeKey, documentId, referenceType: String(r.referenceType), referenceValue: r.value, referenceValueRaw: r.referenceValue.trim().slice(0, 120), issuerKind: r.issuer.issuerKind, issuerOrgRef: r.issuer.issuerOrgRef ?? null, issuerFacilityId: r.issuer.issuerFacilityId ?? null, issuerName: r.issuer.issuerName ?? null, issuerScopeKey: r.issuerScope, source: r.source ?? "human_entered", confirmationStatus: r.confirmed ?? (r.source !== "ocr_proposed") ? "confirmed" : "proposed", confirmedByUserId: r.confirmed ?? (r.source !== "ocr_proposed") ? args.actor.userId : null, confirmedAt: r.confirmed ?? (r.source !== "ocr_proposed") ? now : null, mirrorOfTable: r.mirrorOf?.table ?? null, mirrorOfId: r.mirrorOf?.id ?? null, mirrorOfColumn: r.mirrorOf?.column ?? null, duplicateOfDocumentId: (r as { duplicateOf?: number }).duplicateOf ?? null, duplicateOverrideReason: r.duplicateOverrideReason ?? null, createdByUserId: args.actor.userId });
       referenceRefs.push(referenceRef);
     }
+    if (disposalRecords.length) await mirrorDisposalReferences(tx, documentId, disposalRecords);
     const first: DocumentEventType = args.requestedState === "issued" ? "document.issued" : args.requestedState === "confirmed" ? "document.confirmed" : args.requestedState === "proposed" ? "document.proposed" : "document.captured";
     await appendDocumentEvent(tx, { documentId, eventType: first, actor: args.actor, previousState: null, newState: args.requestedState, occurredAt: now, detail: { documentRef, definitionKey: definition.definitionKey, originKind: args.originKind, issuerKind: args.issuer.issuerKind, controlNumber, contentHash: args.contentHash, links: resolvedLinks.length, references: referenceRefs.length, templateRevisionRef: args.templateRevisionRef ?? null } });
     if (controlNumber) await appendDocumentEvent(tx, { documentId, eventType: "document.number_issued", actor: args.actor, occurredAt: now, detail: { controlNumber, series: definition.numberSeriesType, policy: definition.numberingPolicy, minted: controlMint ? "leaseos_series" : "domain_managed" } });
@@ -282,9 +343,23 @@ export async function confirmDocument(db: Db, args: { book: Book; actor: Actor; 
     if (problems.length) refuse("PRECONDITION_FAILED", `BLOCKED — ${problems.join("; ")}`);
     const now = args.occurredAt ?? new Date();
     const scopeKey = scopeKeyOf(args.book);
+    // Every new link is resolved (in scope) before anything is written, so the disposal check below sees the links the confirmed document will have.
+    const resolvedNew: { l: LinkInput; r: { recordId: number | null; recordRef: string } }[] = [];
     for (const l of newLinks) {
       const r = await linkTargetInScope(tx, args.book, { recordType: l.recordType, recordId: l.recordId ?? null, recordRef: l.recordRef });
       if (!r.ok) throw new DocumentControlRefusal("NOT_FOUND", `BLOCKED — ${r.reason}`);
+      resolvedNew.push({ l, r });
+    }
+    // DC-G: a disposal-owned document must agree with the disposal record it names.
+    const disposalOwned = definition.primaryDomainOwner === "disposal";
+    const linksResolvedAfter = [...existingLinks.filter(l => l.confirmationStatus === "confirmed" || confirmLinks.has(l.id)).map(l => ({ recordType: l.recordType, recordId: l.recordId })), ...resolvedNew.map(x => ({ recordType: x.l.recordType, recordId: x.r.recordId }))];
+    const disposalRecords = disposalOwned ? await disposalRecordsFor(tx, linksResolvedAfter) : [];
+    for (const record of disposalRecords) {
+      const p = disposalEvidenceRefusals({ issuer, references: refsAfter.map(r => ({ referenceType: String(r.referenceType), referenceValue: r.referenceValue })), links: linksResolvedAfter, record });
+      if (p.length) refuse("PRECONDITION_FAILED", `BLOCKED — ${p.join("; ")}`);
+    }
+    const disposalLoad = disposalOwned ? disposalLoadOf(linksResolvedAfter, disposalRecords) : null;
+    for (const { l, r } of resolvedNew) {
       await tx.insert(commercialDocumentLinks).values({ documentId: doc.id, recordType: l.recordType, recordRef: r.recordRef, recordId: r.recordId, role: l.role ?? null, source: l.source ?? "human", confirmationStatus: "confirmed", linkedByUserId: args.actor.userId, linkedByDeviceRef: args.actor.deviceRef ?? null });
       await appendDocumentEvent(tx, { documentId: doc.id, eventType: "document.link_added", actor: args.actor, occurredAt: now, detail: { recordType: l.recordType, recordRef: r.recordRef, recordId: r.recordId, role: l.role ?? null } });
     }
@@ -300,7 +375,7 @@ export async function confirmDocument(db: Db, args: { book: Book; actor: Actor; 
       const issuerScope = issuerScopeKey(ri);
       const priors = await tx.select({ documentId: documentExternalReferences.documentId, contentHash: commercialDocuments.contentHash }).from(documentExternalReferences).innerJoin(commercialDocuments, eq(commercialDocuments.id, documentExternalReferences.documentId))
         .where(and(eq(documentExternalReferences.bookScopeKey, scopeKey), eq(documentExternalReferences.referenceType, String(r.referenceType)), eq(documentExternalReferences.issuerScopeKey, issuerScope), eq(documentExternalReferences.referenceValue, value), sql`${documentExternalReferences.documentId} <> ${doc.id}`, sql`${commercialDocuments.status} <> 'withdrawn'`, sql`${commercialDocuments.controlState} <> 'void'`));
-      const verdict = referenceDuplicateVerdict({ sameIssuerSameValue: priors, contentHash: doc.contentHash });
+      const verdict = referenceDuplicateVerdict({ sameIssuerSameValue: await duplicatePriors(tx, priors, doc.contentHash, disposalLoad), contentHash: doc.contentHash });
       if (verdict.outcome === "exact_duplicate") refuse("CONFLICT", `BLOCKED — ${r.referenceType} ${r.referenceValue} from this issuer is already registered as document #${verdict.matches[0]} with identical bytes`);
       if (verdict.outcome === "possible_duplicate" && !r.duplicateOverrideReason) refuse("CONFLICT", `REVIEW — ${r.referenceType} ${r.referenceValue} from this issuer is already on document #${verdict.matches[0]}; confirm it is a different document with a recorded reason`);
       const referenceRef = mintRef("XREF");
@@ -316,6 +391,7 @@ export async function confirmDocument(db: Db, args: { book: Book; actor: Actor; 
     // Anything still proposed after confirmation is rejected: a confirmed record carries no maybes.
     await tx.update(documentExternalReferences).set({ confirmationStatus: "rejected" }).where(and(eq(documentExternalReferences.documentId, doc.id), eq(documentExternalReferences.confirmationStatus, "proposed")));
     await tx.delete(commercialDocumentLinks).where(and(eq(commercialDocumentLinks.documentId, doc.id), eq(commercialDocumentLinks.confirmationStatus, "proposed")));
+    if (disposalRecords.length) await mirrorDisposalReferences(tx, doc.id, disposalRecords);
     await tx.update(commercialDocuments).set({ controlState: "confirmed", definitionKey: definition.definitionKey, definitionRef: definition.definitionRef, documentType: definition.definitionKey, issuerKind: issuer.issuerKind, issuerOrgRef: issuer.issuerOrgRef ?? null, issuerFacilityId: issuer.issuerFacilityId ?? null, issuerName: issuer.issuerName ?? null, title: args.title ?? doc.title, issuedAt: args.issuedAt === undefined ? doc.issuedAt : args.issuedAt, confirmedByUserId: args.actor.userId, confirmedAt: now, retentionPolicyId: doc.retentionPolicyId ?? definition.retentionPolicyId }).where(eq(commercialDocuments.id, doc.id));
     if (doc.definitionKey !== definition.definitionKey) await appendDocumentEvent(tx, { documentId: doc.id, eventType: "document.classified", actor: args.actor, occurredAt: now, previousState: doc.controlState, newState: doc.controlState, detail: { from: doc.definitionKey, to: definition.definitionKey } });
     await appendDocumentEvent(tx, { documentId: doc.id, eventType: "document.confirmed", actor: args.actor, occurredAt: now, previousState: doc.controlState, newState: "confirmed", detail: { definitionKey: definition.definitionKey, issuerKind: issuer.issuerKind, issuerName: issuer.issuerName ?? null } });

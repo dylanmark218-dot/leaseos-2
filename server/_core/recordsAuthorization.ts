@@ -332,6 +332,9 @@ export type Permission =
   // fact, issue consumes a number, void explains a gap.
   | "document.read" | "document.intake" | "document.confirm" | "document.issue" | "document.void"
   | "document.catalog.manage" | "document.series.manage" | "document.template.manage"
+  // DC-G (0244) — verifying a disposal record against the facility's paper. The disposal domain's act, the
+  // office's: not commercial.write (an external accountant holds that), never a driver's.
+  | "disposal.verify"
   /* P8.5 — the vault. `restricted.read` is the permission the break-glass prompt sits behind; it is
      NOT implied by an administration role, which is the point of the whole subsystem. */
   | "vault.matter.manage" | "restricted.read" | "restricted.audit.read"
@@ -1008,6 +1011,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "document.issue",
     "document.void",
     "document.template.manage",
+    "disposal.verify",
     "safety_program.read",
     "device.verifySeal",
     "vault.matter.manage",
@@ -1209,6 +1213,7 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "document.catalog.manage",
     "document.series.manage",
     "document.template.manage",
+    "disposal.verify",
     /* C1b-2b — requirement verification */
     "compliance.requirement.verify",
     "compliance.requirement.second_approve",
@@ -2132,6 +2137,8 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "document.catalog.manage",
   "document.series.manage",
   "document.template.manage",
+  // DC-G (0244) — a verified disposal record is what billing counts.
+  "disposal.verify",
   "safety_program.manage",
   "safety_program.approve",
   "safety_program.verify",
@@ -2935,6 +2942,7 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "commercialOffice.facilityStatementLines": "commercial.read",
   "commercialOffice.facilityStatementLineResolve": "commercial.write",
   "commercialOffice.facilityStatementClose": "commercial.write",
+  "commercialOffice.disposalTicketVerify": "disposal.verify",
   "commercialOffice.linkSet": "commercial.write",
   "commercialOffice.linkEnd": "commercial.write",
   "commercialOffice.linksList": "commercial.read",

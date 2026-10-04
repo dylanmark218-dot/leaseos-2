@@ -26,6 +26,7 @@ async function actingScopeFor(userId: number) {
   return financeScopeFor(db, userId);
 }
 import { nextTrackingNumber } from "./_core/trackingNumbers";
+import { disposalLineRefusal } from "./_core/disposalVerification";
 import { fieldDevices } from "../drizzle/schema";
 import { canonicalSignaturePayload, checkSignatureAttestation } from "./_core/deviceSignature";
 import { produceFieldTicketSignature } from "./_core/attest/attestProducers";
@@ -199,6 +200,11 @@ export const closeoutRouter = router({
       if (!(await fieldTicketInScope(input.ticketNumber, await actingScopeFor(ctx.user.id)))) throw new TRPCError({ code: "NOT_FOUND", message: `Ticket ${input.ticketNumber} not found` });
       const x = await loadTicket(input.ticketNumber);
       if (x.signature) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Ticket is signed — a later addition is a supplement, not an edit" });
+      // DC-G: a disposal line that names one of this business's disposal records bills a verified record of this job.
+      if (input.lineKind === "disposal" && input.sourceTrackingNumber) {
+        const refusal = await disposalLineRefusal(x.db as never, { scope: await actingScopeFor(ctx.user.id), fieldTicketJobId: x.t.jobId ?? null, sourceTrackingNumber: input.sourceTrackingNumber });
+        if (refusal) throw new TRPCError({ code: "PRECONDITION_FAILED", message: refusal });
+      }
       const ins = await x.db.insert(fieldTicketLines).values({ fieldTicketId: x.t.id, lineKind: input.lineKind, serviceCode: input.serviceCode ?? null, description: input.description, quantity: input.quantity ?? null, quantityUnit: input.quantityUnit ?? null, measurementMethod: input.measurementMethod, sourceTrackingNumber: input.sourceTrackingNumber ?? null, disposition: "not_presented", operatorStatement: input.operatorStatement ?? null });
       const lineId = Number(ins[0]?.insertId ?? 0);
       // v22.8 — a line that names its service is priced as it is recorded; the decision is written once and the line carries it. A line still records a fact: an unknown rate never stops it.

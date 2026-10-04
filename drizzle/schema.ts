@@ -1127,6 +1127,10 @@ export const disposalTickets = mysqlTable("disposalTickets", {
     .notNull(),
   evidenceRefs: text("evidenceRefs"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  // 0244 (DC-G) — the verifier's act: who checked this record against the facility's paper, and when.
+  verifiedByUserId: int("verifiedByUserId"),
+  verifiedAt: timestamp("verifiedAt"),
+  verificationNote: varchar("verificationNote", { length: 400 }),
 });
 
 // Several loads can roll into one facility batch — the system must never

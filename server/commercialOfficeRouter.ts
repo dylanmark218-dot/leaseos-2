@@ -17,6 +17,8 @@ import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { financeScopeFor, requireOwnedEntity } from "./_core/entityScope";
 import { approvalDecision, approvalRequirementFor, layerFor, numberingPolicyFor, type ApprovalPolicyRow } from "./_core/commercialPolicy";
 import { nextTrackingNumber } from "./_core/trackingNumbers";
+import { verifyDisposalTicket } from "./_core/disposalVerification";
+import { DocumentControlRefusal } from "./_core/documentRegisterService";
 import { matchFacilityStatementLine, type DisposalTicketLite } from "./_core/facilityStatements";
 import { aging, type ArInvoice } from "./_core/accountsReceivable";
 import { derivability, empty, finish, type Dimension, type Figures } from "./_core/profitability";
@@ -336,7 +338,8 @@ export const commercialOfficeRouter = router({
   /**
    * P7.3 — disposal reconciliation. The facility's statement is evidence; each line is
    * matched to a disposal ticket, outcomes are match / match_with_variance / unmatched /
-   * ambiguous, and a person resolves the rest. Nothing here edits a disposal ticket.
+   * ambiguous, and a person resolves the rest. Statement matching never edits a disposal ticket;
+   * the only write to one here is `verifyTicket` (DC-G), and only to its verification columns.
    */
   disposal: router({
     statementImport: roleProcedure("commercialOffice.facilityStatementImport")
@@ -428,6 +431,22 @@ export const commercialOfficeRouter = router({
         if (open.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `BLOCKED — ${open.length} line(s) still need a person's resolution: ${open.map(o => `#${o.lineNo} (${o.outcome})`).join(", ")}` });
         await db.update(facilityStatements).set({ status: "closed", closedByUserId: ctx.user.id, closedAt: new Date() }).where(eq(facilityStatements.id, st.id));
         return { statementRef: input.statementRef, status: "closed" as const };
+      }),
+    /**
+     * DC-G (0244) — the verifier's act, and the one procedure here that writes a disposal ticket: its own
+     * verification columns only, against the facility's paper confirmed in the register. In scope through
+     * the record's job; another business's record is not found. See _core/disposalVerification.ts.
+     */
+    verifyTicket: roleProcedure("commercialOffice.disposalTicketVerify")
+      .input(z.object({ ticketNumber: z.string().min(1).max(64), outcome: z.enum(["verified", "rejected"]), note: z.string().max(400).nullable().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const { db, bookOrgRef } = await bookFor(ctx.user.id);
+        try {
+          return await verifyDisposalTicket(db as never, { book: { bookOrgRef }, actorUserId: ctx.user.id, ticketNumber: input.ticketNumber, outcome: input.outcome, note: input.note ?? null });
+        } catch (e) {
+          if (e instanceof DocumentControlRefusal) throw new TRPCError({ code: e.code, message: e.message });
+          throw e;
+        }
       }),
   }),
 

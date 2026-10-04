@@ -472,3 +472,17 @@ so slots below it that are still empty stay usable for the branches that hold th
 **Next free number for new work: `0244`** (re-check with the scan before committing).
 
 * **2026-10-03 (PR #140 merged)**: `0241` merged to `main` as `5283a8e`; next free `0244`.
+
+## Claim: 0244 (Document Control G, manual slice, 2026-10-04)
+
+| Number | Migration file | Branch | PR | Base (merge-base with main) | Status | Collision | Intended resolution |
+|---|---|---|---|---|---|---|---|
+| 0244 | `0244_disposal_ticket_verification.sql` | `claude/document-control-g-disposal` | (opened with this claim) | `d41407f` | gated | none | keeps 0244 |
+
+Three nullable columns on `disposalTickets` (`verifiedByUserId`, `verifiedAt`, `verificationNote`): who verified a
+disposal record against the facility's paper, and when. `main`'s head was `0241`; at the scan of `main` and all
+153 remote branches, `claude/fleet-*` held `0242`–`0243` and nothing held a higher slot, so it takes `0244`. The
+adopted branch's equivalent (`0183_document_control_disposal.sql` on `claude/document-control-architecture-jlffzk`)
+was never merged or applied, so this is a new file under its own number. `server/migrationSlots.test.ts` pins the head.
+
+**Next free number for new work: `0245`** (re-check with the scan before committing).
