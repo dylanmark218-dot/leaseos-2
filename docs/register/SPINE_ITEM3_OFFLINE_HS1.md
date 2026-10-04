@@ -1,5 +1,18 @@
 # SPINE item 3 — `offlineCapability` → HS1, under the owner's ruling (2026-10-03)
 
+**SPINE item 3 is COMPLETE (2026-10-04).**
+- **Merged** in dylanmark218-dot/leaseos-2#143 as `6ecf2d49`, at the reviewed head `e07eda02`.
+- **Main CI:** `6ecf2d49`'s own run was cancelled when the next merge superseded it. The next main commit, `1f24b16b` (#145), contains it and passed (CI run 37162795053).
+
+**What was delivered:**
+- **The HS1 seam:** `CapabilityMatrix`, `missingHardware`, and `capabilities()` over the adapters' probes.
+- **One offline policy:** `actionGateway.mayRunWithoutServer`.
+- **No declared `offlineClass`:** a separately declared class no longer exists. The class is derived from `requiresOnline` plus the risk level.
+- **Authority unchanged:** hardware can narrow availability but never grants authority, and being online never means executing locally.
+- **Reconnect** is re-authorized by the server against the current session, acting organization and permission.
+
+**What remains:** the production device runtime is **still not activated**. No device runtime is mounted, and there is no native shell. The contract is wired; the native field runtime does not exist yet.
+
 The SPINE wiring plan's item 3 reads "`offlineCapability` → HS1. It is the device seam and the hybrid
 plan already covers it." The survey (`SPINE_RECONCILIATION_2026-10-03.md` §7) found that HS1, as the
 repository defines it, is a **hardware** seam (`docs/hybrid-seam/HS_CONTRACTS.md` §1,
@@ -136,7 +149,7 @@ No state means both "hardware unavailable" and "server refused". Both kinds of `
 
 ## Structural guard: `server/spineItem3Structure.test.ts` (AST, not text)
 
-1. Hardware is reached only through `client/src/runtime/adapters/`. That rules out Capacitor imports, computed `import()`, `navigator.mediaDevices`/`geolocation`, `getUserMedia` and `<input type="file">` anywhere else. This is HS0 criterion (b).
+1. Hardware is reached only through `client/src/runtime/adapters/`. That rules out Capacitor imports, computed `import()`, `navigator.mediaDevices`/`geolocation`, `getUserMedia` and `<input type="file">` anywhere else, with no exception (HS0 criteria (b) and (c)).
 2. `requiresOnline` is read (`.requiresOnline`) only in `actionGateway.ts`.
 3. Each seam function is declared once, in its canonical file. `offlineOutcome` is gone, and no production code declares an `offlineClass`.
 4. No server code other than the composition imports HS1 or the composition, so authorization cannot depend on them.
@@ -150,7 +163,7 @@ Mutation checks: a direct `navigator.geolocation` in the runtime, a second `requ
 |---|---|---|
 | (a) | `capabilities()` matrix aggregating the per-binding probes | **done**: `capabilities(probes)`, with `memoryProbes` and `capacitorProbes` |
 | (b) | a test proving no direct hardware call site outside the adapter | **done**: guard 1 |
-| (c) | a decision on `client/src/showcase/Home.tsx`'s file input | **owner's decision, pinned**. The showcase is now mounted under `/showcase/*`, so deleting it is a product decision. The guard allows exactly that one input and fails on a second. |
+| (c) | a decision on `client/src/showcase/Home.tsx`'s file input | **resolved (owner's ruling: no production hardware bypass)**. The showcase is routed and statically bundled (`App.tsx` `/showcase/*`), so it is production code. Its private `<input type="file">` + `fieldRoute.evidence.upload` (already refused by `showcaseGuardLink`) is gone; its Photo/Document buttons call `QuickCapture.startQuickCapture` — the field runtime's HS1-gated outbox, or the authoritative `/evidence` surface. The guard allows **zero** exceptions. |
 
 ## Engine reachability: contract wired, runtime not activated
 
