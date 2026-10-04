@@ -146,7 +146,7 @@ d("one human action changes exactly one thing", () => {
     const driver = await member("driver");
     const at = new Date("2026-09-13T18:00:00Z");
     const profileKey = `CA_FED_S_SIM_${rnd()}`;
-    const jurisdiction = `Z${rnd().slice(0, 2)}`;
+    const jurisdiction = `Z${rnd()}`;   // Z + 7 characters fills the column (varchar 8): two-character suffixes collided across suites in one database
 
     // A copy of the seeded southern schedule, so the simulation does not
     // verify the real candidate — that promotion is the user's to make.

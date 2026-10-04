@@ -83,7 +83,7 @@ const evidence = (profileKey: string, limitKey: string, value: number): Promotio
 d("a promotion moves exactly one determination", () => {
   it("leaves every limit unknown before anything is verified", async () => {
     const { userId, operatorId } = await driver();
-    const jurisdiction = `Z${rnd().slice(0, 2)}`;
+    const jurisdiction = `Z${rnd()}`;   // Z + 7 characters fills the column (varchar 8): two-character suffixes collided across suites in one database
     const profileKey = `FIX-${rnd()}`;
     await profile(profileKey, jurisdiction);
 
@@ -97,7 +97,7 @@ d("a promotion moves exactly one determination", () => {
 
   it("lifts only the promoted limit out of unknown", async () => {
     const { userId, operatorId } = await driver();
-    const jurisdiction = `Z${rnd().slice(0, 2)}`;
+    const jurisdiction = `Z${rnd()}`;   // Z + 7 characters fills the column (varchar 8): two-character suffixes collided across suites in one database
     const profileKey = `FIX-${rnd()}`;
     await profile(profileKey, jurisdiction);
 
@@ -122,7 +122,7 @@ d("a promotion moves exactly one determination", () => {
 
   it("determines the promoted limit and leaves its neighbour unknown", async () => {
     const { userId, operatorId } = await driver();
-    const jurisdiction = `Z${rnd().slice(0, 2)}`;
+    const jurisdiction = `Z${rnd()}`;   // Z + 7 characters fills the column (varchar 8): two-character suffixes collided across suites in one database
     const profileKey = `FIX-${rnd()}`;
     await profile(profileKey, jurisdiction);
 
@@ -154,7 +154,7 @@ d("a promotion moves exactly one determination", () => {
 
   it("does not apply a future amendment to today's determination", async () => {
     const { userId, operatorId } = await driver();
-    const jurisdiction = `Z${rnd().slice(0, 2)}`;
+    const jurisdiction = `Z${rnd()}`;   // Z + 7 characters fills the column (varchar 8): two-character suffixes collided across suites in one database
     const profileKey = `FIX-${rnd()}`;
     await profile(profileKey, jurisdiction);
     await promote(evidence(profileKey, "daily_drive_minutes", 780), NOW);
