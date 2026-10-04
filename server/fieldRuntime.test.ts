@@ -213,27 +213,37 @@ d("a driver starts the day offline", () => {
     expect((await outbox.status()).counts.queued).toBe(5);
     expect((await outbox.status()).oldestUnsyncedCaptureMinutes).toBeGreaterThan(400); // the pre-trip at 05:30, now 13:00
 
-    // 13:30: signal returns — and drops after two uploads. Two captures sync; three fail with the reason; nothing is lost.
+    // 13:30: signal returns — and drops after two uploads. Two captures sync. The connection loss is not
+    // the captures' fault, so none of the other three is marked failed: they stay queued with the reason,
+    // the pass stops rather than sending the rest into a dead connection, and the engine backs off.
     net.isOnline = true;
     const flaky = transportFor(driver, { dropAfterUploads: 2 });
-    const engine2 = new SyncEngine({ store, vault, keystore, transport: flaky, connectivity: net, clock, platform: "android" });
+    const engine2 = new SyncEngine({ store, vault, keystore, transport: flaky, connectivity: net, clock, platform: "android", jitter: () => 0 });
     clock.set(new Date());
     const first = await engine2.syncOnce();
     expect(first.attempted).toBe(true);
     expect(first.synchronized).toBe(2);
-    expect(first.failed).toBe(3);
+    expect(first.failed).toBe(0);
+    expect(first.next).toBe("retry");
+    expect(flaky.uploads).toBe(3);                                          // stopped at the first dropped upload
     const afterDrop = await outbox.status();
     expect(afterDrop.counts.synchronized).toBe(2);
-    expect(afterDrop.counts.failed).toBe(3);
+    expect(afterDrop.counts.failed).toBe(0);
+    expect(afterDrop.counts.queued).toBe(3);
     expect((await store.getCapture(fuel.localId))!.lastError).toContain("ECONNRESET");
 
-    // The worker re-queues the failed ones (or the app does on reconnect). The retry re-sends the same
-    // capture references: the server returns the same ids, and no duplicate evidence appears.
-    for (const c of await store.listCaptures({ syncState: "failed" })) await outbox.queue(c.localId);
-    clock.set(new Date());
+    // An automatic pass inside the back-off does nothing and says when it will try.
+    const waiting = await engine.syncOnce();
+    expect(waiting.attempted).toBe(false);
+    expect(waiting.retryAt).toBe(first.retryAt);
+
+    // Once the back-off passes, the next pass sends them without anyone re-queuing anything. The retry
+    // re-sends the same capture references: the server returns the same ids, and no duplicate appears.
+    clock.set(new Date(Math.max(Date.now(), new Date(first.retryAt!).getTime() + 1)));
     const second = await engine.syncOnce();
     expect(second.synchronized).toBe(3);
     expect(second.failed).toBe(0);
+    expect(second.next).toBeNull();
     expect((await outbox.status()).counts.synchronized).toBe(5);
     const refs = [pretrip, photo, fuel, ticket, defect].map(c => `${enrolled.deviceRef}:${c.localId}`);
     const [rows] = await pool.execute<mysql.RowDataPacket[]>(`SELECT clientCaptureRef, sealState, capturedAt, createdAt FROM evidenceRecords WHERE clientCaptureRef IN (${refs.map(() => "?").join(",")})`, refs);

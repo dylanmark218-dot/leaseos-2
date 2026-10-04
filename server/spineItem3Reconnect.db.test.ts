@@ -99,10 +99,15 @@ d("reconnect is re-authorized on the server; a historical claim is not authority
     await pool.execute("UPDATE organizationMemberships SET status = 'ended', effectiveTo = NOW() WHERE userId = ? AND orgRef = ?", [driver, A]);
     await join(B, driver);
     t.net.isOnline = true; t.clock.set(new Date());
-    // The server refuses the package outright; the engine puts the capture back in the queue (it is
-    // retained, never deleted) and surfaces the refusal.
-    await expect(t.engine.syncOnce()).rejects.toMatchObject({ code: "FORBIDDEN", message: "Device is not bound to the active organization" });
-    expect((await t.store.getCapture(t.capture.localId))!.syncState).toBe("queued");
+    // The server refuses the package outright. Under HS5's queue rules (shared/clientContract.ts) a
+    // FORBIDDEN is a real refusal: the capture is retained as failed with the server's reason — never
+    // deleted, never resent under another organization — and nothing is accepted.
+    const r = await t.engine.syncOnce();
+    expect(r).toMatchObject({ synchronized: 0, failed: 1, reason: "Device is not bound to the active organization" });
+    const kept = (await t.store.getCapture(t.capture.localId))!;
+    expect(kept.syncState).toBe("failed");
+    expect(kept.lastError).toBe("Device is not bound to the active organization");
+    expect(kept.captureAuthorizationClaim).toBe("authorized");   // still only history
     expect(await accepted(t.deviceRef)).toBe(0);
   }, 60_000);
 

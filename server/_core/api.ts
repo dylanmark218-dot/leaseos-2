@@ -16,6 +16,7 @@ import { createContext } from "./context";
 import { registerOAuthRoutes } from "./oauth";
 import { allowedOriginsFromEnv, crossSiteGuard, rateLimit } from "./httpHardening";
 import { organizationSelectionMiddleware } from "./organizationSelection";
+import { clientContractGate } from "./clientContractGate";
 
 export function registerApi(app: Express): void {
   // #19: a cross-site write to the API is refused before any parser or procedure runs.
@@ -35,6 +36,9 @@ export function registerApi(app: Express): void {
   // every request, so a forged cookie names an organization the caller has been proved to belong to
   // or it names nothing. Registered on the mount ahead of tRPC (it runs `next` inside the scope)
   // rather than in `createContext`, because a context factory returns before any procedure runs.
+  // HS5 — an installed client declares its contract; one this server cannot serve is refused with 426
+  // before any session or organization work is done for it. The website sends no header and passes.
+  app.use(TRPC_MOUNT_PATH, clientContractGate());
   app.use(TRPC_MOUNT_PATH, organizationSelectionMiddleware);
   // tRPC API
   app.use(TRPC_MOUNT_PATH, createExpressMiddleware({ router: appRouter, createContext }));

@@ -128,7 +128,7 @@ No state means both "hardware unavailable" and "server refused". Both kinds of `
     - the outbox without a gate is unchanged.
 - **`server/spineItem3Reconnect.db.test.ts`** (3 tests). These run through the real `SyncEngine` and router, with captures claiming `"authorized"`:
   - a worker still permitted is accepted, and the claim is stored as history, neither upgraded nor used;
-  - a worker whose organization changed offline is refused (`FORBIDDEN`, "Device is not bound to the active organization"), the capture goes back to `queued`, and nothing is accepted;
+  - a worker whose organization changed offline is refused ("Device is not bound to the active organization"); under HS5's queue rules (#120) the capture is retained as `failed` with that reason (before HS5 the engine rethrew and re-queued it), its claim is still only history, and nothing is accepted;
   - a worker whose permission was revoked offline is refused, and no evidence or package is received.
 
   Mutation check: removing the device-organization binding fails the second test.

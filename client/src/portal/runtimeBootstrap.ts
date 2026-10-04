@@ -14,11 +14,16 @@ import { Outbox } from "../runtime/outbox";
 import { SyncEngine } from "../runtime/syncEngine";
 import type { OutboxStatus, QuickCaptureAction } from "./viewModels";
 import type { Transport } from "../runtime/contracts";
+import type { SessionObservation } from "@shared/clientContract";
 import { captureGate } from "../runtime/capabilities";
 
 export type MountedRuntime = { kind: "native" | "browser_fallback"; outboxStatus: () => Promise<OutboxStatus>; capture: (a: QuickCaptureAction, args?: { jobId?: number | null; unitId?: number | null; fields?: Record<string, unknown>; files?: { bytes: Uint8Array; fileName: string; mimeType: string }[] }) => Promise<{ localId: string }>; syncNow: () => Promise<unknown> };
 
-export function mountBrowserFallbackRuntime(transport: Transport): MountedRuntime {
+/**
+ * `session` is `observeSession` over `session.context`. Given, the engine sends a
+ * queue only under the person and company it was captured for (shared/clientContract.ts).
+ */
+export function mountBrowserFallbackRuntime(transport: Transport, session?: () => Promise<SessionObservation>): MountedRuntime {
   const g = globalThis as { leaseosRuntime?: MountedRuntime };
   if (g.leaseosRuntime) return g.leaseosRuntime;
   const tickingClock = { now: () => new Date() };
@@ -28,9 +33,11 @@ export function mountBrowserFallbackRuntime(transport: Transport): MountedRuntim
   const connectivity = new FlagConnectivity(true);
   // SPINE item 3: every capture passes HS1 and the one offline rule before it is saved.
   const outbox = new Outbox(store, vault, tickingClock, captureGate({ probes: memoryProbes(), connectivity }));
-  const engine = new SyncEngine({ store, vault, keystore, transport, connectivity, clock: tickingClock, platform: "web" });
+  // HS5: the engine sends a queue only under the person and company it was captured for.
+  const engine = new SyncEngine({ store, vault, keystore, transport, connectivity, clock: tickingClock, platform: "web", session });
   if (typeof window !== "undefined") {
-    window.addEventListener("online", () => { connectivity.isOnline = true; void engine.syncOnce(); });
+    // The connection coming back is a reason to try now, not after the back-off.
+    window.addEventListener("online", () => { connectivity.isOnline = true; void engine.syncOnce({ force: true }); });
     window.addEventListener("offline", () => { connectivity.isOnline = false; });
     connectivity.isOnline = navigator.onLine;
   }
@@ -42,7 +49,8 @@ export function mountBrowserFallbackRuntime(transport: Transport): MountedRuntim
       if (c.jobId != null || c.unitId != null) { await outbox.queue(c.localId); void engine.syncOnce(); }
       return { localId: c.localId };
     },
-    syncNow: () => engine.syncOnce(),
+    // A person asked: skip the back-off. A held queue (sign in / update) stays held.
+    syncNow: () => engine.syncOnce({ force: true }),
   };
   g.leaseosRuntime = mounted;
   return mounted;
