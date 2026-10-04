@@ -603,6 +603,10 @@ The §56 example ("Can Dylan take Unit 117…") is the acceptance target of C4.
   `MEASUREMENT_AUTHORITY_RANK`.
 * **Staleness is eager.** Today it is lazy (`routeApprovalCheck` only). The composer recomputes the dependency
   hash on every evaluation and treats a mismatch as `route_approval_stale`.
+* **T2 update (2026-10-01).** Weights are now done: `routingWeight.routingWeightFor` uses the LoadSense legal
+  determination frozen at ingest. Staleness is now eager: `composeReadiness` runs `recheckRouteApproval`, and it
+  re-runs the route evaluation as per-check blockers. Permits are unchanged and deferred (T2-D1). Details are in
+  `docs/transport/COMMERCIAL_ROUTE_LEGALITY.md`.
 * **Wiring.** `routeApprovalPolicy` and `advisoryImpact` are wired in C6. They require the M2/M3 routing work
   they are waiting on; this is a dependency, not something to force.
 
@@ -816,6 +820,7 @@ Database-backed suites follow the `*.db.test.ts` convention (gate 6 refuses skip
 | C1b-Q2 | Who may verify a regulatory source or rule revision, and against what? | **Decided (2026-09-25): B — citation verification permitted as a transitional trust level; source-document verification becomes mandatory per authority/domain as sources are admitted.** Never the proposer; a named verifier; two independent verifiers for a dispatch-blocking requirement. This is a transitional architecture, **not** a claim that LeaseOS has completed legal-source licensing assessment. Implemented in C1b-2b (`checkpoints/C1B_2B_REQUIREMENT_VERIFICATION.md`). |
 | C1b-Q3 | Which rule revisions need two verifiers? | **Decided with Q2:** every dispatch-blocking requirement (`missingSeverity = blocked`), whatever its tier; one independent verifier for an informational one. The ledger's own statute/regulator-order rule still applies on top. |
 | C1b-Q4 | Load unverified seeds as candidates? | Recommended answer assumed; nothing has been loaded. Seeds remain UNVERIFIED seed constants. |
+| T2-D1 | Lift D-01 for movement permits (permit records, determinations, lifecycle, OCR-to-rule) as part of commercial route legality? | **Decided (2026-10-01): no — D-01 stays in force for permits.** T2 is permit-schema-free: no permit tables, no permit determination, no permit lifecycle, no OCR-to-permit-rule system, and no permit migration (0210 is not used). Permit references stay hashed free text on the route approval, and a recheck reports them as carried, not re-checked (`notRechecked`). Revisit only by a new owner ruling. See `docs/transport/COMMERCIAL_ROUTE_LEGALITY.md`. |
 
 ---
 

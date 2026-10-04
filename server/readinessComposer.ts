@@ -34,7 +34,7 @@ import {
   coreRecordOwnership, enforcementEvents, outOfServiceOrders,
   faultCodes,
   communicationCoverage, communicationPolicies, companyRadioAuthorizations, radioChannels,
-  roadGraphEdges, roadRadioAssignments, routeApprovals, unitRadioCapabilities,
+  roadGraphEdges, roadRadioAssignments, routeApprovals, routeEvidenceEntries, unitRadioCapabilities,
   academyQualifications, academyRequirements, academyRequirementBindings, academyDirectSupervisionRecords,
   driverRequirementBindings, operatorEquipmentAuthorizations,
   loadProfiles,
@@ -54,6 +54,9 @@ import { bindingApplies, evaluateDriverReadiness, requirementFromBinding, type B
 import { equipmentAuthorizationsInOrg } from "./driverPortfolioService";
 import { listRoleNamesAnyScope } from "./db";
 import { resolveRouteCommunicationGeography } from "./routeCommunicationGeography";
+import { recheckRouteApproval } from "./routeDependencies";
+import { evaluateSegments, NoVehicleProfile, routeCheckBlockers } from "./routeLegality";
+import type { RequiredCheck } from "./_core/routingCompiler";
 import { enforcementReadiness, type OosOrder, type OosScope } from "./_core/enforcement";
 import { currentReleaseEvidenceFor, type StoredRelease } from "./_core/mechanicRelease";
 import { SINGLE_TENANT_ID } from "./_core/actingScope";
@@ -936,24 +939,66 @@ export async function composeReadiness(subject: ReadinessSubject, now = new Date
     contributions.push({ engine: "routing", finding: "No route named for this readiness — the route axis is not evaluated" });
     evaluation[CAPABILITY.routeRestrictions] = { evaluated: false, reason: "not_applicable", detail: "no route named for this readiness" };
   } else {
-    const approval = (await db.select().from(routeApprovals).where(eq(routeApprovals.approvalRef, subject.routeApprovalRef)).limit(1))[0];
+    const found = (await db.select().from(routeApprovals).where(eq(routeApprovals.approvalRef, subject.routeApprovalRef)).limit(1))[0];
+    // T2 — an approval is for one unit. Naming another unit's approval (including another tenant's:
+    // the subject's unit is the scoped fact, the approval ref is not) reads as not on record, and
+    // nothing of it — status, segments, constraints — reaches this readiness.
+    const approval = found && found.unitId === subject.unitId ? found : undefined;
     if (!approval) {
-      extra.push({ code: "route_approval_missing", label: `Route ${subject.routeApprovalRef} is not on record`, severity: "unknown", subject: "route", overridable: true, overrideAuthority: "manager" });
-      contributions.push({ engine: "routing", finding: `Route approval ${subject.routeApprovalRef} not found` });
+      extra.push({ code: "route_approval_missing", label: `Route ${subject.routeApprovalRef} is not on record for this unit`, severity: "unknown", subject: "route", overridable: true, overrideAuthority: "manager" });
+      contributions.push({ engine: "routing", finding: `Route approval ${subject.routeApprovalRef} not found for this unit` });
     } else {
       routeProfileId = approval.approvalRef;
+      // T2 (P5) — staleness is measured now, not read from whenever somebody last asked: the same
+      // recheck `spatial.routeApprovalCheck` runs, which also records a newly stale approval.
+      let liveStatus = approval.status;
+      let staleReasons: string[] = [];
+      if (approval.status === "approved") {
+        const re = await recheckRouteApproval(db, approval, now);
+        if (re.stale) { liveStatus = "stale"; staleReasons = re.reasons; }
+      } else if (approval.status === "stale" && approval.staleReasonsJson) {
+        staleReasons = JSON.parse(approval.staleReasonsJson) as string[];
+      }
       // C1a-6 — the whole dependency hash (permits, restrictions, structures, vehicle and load are all
       // inside it) and the approval's status: a revocation used to leave the fingerprint unchanged.
-      routeDecisionVersion = `${approval.status}:${approval.fingerprintHash}`;
+      routeDecisionVersion = `${liveStatus}:${approval.fingerprintHash}`;
       const status = approval.dispatchStatus as ReadinessInput["route"]["dispatchStatus"];
       route.dispatchStatus = status === "clear" || status === "warning" || status === "review" || status === "blocked" ? status : null;
       // The approval records a verdict, not the confidence behind it, so this
       // stays unknown rather than being invented from the verdict.
       route.dataTrustworthy = null;
-      if (approval.status === "stale" || approval.status === "revoked" || approval.status === "superseded") {
-        extra.push({ code: `route_approval_${approval.status}`, label: `The approved route is ${approval.status} — re-evaluate it before dispatching`, severity: "blocking", subject: "route", overridable: true, overrideAuthority: "manager" });
+      if (liveStatus === "stale" || liveStatus === "revoked" || liveStatus === "superseded") {
+        const why = staleReasons.length ? ` (${staleReasons.join("; ")})` : "";
+        extra.push({ code: `route_approval_${liveStatus}`, label: `The approved route is ${liveStatus}${why} — re-evaluate it before dispatching`, severity: "blocking", subject: "route", overridable: true, overrideAuthority: "manager" });
       }
-      contributions.push({ engine: "routing", finding: `Route ${approval.approvalRef}: ${approval.dispatchStatus}, ${approval.status}` });
+      contributions.push({ engine: "routing", finding: `Route ${approval.approvalRef}: ${approval.dispatchStatus}, ${liveStatus}` });
+
+      /*
+       * T2 (P5) — the route's legality as it stands now, per check, through the same evaluation the
+       * approval was made from (`evaluateSegments`), on the checks and segments that evaluation
+       * covered. A ban that came into force since the approval is a named FAIL here, not only a
+       * stale fingerprint. No new gate: these are ordinary readiness blockers. An approval with no
+       * recorded evaluation stays `not_evaluated` (route_not_evaluated, UNKNOWN) as before.
+       */
+      if (approval.evaluationRef && liveStatus !== "revoked" && liveStatus !== "superseded") {
+        const rows = await db.select({ segmentId: routeEvidenceEntries.segmentId, segmentLabel: routeEvidenceEntries.segmentLabel, checkKey: routeEvidenceEntries.checkKey }).from(routeEvidenceEntries).where(eq(routeEvidenceEntries.evaluationRef, approval.evaluationRef));
+        const labels = new Map(rows.map(r => [r.segmentId, r.segmentLabel ?? r.segmentId]));
+        const checks = Array.from(new Set(rows.map(r => r.checkKey))) as RequiredCheck[];
+        const approvedSegments = JSON.parse(approval.segmentIdsJson) as string[];
+        try {
+          const current = await evaluateSegments(db, {
+            unitId: approval.unitId, at: now, requiredChecks: checks,
+            segments: approvedSegments.map(id => ({ segmentId: id, label: labels.get(id) ?? id, lengthKm: 0 })),
+            dangerousGoods: possiblyDangerousGoods, requiresEscort: false,
+            tripId: approval.tripId, jobId: approval.jobId, buildRef: approval.buildRef,
+          });
+          for (const b of routeCheckBlockers(current.verdict.evidence, approval.evaluationRef)) extra.push(b);
+          contributions.push({ engine: "routing", finding: `Route ${approval.approvalRef} re-evaluated ${now.toISOString().slice(0, 10)}: ${current.verdict.dispatchStatus} — ${current.verdict.explanation}` });
+        } catch (e) {
+          if (!(e instanceof NoVehicleProfile)) throw e;
+          extra.push({ code: "route_check_unknown_vehicle_profile", label: `Route ${approval.approvalRef} cannot be re-evaluated: ${e.message}`, severity: "unknown", subject: "route", overridable: true, overrideAuthority: "manager" });
+        }
+      }
 
       /* The communication plan over that route's segments, under the company's own policy. */
       const segmentIds = JSON.parse(approval.segmentIdsJson) as string[];

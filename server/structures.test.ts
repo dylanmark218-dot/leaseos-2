@@ -71,7 +71,8 @@ describe("an approved route knows when it has gone stale", () => {
   // v22.17 added `communicationsPlan`. The fixture carries it so the "every
   // dependency has a label" assertion keeps meaning what it meant. The provider runtime added
   // `liveAdvisories` (material provincial advisories on the route's geometry) for the same reason.
-  const base: RouteDependencies = { vehicleProfile: "a", loadProfile: "b", permitSet: "c", restrictionSet: "d", structureSet: "e", roadFabric: "f", requiredChecks: "g", communicationsPlan: "h", liveAdvisories: "i" };
+  // T2 added `measuredWeight` (the authoritative weight) and `legalRules` (the rules road bans resolve against).
+  const base: RouteDependencies = { vehicleProfile: "a", loadProfile: "b", permitSet: "c", restrictionSet: "d", structureSet: "e", roadFabric: "f", requiredChecks: "g", communicationsPlan: "h", liveAdvisories: "i", measuredWeight: "j", legalRules: "k" };
   it("names what changed in the words a dispatcher would use, and says nothing changed when nothing did", () => {
     expect(stalenessAgainst(base, { ...base })).toEqual({ stale: false, changed: [], reasons: [] });
     const heavier = stalenessAgainst(base, { ...base, loadProfile: "b2" });
@@ -148,7 +149,7 @@ d("structures and route staleness through the database", () => {
     expect(approval.status).toBe("approved");
     // v22.17 — an approval now also stands on the radio channels governing its
     // segments, so a channel change makes it stale the same way a road ban does.
-    expect(approval.dependencies.sort()).toEqual(["communicationsPlan", "liveAdvisories", "loadProfile", "permitSet", "requiredChecks", "restrictionSet", "roadFabric", "structureSet", "vehicleProfile"]);
+    expect(approval.dependencies.sort()).toEqual(["communicationsPlan", "legalRules", "liveAdvisories", "loadProfile", "measuredWeight", "permitSet", "requiredChecks", "restrictionSet", "roadFabric", "structureSet", "vehicleProfile"]);
     const fresh = await callerFor(dispatcher).spatial.routeApprovalCheck({ approvalRef: approval.approvalRef });
     expect(fresh).toMatchObject({ stale: false, status: "approved" });
     expect(fresh.reasons[0]).toBe("Nothing this route depended on has changed");
