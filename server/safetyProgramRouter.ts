@@ -18,14 +18,14 @@ import { z } from "zod";
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import type { AnyMySqlColumn } from "drizzle-orm/mysql-core";
 import { roleProcedure, router } from "./_core/trpc";
-import { getDb, ownershipScopeWhere } from "./db";
+import { evidenceInScope, getDb, orgScopeWhere, ownershipScopeWhere, userInScope } from "./db";
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { financialEntities } from "../drizzle/schema";
 import { effectiveQualifications } from "./qualificationReads";
 import { complianceDocumentValidity } from "./_core/complianceDocumentValidity";
 import { assertEntityInScope } from "./_core/entityScope";
 import {
-  clientPolicyOverlays, companyPolicies, companySafetyPrograms, companyTrainingMatrix, complianceDocuments,
+  clientPolicyOverlays, customerAccounts, companyPolicies, companySafetyPrograms, companyTrainingMatrix, complianceDocuments,
   correctiveActions, incidentActions, incidentReports, inspections, nearMissReports, operators, organizationWorkers,
   policyAcknowledgements, policyRegulatoryLinks, policyReviews, policyTemplates, policyVersions, regulatoryReferences,
   safetyEvents, safetyProgramEvents, safetyProgramModules, tailgateMeetings, trainingRecords, trainingRequirements, units,
@@ -68,8 +68,8 @@ async function orgOf(db: Db, userId: number): Promise<string | null> {
 }
 const scopeKeyOf = (orgRef: string | null) => orgRef ?? "platform";
 const tenantOf = (orgRef: string | null) => ({ tenantId: orgRef ?? SINGLE_TENANT_ID });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const scopeWhere = (col: any, orgRef: string | null) => (orgRef == null ? isNull(col) : eq(col, orgRef));
+/** The 0132 rule through main's canonical `orgScopeWhere`: the single tenant reads NULL or 'default', an organization its own rows. */
+const scopeWhere = (col: AnyMySqlColumn, orgRef: string | null) => orgScopeWhere({ orgRef: col }, tenantOf(orgRef));
 function json<T>(text: string | null | undefined, fallback: T): T {
   if (!text) return fallback;
   try { return JSON.parse(text) as T; } catch { return fallback; }
@@ -78,13 +78,52 @@ const notFound = (what: string): never => { throw new TRPCError({ code: "NOT_FOU
 const refuse = (reason: string): never => { throw new TRPCError({ code: "FORBIDDEN", message: reason }); };
 const bad = (reason: string): never => { throw new TRPCError({ code: "BAD_REQUEST", message: reason }); };
 
+/**
+ * Append one event to the hash chain. `previousHash` is UNIQUE (0241), so two writers that read the same head
+ * cannot both link to it: the second insert is refused and that writer re-reads the head and tries again. A
+ * concurrent write therefore extends the chain instead of forking it — the same discipline main's document
+ * register keeps with its unique per-document sequence.
+ */
 async function audit(db: Db, orgRef: string | null, actorUserId: number | null, subjectType: string, subjectRef: string, eventType: string, payload: unknown) {
-  const previous = (await db.select({ eventHash: safetyProgramEvents.eventHash }).from(safetyProgramEvents).orderBy(desc(safetyProgramEvents.id)).limit(1))[0]?.eventHash ?? null;
   const eventRef = ref("SP-EVT");
   const eventJson = JSON.stringify(payload ?? {});
-  const hash = eventHash({ eventRef, actorUserId, subjectType, subjectRef, eventType, eventJson, previousHash: previous });
-  await db.insert(safetyProgramEvents).values({ eventRef, orgRef, actorUserId, subjectType, subjectRef, eventType, eventJson, previousHash: previous, eventHash: hash });
-  return eventRef;
+  for (let attempt = 0; ; attempt++) {
+    const previous = (await db.select({ eventHash: safetyProgramEvents.eventHash }).from(safetyProgramEvents).orderBy(desc(safetyProgramEvents.id)).limit(1))[0]?.eventHash ?? null;
+    const hash = eventHash({ eventRef, actorUserId, subjectType, subjectRef, eventType, eventJson, previousHash: previous });
+    try {
+      await db.insert(safetyProgramEvents).values({ eventRef, orgRef, actorUserId, subjectType, subjectRef, eventType, eventJson, previousHash: previous, eventHash: hash });
+      return eventRef;
+    } catch (e) {
+      const dup = /Duplicate entry|ER_DUP_ENTRY/.test(String((e as { message?: string; cause?: { message?: string } }).cause?.message ?? (e as Error).message));
+      if (!dup || attempt >= 20) throw e;
+    }
+  }
+}
+
+/*
+ * Every identifier a caller supplies is proved against the caller's organization before it is stored or read
+ * through. Each refuses as NOT FOUND, never FORBIDDEN: another organization's record does not exist here.
+ */
+async function requireUserInScope(userId: number, orgRef: string | null) {
+  if (!(await userInScope(userId, tenantOf(orgRef)))) notFound(`User ${userId}`);
+}
+async function requireEvidenceInScope(evidenceRecordId: number, orgRef: string | null) {
+  if (!(await evidenceInScope(evidenceRecordId, tenantOf(orgRef)))) notFound(`Evidence record ${evidenceRecordId}`);
+}
+async function requireCustomerAccountInScope(db: Db, customerAccountId: number, orgRef: string | null) {
+  const [row] = await db.select({ id: customerAccounts.id }).from(customerAccounts).where(and(eq(customerAccounts.id, customerAccountId), orgScopeWhere(customerAccounts, tenantOf(orgRef)))).limit(1);
+  if (!row) notFound(`Customer account ${customerAccountId}`);
+}
+async function requireOverlaysInScope(db: Db, overlayRefs: readonly string[], orgRef: string | null) {
+  if (overlayRefs.length === 0) return;
+  const rows = await db.select({ overlayRef: clientPolicyOverlays.overlayRef }).from(clientPolicyOverlays).where(and(inArray(clientPolicyOverlays.overlayRef, [...overlayRefs]), scopeWhere(clientPolicyOverlays.orgRef, orgRef)));
+  const found = new Set(rows.map(r => r.overlayRef));
+  const missing = overlayRefs.find(r => !found.has(r));
+  if (missing) notFound(`Overlay ${missing}`);
+}
+/** Regulatory references are platform-wide: every organization reads them, so no single organization writes or verifies them. */
+function requirePlatformScope(orgRef: string | null, act: string) {
+  if (orgRef != null) refuse(`Regulatory references are shared by every organization; they are ${act} from the platform scope, not by one organization for all the others`);
 }
 
 async function policyInScope(db: Db, policyRef: string, orgRef: string | null) {
@@ -103,14 +142,17 @@ async function templatesFor(db: Db, orgRef: string | null) {
   return db.select().from(policyTemplates).where(and(eq(policyTemplates.active, true), orgRef == null ? isNull(policyTemplates.orgRef) : sql`(${policyTemplates.orgRef} IS NULL OR ${policyTemplates.orgRef} = ${orgRef})`));
 }
 
-/** Who counts as the workforce: the organization's active workers, or in the single tenant everyone holding an active role. */
+/** Who counts as the workforce: the organization's active workers, or in the single tenant everyone holding an active role who belongs to no organization. */
 async function workforce(db: Db, orgRef: string | null): Promise<{ userId: number; positionCode: string }[]> {
   if (orgRef != null) {
     const rows = await db.select({ userId: organizationWorkers.userId, workerType: organizationWorkers.workerType }).from(organizationWorkers)
       .where(and(eq(organizationWorkers.orgRef, orgRef), eq(organizationWorkers.status, "active")));
     return rows.filter((r): r is { userId: number; workerType: typeof r.workerType } => r.userId != null).map(r => ({ userId: r.userId, positionCode: r.workerType }));
   }
-  const rows = await db.selectDistinct({ userId: userRoleAssignments.userId, role: userRoleAssignments.role }).from(userRoleAssignments).where(isNull(userRoleAssignments.revokedAt));
+  // The single tenant's people are those with an active role and no active organization membership — the same
+  // rule as main's userInScope — so a member of another organization never appears in this workforce.
+  const rows = await db.selectDistinct({ userId: userRoleAssignments.userId, role: userRoleAssignments.role }).from(userRoleAssignments)
+    .where(and(isNull(userRoleAssignments.revokedAt), sql`${userRoleAssignments.userId} NOT IN (SELECT m.userId FROM organizationMemberships m WHERE m.status = 'active')`));
   const seen = new Map<number, string>();
   for (const r of rows) if (!seen.has(r.userId)) seen.set(r.userId, String(r.role).toUpperCase());
   return Array.from(seen, ([userId, positionCode]) => ({ userId, positionCode }));
@@ -169,7 +211,11 @@ async function currentMatrixSummary(db: Db, orgRef: string | null) {
 
 /** Counts through a job's organization when the row has a job; the single tenant counts everything. */
 function jobScope(jobIdCol: AnyMySqlColumn, orgRef: string | null) {
-  return orgRef == null ? sql`1=1` : sql`${jobIdCol} IN (SELECT j.id FROM jobs j WHERE j.orgRef = ${orgRef})`;
+  // The 0132 rule: the single tenant owns jobs with no organization (or 'default'), and rows with no job; an
+  // organization owns its own jobs only.
+  return orgRef == null
+    ? sql`(${jobIdCol} IS NULL OR ${jobIdCol} IN (SELECT j.id FROM jobs j WHERE j.orgRef IS NULL OR j.orgRef = ${SINGLE_TENANT_ID}))`
+    : sql`${jobIdCol} IN (SELECT j.id FROM jobs j WHERE j.orgRef = ${orgRef})`;
 }
 const count = async (db: Db, q: Promise<{ n: unknown }[]>) => Number((await q)[0]?.n ?? 0);
 
@@ -341,6 +387,7 @@ export const safetyProgramRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const orgRef = await orgOf(db, ctx.user.id);
+      if (input.ownerUserId != null) await requireUserInScope(input.ownerUserId, orgRef);
       let template: typeof policyTemplates.$inferSelect | null = null;
       if (input.templateKey) {
         [template] = await db.select().from(policyTemplates).where(and(eq(policyTemplates.templateKey, input.templateKey), sql`(${policyTemplates.orgRef} IS NULL OR ${policyTemplates.orgRef} = ${orgRef ?? ""})`)).limit(1);
@@ -410,6 +457,7 @@ export const safetyProgramRouter = router({
       const orgRef = await orgOf(db, ctx.user.id);
       const p = await policyInScope(db, input.policyRef, orgRef);
       if (p.status === "retired") return refuse("A retired policy takes no new versions");
+      await requireOverlaysInScope(db, input.clientOverlayRefs ?? [], orgRef);
       const [openDraft] = await db.select({ versionRef: policyVersions.versionRef }).from(policyVersions).where(and(eq(policyVersions.companyPolicyId, p.id), eq(policyVersions.state, "draft"))).limit(1);
       if (openDraft) return bad(`A draft (${openDraft.versionRef}) is already open; edit it or withdraw it`);
       const [last] = await db.select({ versionNumber: policyVersions.versionNumber, versionHash: policyVersions.versionHash, id: policyVersions.id }).from(policyVersions).where(eq(policyVersions.companyPolicyId, p.id)).orderBy(desc(policyVersions.versionNumber)).limit(1);
@@ -607,6 +655,9 @@ export const safetyProgramRouter = router({
       const db = await dbOrThrow();
       const orgRef = await orgOf(db, ctx.user.id);
       const policy = input.policyRef ? await policyInScope(db, input.policyRef, orgRef) : null;
+      if (input.customerAccountId != null) await requireCustomerAccountInScope(db, input.customerAccountId, orgRef);
+      if (input.sourceEvidenceRecordId != null) await requireEvidenceInScope(input.sourceEvidenceRecordId, orgRef);
+      // clientOrgRef names the counterparty by reference only: nothing here reads or writes through it.
       const values = {
         clientName: input.clientName, clientOrgRef: input.clientOrgRef ?? null, customerAccountId: input.customerAccountId ?? null, moduleKey: input.moduleKey ?? policy?.moduleKey ?? null, companyPolicyId: policy?.id ?? null,
         title: input.title, requirementsJson: JSON.stringify(input.requirements), sourceDescription: input.sourceDescription ?? null, sourceEvidenceRecordId: input.sourceEvidenceRecordId ?? null,
@@ -684,6 +735,7 @@ export const safetyProgramRouter = router({
     .input(z.object({ referenceKey: z.string().min(3).max(120).regex(/^[a-z0-9_.]+$/), jurisdiction: z.string().min(2).max(40), authority: z.string().min(2).max(160), instrument: z.string().min(2).max(220), provision: z.string().max(160).nullable().optional(), title: z.string().min(3).max(240), url: z.string().url().max(500).nullable().optional(), summary: z.string().max(5000).optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
+      requirePlatformScope(await orgOf(db, ctx.user.id), "recorded");
       const [existing] = await db.select({ id: regulatoryReferences.id, verificationStatus: regulatoryReferences.verificationStatus }).from(regulatoryReferences).where(eq(regulatoryReferences.referenceKey, input.referenceKey)).limit(1);
       const values = { jurisdiction: input.jurisdiction, authority: input.authority, instrument: input.instrument, provision: input.provision ?? null, title: input.title, url: input.url ?? null, summary: input.summary ?? null };
       if (existing) {
@@ -700,6 +752,7 @@ export const safetyProgramRouter = router({
     .input(z.object({ referenceKey: z.string().min(3).max(120), verificationNote: z.string().min(3).max(400), sourceSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(), status: z.enum(["verified", "superseded"]).default("verified") }))
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
+      requirePlatformScope(await orgOf(db, ctx.user.id), "verified");
       const [r] = await db.select().from(regulatoryReferences).where(eq(regulatoryReferences.referenceKey, input.referenceKey)).limit(1);
       if (!r) return notFound(`Reference ${input.referenceKey}`);
       if (r.recordedByUserId === ctx.user.id) return refuse("The person who recorded a reference cannot verify it");
@@ -728,6 +781,7 @@ export const safetyProgramRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const orgRef = await orgOf(db, ctx.user.id);
+      if (input.overlayRef) await requireOverlaysInScope(db, [input.overlayRef], orgRef);
       if (input.requirementKind === "policy_acknowledgement") { if (!input.policyRef) return bad("A policy-acknowledgement requirement names the policy"); await policyInScope(db, input.policyRef, orgRef); }
       else if (!input.qualificationCode) return bad("A certificate, training, orientation or competency requirement names the qualification code the Driver Wallet holds");
       const values = { positionCode: input.positionCode, requirementKind: input.requirementKind, qualificationCode: input.qualificationCode ?? null, policyRef: input.policyRef ?? null, title: input.title, source: input.source, packKey: input.packKey ?? null, overlayRef: input.overlayRef ?? null, renewalMonths: input.renewalMonths ?? null, warnDaysBeforeExpiry: input.warnDaysBeforeExpiry, enforcement: input.enforcement, active: input.active };
@@ -750,6 +804,8 @@ export const safetyProgramRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const orgRef = await orgOf(db, ctx.user.id);
+      // Named workers must be the caller's own: an id from another organization is not found, and is never read.
+      if (input.workers?.length) for (const w of input.workers) await requireUserInScope(w.userId, orgRef);
       const people = input.workers?.length ? input.workers : await workforce(db, orgRef);
       const reqRows = await db.select().from(trainingRequirements).where(and(inArray(trainingRequirements.scopeKey, [scopeKeyOf(orgRef), "platform"]), eq(trainingRequirements.active, true)));
       const requirements: MatrixRequirement[] = reqRows.map(r => ({ requirementRef: r.requirementRef, positionCode: r.positionCode, requirementKind: r.requirementKind, qualificationCode: r.qualificationCode, policyRef: r.policyRef, renewalMonths: r.renewalMonths, warnDaysBeforeExpiry: r.warnDaysBeforeExpiry, enforcement: r.enforcement, title: r.title }));
@@ -786,6 +842,7 @@ export const safetyProgramRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const orgRef = await orgOf(db, ctx.user.id);
+      await requireUserInScope(input.assignedToUserId, orgRef);
       const actionRef = ref("CA");
       await db.insert(correctiveActions).values({ actionRef, orgRef, sourceType: input.sourceType, sourceRef: input.sourceRef ?? null, title: input.title, description: input.description, rootCause: input.rootCause ?? null, priority: input.priority, assignedToUserId: input.assignedToUserId, dueAt: input.dueAt, openedByUserId: ctx.user.id });
       await audit(db, orgRef, ctx.user.id, "correctiveAction", actionRef, "action.opened", { sourceType: input.sourceType, sourceRef: input.sourceRef ?? null, assignedToUserId: input.assignedToUserId, dueAt: input.dueAt, priority: input.priority });
@@ -799,6 +856,7 @@ export const safetyProgramRouter = router({
       const orgRef = await orgOf(db, ctx.user.id);
       const [a] = await db.select().from(correctiveActions).where(and(eq(correctiveActions.actionRef, input.actionRef), scopeWhere(correctiveActions.orgRef, orgRef))).limit(1);
       if (!a) return notFound(`Corrective action ${input.actionRef}`);
+      if (input.evidenceRecordId != null) await requireEvidenceInScope(input.evidenceRecordId, orgRef);
       const now = new Date();
       if (input.transition === "start") {
         if (a.status !== "open") return refuse(`A ${a.status} action cannot be started`);
@@ -913,12 +971,18 @@ export const safetyProgramRouter = router({
   events: roleProcedure("safetyProgram.events").input(z.object({ subjectType: z.string().max(80).optional(), subjectRef: z.string().max(120).optional(), limit: z.number().int().min(1).max(500).default(100), verifyChain: z.boolean().default(false) }).default({ limit: 100, verifyChain: false })).query(async ({ ctx, input }) => {
     const db = await dbOrThrow();
     const orgRef = await orgOf(db, ctx.user.id);
-    const where = [sql`(${safetyProgramEvents.orgRef} IS NULL OR ${scopeWhere(safetyProgramEvents.orgRef, orgRef)})`];
+    // Own organization only. Platform events (catalog and reference work, orgRef NULL) belong to the platform scope,
+    // which is what the single tenant reads; an organization does not see who across the platform did what.
+    const where = [scopeWhere(safetyProgramEvents.orgRef, orgRef)];
     if (input.subjectType) where.push(eq(safetyProgramEvents.subjectType, input.subjectType));
     if (input.subjectRef) where.push(eq(safetyProgramEvents.subjectRef, input.subjectRef));
     const rows = await db.select().from(safetyProgramEvents).where(and(...where)).orderBy(desc(safetyProgramEvents.id)).limit(input.limit);
     // The chain runs over the whole ledger in insertion order, whoever the subject; verifying it reads every row.
-    const chain = input.verifyChain ? verifyEventChain(await db.select().from(safetyProgramEvents).orderBy(safetyProgramEvents.id)) : null;
+    const all = input.verifyChain ? await db.select().from(safetyProgramEvents).orderBy(safetyProgramEvents.id) : [];
+    const walked = input.verifyChain ? verifyEventChain(all) : null;
+    // A break is named only when it is the caller's own event; otherwise it is reported without its reference.
+    const brokenOwn = walked?.brokenAt ? all.find(e => e.eventRef === walked.brokenAt && (orgRef == null ? e.orgRef == null || e.orgRef === SINGLE_TENANT_ID : e.orgRef === orgRef)) : null;
+    const chain = walked ? { intact: walked.intact, length: walked.length, brokenAt: walked.brokenAt ? (brokenOwn ? walked.brokenAt : "outside this organization") : null } : null;
     return { events: rows.map(e => ({ ...e, payload: json<unknown>(e.eventJson, {}) })), chain };
   }),
 });

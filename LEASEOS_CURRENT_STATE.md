@@ -8,7 +8,7 @@ here can be added rather than read.
 |---|---|---|
 | Release | **v23.31** | `LEASEOS_RELEASE` (or explicit argument 1) |
 | Tables | **491** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **212** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Migrations | **213** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
 | Role-authorized procedures | **925** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **40** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |

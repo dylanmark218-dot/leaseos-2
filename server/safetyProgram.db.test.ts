@@ -38,6 +38,12 @@ async function personIn(orgRef: string, role: string, workerType = "EMPLOYEE_DRI
   await pool.execute("INSERT INTO organizationWorkers (workerRef, orgRef, userId, workerType, status, effectiveFrom, createdByUserId) VALUES (?,?,?,?,'active','2020-01-01',1)", [`WRK-${rnd()}`, orgRef, userId, workerType]);
   return userId;
 }
+/** A person in the platform (single-tenant) scope: a role and no organization membership. */
+async function platformPerson(role: string) {
+  const userId = seq++;
+  await pool.execute("INSERT INTO userRoleAssignments (userId, role, scopeType, grantedByUserId, grantedAt) VALUES (?,?,'global',1,NOW())", [userId, role]);
+  return userId;
+}
 const code = async (fn: () => Promise<unknown>) => { try { await fn(); return "ok"; } catch (e) { return (e as { code?: string }).code ?? "error"; } };
 const message = async (fn: () => Promise<unknown>) => { try { await fn(); return ""; } catch (e) { return (e as { message?: string }).message ?? ""; } };
 
@@ -222,12 +228,15 @@ d("0228 — Safety & Compliance Program Builder", () => {
     expect(await message(() => S.safetyProgram.correctiveActionVerify({ actionRef: ca.actionRef, verificationNote: "looks fine" }))).toMatch(/completed an action cannot verify/);
     await M.safetyProgram.correctiveActionVerify({ actionRef: ca.actionRef, verificationNote: "Muster sheet on file" });
 
-    // --- references: recorder never verifies
+    // --- references: shared by every organization, so written and verified only from the platform scope; recorder never verifies
     const rk = `ab.test_${rnd().toLowerCase()}`;
-    await S.safetyProgram.referenceUpsert({ referenceKey: rk, jurisdiction: "CA-AB", authority: "Alberta", instrument: "Test instrument", title: "Test reference" });
-    expect(await message(() => S.safetyProgram.referenceVerify({ referenceKey: rk, verificationNote: "checked" }))).toMatch(/recorded a reference cannot verify/);
-    expect((await M.safetyProgram.referenceVerify({ referenceKey: rk, verificationNote: "Checked against the consolidated instrument" })).verificationStatus).toBe("verified");
-    await S.safetyProgram.referenceUpsert({ referenceKey: rk, jurisdiction: "CA-AB", authority: "Alberta", instrument: "Test instrument (amended)", title: "Test reference" });
+    const P1 = callerFor(await platformPerson("safety")), P2 = callerFor(await platformPerson("management"));
+    expect(await message(() => S.safetyProgram.referenceUpsert({ referenceKey: rk, jurisdiction: "CA-AB", authority: "Alberta", instrument: "Test instrument", title: "Test reference" }))).toMatch(/shared by every organization/);
+    await P1.safetyProgram.referenceUpsert({ referenceKey: rk, jurisdiction: "CA-AB", authority: "Alberta", instrument: "Test instrument", title: "Test reference" });
+    expect(await code(() => M.safetyProgram.referenceVerify({ referenceKey: rk, verificationNote: "an organization verifying for everyone" }))).toBe("FORBIDDEN");
+    expect(await message(() => P1.safetyProgram.referenceVerify({ referenceKey: rk, verificationNote: "checked" }))).toMatch(/recorded a reference cannot verify/);
+    expect((await P2.safetyProgram.referenceVerify({ referenceKey: rk, verificationNote: "Checked against the consolidated instrument" })).verificationStatus).toBe("verified");
+    await P1.safetyProgram.referenceUpsert({ referenceKey: rk, jurisdiction: "CA-AB", authority: "Alberta", instrument: "Test instrument (amended)", title: "Test reference" });
     expect((await A.safetyProgram.referenceList({ jurisdiction: "CA-AB" })).find(r => r.referenceKey === rk)!.verificationStatus).toBe("unverified");   // an edited citation is unverified again
 
     // --- readiness and package
@@ -245,5 +254,61 @@ d("0228 — Safety & Compliance Program Builder", () => {
     expect(ev.events.map(e => e.eventType)).toContain("policy.created");
     expect(ev.chain).toMatchObject({ intact: true, brokenAt: null });
     expect((await X.safetyProgram.events({ subjectType: "policy", subjectRef: p1.policyRef })).events).toEqual([]);
+  }, 120_000);
+
+  it("refuses every identifier from another organization, keeps platform work out of an organization's view, and keeps one chain under concurrency", async () => {
+    const orgA = await org(), orgB = await org();
+    const safety = await personIn(orgA, "safety", "SAFETY_COMPLIANCE");
+    const driver = await personIn(orgA, "driver");
+    const outsider = await personIn(orgB, "management", "OFFICE_ADMIN");
+    const otherWorker = await personIn(orgB, "driver");
+    const S = callerFor(safety), X = callerFor(outsider);
+    const PS = callerFor(await platformPerson("safety")), PM = callerFor(await platformPerson("management"));
+    await S.safetyProgram.syncCatalog();
+
+    // Fixtures that belong to organization B.
+    const [entA] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (orgRef, entityRef, legalName, taxpayerType, jurisdiction, status) VALUES (?,?,?,'corporation','CA-AB','active')", [orgA, `ENT-${rnd()}`, "A Vac Ltd."]);
+    const [entB] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO financialEntities (orgRef, entityRef, legalName, taxpayerType, jurisdiction, status) VALUES (?,?,?,'corporation','CA-AB','active')", [orgB, `ENT-${rnd()}`, "B Haul Inc."]);
+    const [custB] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO customerAccounts (orgRef, accountRef, financialEntityId, name) VALUES (?,?,?,?)", [orgB, `CA-${rnd()}`, entB.insertId, "B's client"]);
+    const [evB] = await pool.execute<mysql.ResultSetHeader>("INSERT INTO evidenceRecords (title, category, capturedAt, capturedBy) VALUES ('B evidence','other',NOW(),?)", [otherWorker]);
+    const overlayB = (await X.safetyProgram.overlaySet({ clientName: "B client", title: "B overlay", requirements: [{ requirement: "B rule" }] })).overlayRef;
+
+    const profile = { jurisdictions: ["CA-AB"], workforceSize: 3, nscCarrier: false, federalCarrier: false, oilfield: false, hydrovac: false, groundDisturbance: false, dangerousGoods: false, workingAlone: false };
+    // financialEntityId: another organization's entity is not found; the caller's own is accepted.
+    expect(await code(() => S.safetyProgram.programSet({ name: "A program", financialEntityId: entB.insertId, profile, packKeys: ["ab_ohs"] }))).toBe("NOT_FOUND");
+    expect((await S.safetyProgram.programSet({ name: "A program", financialEntityId: entA.insertId, profile, packKeys: ["ab_ohs"] })).programRef).toMatch(/^SPRG-/);
+    // user ids: owner, assignee and named matrix workers must be the caller's own people.
+    expect(await code(() => S.safetyProgram.policyCreate({ templateKey: "company_foundation.health_and_safety_policy", ownerUserId: otherWorker }))).toBe("NOT_FOUND");
+    const pol = await S.safetyProgram.policyCreate({ templateKey: "company_foundation.health_and_safety_policy", ownerUserId: driver });
+    expect(await code(() => S.safetyProgram.correctiveActionOpen({ sourceType: "other", title: "cross assign", description: "assign across", assignedToUserId: otherWorker, dueAt: new Date(Date.now() + 86_400_000) }))).toBe("NOT_FOUND");
+    expect(await code(() => S.safetyProgram.trainingMatrixCompute({ workers: [{ userId: otherWorker, positionCode: "EMPLOYEE_DRIVER" }] }))).toBe("NOT_FOUND");
+    // customer account, evidence and overlay references: B's are not found from A.
+    expect(await code(() => S.safetyProgram.overlaySet({ clientName: "Client X", title: "Overlay X", customerAccountId: custB.insertId, requirements: [{ requirement: "Rule R" }] }))).toBe("NOT_FOUND");
+    expect(await code(() => S.safetyProgram.overlaySet({ clientName: "Client X", title: "Overlay X", sourceEvidenceRecordId: evB.insertId, requirements: [{ requirement: "Rule R" }] }))).toBe("NOT_FOUND");
+    expect(await code(() => S.safetyProgram.versionDraft({ policyRef: pol.policyRef, sections: [{ heading: "Purpose", body: "x" }], bodyMarkdown: "", clientOverlayRefs: [overlayB] }))).toBe("NOT_FOUND");
+    expect(await code(() => S.safetyProgram.trainingRequirementUpsert({ positionCode: "EMPLOYEE_DRIVER", requirementKind: "client_orientation", qualificationCode: "B_ORIENT", title: "Orientation", overlayRef: overlayB }))).toBe("NOT_FOUND");
+    const own = await S.safetyProgram.correctiveActionOpen({ sourceType: "other", title: "own action", description: "own", assignedToUserId: driver, dueAt: new Date(Date.now() + 86_400_000) });
+    expect(await code(() => S.safetyProgram.correctiveActionProgress({ actionRef: own.actionRef, transition: "complete", note: "done", evidenceRecordId: evB.insertId }))).toBe("NOT_FOUND");
+    // B never sees A's records.
+    expect(await code(() => X.safetyProgram.policyDetail({ policyRef: pol.policyRef }))).toBe("NOT_FOUND");
+    expect(await code(() => X.safetyProgram.correctiveActionProgress({ actionRef: own.actionRef, transition: "start" }))).toBe("NOT_FOUND");
+
+    // Platform events (the catalog sync above) are the platform scope's, not an organization's.
+    expect((await S.safetyProgram.events({ subjectType: "catalog" })).events).toEqual([]);
+    expect((await PS.safetyProgram.events({ subjectType: "catalog" })).events.length).toBeGreaterThan(0);
+
+    // The single tenant's workforce is people with no organization: neither A's nor B's appear in it.
+    const pp = await PS.safetyProgram.policyCreate({ templateKey: "company_foundation.stop_work_authority" });
+    const pv = await PS.safetyProgram.versionDraftFromTemplate({ policyRef: pp.policyRef });
+    await PM.safetyProgram.versionApprove({ versionRef: pv.versionRef });
+    const st = await PS.safetyProgram.acknowledgementStatus({ policyRef: pp.policyRef });
+    const listed = new Set([...st.signed.map(x => x.userId), ...st.outstanding.map(x => x.userId)]);
+    for (const u of [safety, driver, outsider, otherWorker]) expect(listed.has(u), `user ${u} is in an organization`).toBe(false);
+
+    // Concurrent writers extend the chain instead of forking it.
+    await Promise.all(Array.from({ length: 6 }, (_, i) => S.safetyProgram.correctiveActionOpen({ sourceType: "other", title: `concurrent ${i}`, description: "concurrent", assignedToUserId: driver, dueAt: new Date(Date.now() + 86_400_000) })));
+    expect((await S.safetyProgram.events({ verifyChain: true, limit: 1 })).chain).toMatchObject({ intact: true, brokenAt: null });
+    const [[dupes]] = await pool.execute<mysql.RowDataPacket[]>("SELECT COUNT(*) AS n FROM (SELECT previousHash FROM safetyProgramEvents WHERE previousHash IS NOT NULL GROUP BY previousHash HAVING COUNT(*) > 1) d");
+    expect(Number(dupes!.n)).toBe(0);
   }, 120_000);
 });

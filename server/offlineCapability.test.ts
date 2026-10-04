@@ -4,46 +4,51 @@
 import { describe, expect, it } from "vitest";
 import {
   actionable, classRiskDisagreements, ClassRiskMismatch, DeviceAuthorityRefused,
-  envelopeFor, freshnessOf, offlineOutcome, validateCapability,
-  type FieldCapability, type LocalRecord,
+  envelopeFor, freshnessOf, offlineClassOf, runtimeAvailability, validateCapability,
+  type DeviceOperation, type LocalRecord,
 } from "./_core/offlineCapability";
+import type { CapabilityMatrix } from "@shared/hardwareCapability";
 
 const AT = new Date("2026-09-13T14:00:00Z");
 
-const cap = (o: Partial<FieldCapability> = {}): FieldCapability => ({
-  key: "documents.readCached", description: "read a cached manual", riskLevel: "read",
-  requiredPermissions: ["document.read"], requiresOnline: false, idempotent: true,
-  offlineClass: "local_safe", ...o,
+// SPINE item 3: a capability declares requiresOnline and its risk; its offline class is derived from them.
+const cap = (o: Partial<DeviceOperation> = {}): DeviceOperation => ({
+  key: "documents.readCached", riskLevel: "read", requiresOnline: false, requiredHardware: [], draftable: false, ...o,
 });
+const HARDWARE: CapabilityMatrix = { localStore: true, fileVault: true, keystore: true, camera: true, location: true, network: true };
+const offlineOutcome = (c: DeviceOperation, a: { online: boolean; draftable: boolean }) =>
+  runtimeAvailability({ ...c, draftable: a.draftable }, { hardware: HARDWARE, online: a.online });
 
 /** The stack as it would actually be declared. */
-const capabilities: FieldCapability[] = [
+const capabilities: DeviceOperation[] = [
   cap(),
-  cap({ key: "safety.recordObservation", riskLevel: "low_risk_action", offlineClass: "local_capture" }),
-  cap({ key: "tickets.prepareDisposalTicket", riskLevel: "prepare", offlineClass: "local_prepare" }),
-  cap({ key: "maintenance.clearOutOfService", riskLevel: "restricted", offlineClass: "server_authoritative" }),
-  cap({ key: "billing.issueInvoice", riskLevel: "approval_required", offlineClass: "server_authoritative" }),
+  cap({ key: "safety.recordObservation", riskLevel: "low_risk_action" }),
+  cap({ key: "tickets.prepareDisposalTicket", riskLevel: "prepare" }),
+  cap({ key: "maintenance.clearOutOfService", riskLevel: "restricted", requiresOnline: true }),
+  cap({ key: "billing.issueInvoice", riskLevel: "approval_required", requiresOnline: true }),
 ];
 
 describe("the class and the risk cannot disagree", () => {
-  it("accepts the declared stack", () => {
+  it("accepts the declared stack, and classes it from requiresOnline and the risk", () => {
     expect(classRiskDisagreements(capabilities)).toEqual([]);
+    expect(capabilities.map(offlineClassOf)).toEqual(["local_safe", "local_capture", "local_prepare", "server_authoritative", "server_authoritative"]);
   });
 
-  it("refuses a server decision wearing a local-read label", () => {
-    // The label is the only thing standing between an offline device and this.
-    const mislabelled = cap({ key: "oos.release", riskLevel: "restricted", offlineClass: "local_safe" });
+  it("refuses a server decision declared as runnable without the server", () => {
+    // requiresOnline is the only thing standing between an offline device and this.
+    const mislabelled = cap({ key: "oos.release", riskLevel: "restricted", requiresOnline: false });
     expect(() => validateCapability(mislabelled)).toThrow(ClassRiskMismatch);
-    expect(() => validateCapability(mislabelled)).toThrow(/may be read —/);
+    expect(() => validateCapability(mislabelled)).toThrow(/declare it requiresOnline/);
   });
 
   it("names the exact disagreement rather than counting them", () => {
-    const [msg] = classRiskDisagreements([cap({ key: "x", riskLevel: "approval_required", offlineClass: "local_prepare" })]);
-    expect(msg).toContain("x is local_prepare but carries risk approval_required");
+    const [msg] = classRiskDisagreements([cap({ key: "x", riskLevel: "approval_required", requiresOnline: false })]);
+    expect(msg).toContain("x carries risk approval_required but is declared to run without the server");
   });
 
   it("lets a capture record something, since refusing would break the device where it matters most", () => {
-    expect(() => validateCapability(cap({ riskLevel: "low_risk_action", offlineClass: "local_capture" }))).not.toThrow();
+    expect(() => validateCapability(cap({ riskLevel: "low_risk_action" }))).not.toThrow();
+    expect(offlineClassOf(cap({ riskLevel: "low_risk_action" }))).toBe("local_capture");
   });
 });
 
@@ -55,33 +60,34 @@ describe("losing signal is not a way around the server", () => {
   });
 
   it("captures an observation and says who decides what it permits", () => {
-    const r = offlineOutcome(cap({ offlineClass: "local_capture", riskLevel: "low_risk_action" }), offline);
+    const r = offlineOutcome(cap({ riskLevel: "low_risk_action" }), offline);
     expect(r.outcome).toBe("capture_locally");
-    expect(r.note).toContain("The observation is a fact; what it permits is decided when this reaches the server");
+    expect(r.note).toContain("What it permits is decided when it reaches the server");
   });
 
   it("never executes a server-authoritative capability offline", () => {
-    for (const c of capabilities.filter(c => c.offlineClass === "server_authoritative")) {
+    for (const c of capabilities.filter(c => offlineClassOf(c) === "server_authoritative")) {
       expect(offlineOutcome(c, offline).outcome).not.toBe("execute_locally");
       expect(offlineOutcome(c, { online: false, draftable: true }).outcome).not.toBe("execute_locally");
     }
   });
 
   it("says unavailable plainly rather than appearing to work and failing hours later", () => {
-    const r = offlineOutcome(cap({ key: "maintenance.clearOutOfService", riskLevel: "restricted", offlineClass: "server_authoritative" }), offline);
+    const r = offlineOutcome(cap({ key: "maintenance.clearOutOfService", riskLevel: "restricted", requiresOnline: true }), offline);
     expect(r.outcome).toBe("unavailable");
     expect(r.note).toContain("Losing signal is not a way around it");
   });
 
   it("queues a draftable server capability instead", () => {
-    const r = offlineOutcome(cap({ key: "billing.issueInvoice", riskLevel: "approval_required", offlineClass: "server_authoritative" }), { online: false, draftable: true });
+    const r = offlineOutcome(cap({ key: "billing.issueInvoice", riskLevel: "approval_required", requiresOnline: true }), { online: false, draftable: true });
     expect(r.outcome).toBe("prepare_and_queue");
   });
 
-  it("behaves normally once there is signal", () => {
-    const r = offlineOutcome(cap({ key: "billing.issueInvoice", riskLevel: "approval_required", offlineClass: "server_authoritative" }), { online: true, draftable: false });
-    expect(r.outcome).toBe("execute_locally");
-    expect(r.note).toContain("the server decides as usual");
+  it("with signal, sends server work to the server — signal is not a licence to execute it here (SPINE item 3)", () => {
+    // Before item 3 this returned execute_locally for every capability once online.
+    const r = offlineOutcome(cap({ key: "billing.issueInvoice", riskLevel: "approval_required", requiresOnline: true }), { online: true, draftable: false });
+    expect(r).toMatchObject({ outcome: "prepare_and_queue", reason: "server_decides" });
+    expect(r.note).toContain("sent to the server now; nothing is done here");
   });
 });
 
