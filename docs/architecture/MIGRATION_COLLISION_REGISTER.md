@@ -256,6 +256,8 @@ auth-workspace, work-calendar), `0172`–`0175` (training-academy-workforce), `0
   `0170 → 0176`, the first two numbers held by neither `main` nor any open branch (0170–0173 are
   claimed by #9/#11 and the training-academy branch; 0174 is on main). `claude/leaseos-auth-workspace-system-t008ad`
   still claims 0170 and should take the next free number at its own rebase.
+* **2026-09-24**: `0186` claimed by `claude/canadian-govt-apis-leaseos-q33l42` (external source categories);
+  first number free after the `0185` claims above. No branch renumbered.
 
 ## State at the 0169 reconciliation (2026-09-23, `main` = `6f52b574`, after PR #10 and PR #13)
 
@@ -282,6 +284,7 @@ the 0181–0190 range is held entirely by open branches.
 | Number | Migration file | Branch | PR | Status | Collision | Intended resolution |
 |---|---|---|---|---|---|---|
 | 0185 | `0185_webhook_delivery_claim.sql` | `claude/sec-004-webhook-delivery-integrity` | #20 | reconciled onto `main`; integrating | **`claude/relaxed-carson-qfcopf` also claims `0185`** (`0185_assistant_proposal_tenancy.sql`) | **SEC-004 keeps `0185`**: it claimed the number at 2026-09-24 07:52 when it was free on `main` and every branch; the other claim followed 77 minutes later and did not meet the "free everywhere" standard. That branch renumbers at its own integration, as the academy branch's `0174` does |
+| 0186 | `0186_external_source_categories.sql` | `claude/canadian-govt-apis-leaseos-q33l42` | #26 | open branch | none seen in the S2 scan | keeps `0186` unless a later branch proves an earlier claim |
 | 0191 | `0191_encrypted_secrets.sql` | `feature/secret-management-foundation` | #45 | **merged** | none | recorded late — see change log |
 | 0192 | `0192_provider_credentials.sql` | `feature/secret-management-foundation` | #45 | **merged** | none | recorded late — see change log |
 | 0193 | `0193_mfa_secret_ref.sql` | `feature/mfa-secret-migration` | #47 | **merged** | none | recorded late — see change log |

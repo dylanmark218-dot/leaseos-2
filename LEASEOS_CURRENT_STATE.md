@@ -8,7 +8,7 @@ here can be added rather than read.
 |---|---|---|
 | Release | **v23.31** | `LEASEOS_RELEASE` (or explicit argument 1) |
 | Tables | **490** | `mysqlTable(` declarations in `drizzle/schema.ts` |
-| Migrations | **212** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
+| Migrations | **213** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
 | Role-authorized procedures | **925** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **40** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
@@ -41,7 +41,7 @@ organization and workspace server-side, refuses a workspace the caller does
 not hold, ends access with the membership rather than with the grant, and
 verifies a named organization against the membership table before it scopes
 anything · payroll, finance, tax
-rules (unverified) · geospatial source registry (8 verified licences, 10
+rules (unverified) · geospatial source registry (10 verified licences, 27
 blocked) · approved external source registry (a publisher is contacted only
 through an endpoint a person approved — exact host, port, method and path,
 for a named purpose, until a review-by date — by someone who neither asked

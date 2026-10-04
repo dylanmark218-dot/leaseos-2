@@ -5,18 +5,19 @@ Every field below was checked against the publisher and is now seeded into
 `externalDataSources` by `seedExternalDataSources()`. This document describes
 what the runtime enforces; it is not the enforcement itself.
 
-## Ten verified, twenty not
+## Ten verified, twenty-seven not
 
 | | Count |
 |---|---|
 | Verified — usable per their licence | **10** |
-| Unverified — inspection only | **20** |
-| Total | **30** |
+| Unverified — inspection only | **27** |
+| Total | **37** |
 
 > **Correction.** The research summary stated "nine of eleven are clean" while
 > separately flagging three as unresolved. Eleven minus three is eight. Seeding
 > nine would have marked a blocked source usable. `externalSourceSeeds.test.ts`
-> holds the counts — now 10 / 18 / 28 after the 511 tranche below.
+> holds the counts — now 10 / 27 / 37 after the 511 tranche, the federal and
+> provincial candidates and the facility layers below.
 
 ## Verified sources
 
@@ -57,6 +58,13 @@ what the runtime enforces; it is not the enforcement itself.
 | `crtc_coverage` | Modelled coverage layers published for regulatory purposes, not a guarantee of service at a position. |
 | `sk_petroleum_gis` | The facility directory's Saskatchewan Petroleum facilities layer (0143), registered in 0233 so the approved-source registry governs its importer. The licence is named (Standard Unrestricted Use Data Licence v2.0); commercial use, redistribution and attribution are recorded here only when a person clears it. The importer's own licence gate reads the facility licence register, where 0143 recorded the grant. |
 | `bcer_gis` | The BC Energy Regulator's facility-point and sump layers (0143). Same treatment: licence named (BCER Open Data Licence), not cleared here. |
+| `tc_vehicle_recalls` | Transport Canada Vehicle Recalls Database, last 60 days, daily. Catalogue states OGL – Canada; not yet reviewed. A match is information for a person, never a safe/unsafe determination. |
+| `hc_recalls_safety_alerts` | Government of Canada Recalls and Safety Alerts feed. Catalogue states OGL – Canada; not yet reviewed. |
+| `goc_open_data_api` | The federal CKAN catalogue. Catalogue states OGL – Canada for itself; each dataset it lists is its own source with its own licence. |
+| `statcan_wds` | Statistics Canada Web Data Service. Statistics Canada Open Licence named; not yet reviewed. |
+| `statcan_rdaas` | Statistics Canada Reference Data as a Service. Same licence named; not yet reviewed. |
+| `bc_data_catalogue` | BC's CKAN catalogue. Licensing is per dataset and not uniformly OGL – BC, so the row names no licence. |
+| `qc_reseau_camionnage` | Québec heavy-truck network (a different dataset from the cleared `qc_mtmd_roadworks`). Données Québec lists CC BY 4.0; the attribution wording is recorded on review. |
 
 Every unverified source carries `attributionText: null` deliberately, as a second barrier: a
 source cannot reach operational use by editing `status` and the permission flags
@@ -65,7 +73,32 @@ Test-pinned.
 
 **Required to unblock:** written confirmation from AER (Terms of Use) and from
 Alberta 511 (developer terms) covering (a) commercial fleet use and (b) offline
-redistribution to field tablets.
+redistribution to field tablets. For the seven federal and provincial
+candidates a reviewer reads the named licence and records its attribution;
+none needs a written request unless that reading leaves commercial fleet use
+unclear.
+
+## Integration states
+
+`integrationState()` gives each source one of four states for integration
+planning. It adds no second rule: it labels what `evaluateSourceUsage` already
+decides for `operational_decision`, and a test checks that the two agree for
+every seeded source.
+
+| State | Meaning | Today |
+|---|---|---|
+| `APPROVED_FREE_COMMERCIAL` | Cleared for commercial use, no attribution owed | none |
+| `APPROVED_WITH_ATTRIBUTION` | Cleared for commercial use; show the attribution text | the 10 verified |
+| `PERMISSION_REQUIRED` | Unreviewed, commercial terms unknown, or attribution unrecorded | the 27 unverified |
+| `DO_NOT_USE` | Withdrawn, superseded, or commercial use recorded as not permitted | none |
+
+"Approved" answers commercial use only. Offline bundling and redistribution
+are still decided per intent by the gate, and an advisory-only source
+(`cwfis`) stays advisory.
+
+**Clearing a candidate** is `geo.sourceReview` with the licence the reviewer
+read, the attribution text it requires, and what it permits. The research that
+named each licence is not a review.
 
 ## Caveats the code carries
 

@@ -2287,15 +2287,30 @@ export async function seedExternalDataSources(): Promise<{
     await import("./_core/externalSourceSeeds");
 
   const rows = await db
-    .select({ sourceKey: externalDataSources.sourceKey })
+    .select({
+      sourceKey: externalDataSources.sourceKey,
+      sourceUrl: externalDataSources.sourceUrl,
+    })
     .from(externalDataSources);
   const present = new Set(rows.map(r => r.sourceKey));
+  const currentSourceUrlByKey = new Map(rows.map(r => [r.sourceKey, r.sourceUrl]));
 
   const inserted: string[] = [];
   const existing: string[] = [];
 
   for (const s of ALL_DATA_SOURCES) {
     if (present.has(s.sourceKey)) {
+      if (s.sourceUrl && currentSourceUrlByKey.get(s.sourceKey) === null) {
+        await db
+          .update(externalDataSources)
+          .set({ sourceUrl: s.sourceUrl })
+          .where(
+            and(
+              eq(externalDataSources.sourceKey, s.sourceKey),
+              isNull(externalDataSources.sourceUrl)
+            )
+          );
+      }
       existing.push(s.sourceKey);
       continue;
     }
@@ -2303,6 +2318,7 @@ export async function seedExternalDataSources(): Promise<{
       sourceKey: s.sourceKey,
       displayName: s.displayName,
       authority: s.authority,
+      sourceUrl: s.sourceUrl ?? null,
       jurisdiction: s.jurisdiction ?? null,
       category: s.category,
       licenceName: s.licenceName ?? null,

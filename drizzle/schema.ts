@@ -3628,7 +3628,7 @@ export const externalDataSources = mysqlTable("externalDataSources", {
   authority: varchar("authority", { length: 220 }).notNull(),
   sourceUrl: varchar("sourceUrl", { length: 600 }),
   jurisdiction: varchar("jurisdiction", { length: 80 }),
-  category: mysqlEnum("category", ["base_map", "road_network", "land_grid", "oilfield_assets", "road_conditions", "weather", "wildfire", "routing_engine", "geocoder", "tiles", "spectrum", "coverage", "other"]).notNull(),
+  category: mysqlEnum("category", ["base_map", "road_network", "land_grid", "oilfield_assets", "road_conditions", "weather", "wildfire", "routing_engine", "geocoder", "tiles", "spectrum", "coverage", "vehicle_recalls", "safety_alerts", "statistics", "dataset_catalog", "other"]).notNull(),
   licenceName: varchar("licenceName", { length: 180 }),
   licenceUrl: varchar("licenceUrl", { length: 600 }),
   attributionRequired: boolean("attributionRequired").default(true).notNull(),

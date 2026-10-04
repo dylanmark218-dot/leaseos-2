@@ -315,9 +315,9 @@ describe("the data source document matches the seeded registry", () => {
     // (Ontario, Québec) and blocked five (MB, NB, YT, NL, SK). 0233 registered the facility
     // directory's two regulator GIS services (SK Petroleum, BCER) so the approved-source registry can
     // govern their importer; their licences are named and not yet cleared here, so twenty.
-    expect(dataSources).toContain("Ten verified, twenty not");
+    expect(dataSources).toContain("Ten verified, twenty-seven not");
     expect(VERIFIED_DATA_SOURCES).toHaveLength(10);
-    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(20);
+    expect(UNVERIFIED_DATA_SOURCES).toHaveLength(27);
   });
 
   it("lists exactly the blocked sources as blocked", () => {

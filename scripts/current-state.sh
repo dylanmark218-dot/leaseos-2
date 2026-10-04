@@ -147,7 +147,7 @@ organization and workspace server-side, refuses a workspace the caller does
 not hold, ends access with the membership rather than with the grant, and
 verifies a named organization against the membership table before it scopes
 anything · payroll, finance, tax
-rules (unverified) · geospatial source registry (8 verified licences, 10
+rules (unverified) · geospatial source registry (10 verified licences, 27
 blocked) · approved external source registry (a publisher is contacted only
 through an endpoint a person approved — exact host, port, method and path,
 for a named purpose, until a review-by date — by someone who neither asked
