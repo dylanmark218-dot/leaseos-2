@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PanelSourceBadge } from "./SourcedPanel";
 import { demonstration, fromQuery } from "./panelSource";
+import { startQuickCapture } from "@/portal/QuickCapture";
+import { quickCaptureActions, type QuickCaptureAction } from "@/portal/viewModels";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
@@ -69,6 +71,17 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
+
+/**
+ * HS1 (SPINE item 3): the showcase opens no camera or file picker of its own. Its capture buttons hand
+ * the same actions Quick Capture uses to the field runtime — gated by the device's capabilities — or,
+ * with no runtime, to the authoritative evidence surface. (Its old private upload was refused by the
+ * showcase write guard anyway.)
+ */
+const SHOWCASE_CAPTURE: Record<"photo" | "document", QuickCaptureAction> = {
+  photo: quickCaptureActions("field_workforce").find(a => a.key === "photo")!,
+  document: { key: "document", label: "Document", kind: "scanned_document", formKey: null, category: "document", needsPhoto: true, needsVoice: false },
+};
 
 const jobs = [
   {
@@ -1560,36 +1573,6 @@ function EvidenceWorkspace() {
       toast.success("Evidence marked as verified.");
     }
   };
-  const [captureType, setCaptureType] = useState<"photo" | "document">("photo");
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const uploadMutation = trpc.fieldRoute.evidence.upload.useMutation({
-    onSuccess: async () => {
-      await utils.fieldRoute.evidence.list.invalidate();
-      toast.success("Evidence uploaded and queued for review.");
-      setIsCapturing(false);
-    },
-    onError: error => toast.error(error.message),
-  });
-  const handleCapture = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = String(reader.result).split(",")[1] ?? "";
-      uploadMutation.mutate({
-        title: `${captureType === "photo" ? "Field photo" : "Field document"} · JOB-08421`,
-        category: captureType === "photo" ? "field_photo" : "document",
-        fileName: file.name,
-        mimeType: file.type || "application/octet-stream",
-        dataBase64: base64,
-        latitude: 53.557,
-        longitude: -113.286,
-        notes: "Original captured from the field workspace.",
-      });
-    };
-    reader.readAsDataURL(file);
-    event.target.value = "";
-  };
   return (
     <div>
       <PageHeader
@@ -1805,17 +1788,6 @@ function EvidenceWorkspace() {
       </div>
       {isCapturing && (
         <div className="fixed inset-x-4 bottom-5 z-50 mx-auto max-w-lg rounded-2xl border border-[#dfe6ee] bg-white p-4 shadow-[0_20px_60px_rgba(16,36,63,0.18)] sm:inset-x-auto sm:right-8">
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            accept={
-              captureType === "photo"
-                ? "image/*"
-                : "image/*,application/pdf,.doc,.docx"
-            }
-            onChange={handleCapture}
-          />
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#fff0ea] text-[#e45e3b]">
               <Camera className="h-5 w-5" />
@@ -1838,11 +1810,7 @@ function EvidenceWorkspace() {
           <div className="mt-4 grid grid-cols-3 gap-2">
             <Button
               variant="outline"
-              disabled={uploadMutation.isPending}
-              onClick={() => {
-                setCaptureType("photo");
-                fileInputRef.current?.click();
-              }}
+              onClick={() => startQuickCapture(SHOWCASE_CAPTURE.photo)}
               className="h-9 rounded-lg border-[#dfe6ee] bg-white text-xs"
             >
               <Camera className="mr-1.5 h-3.5 w-3.5" />
@@ -1850,11 +1818,7 @@ function EvidenceWorkspace() {
             </Button>
             <Button
               variant="outline"
-              disabled={uploadMutation.isPending}
-              onClick={() => {
-                setCaptureType("document");
-                fileInputRef.current?.click();
-              }}
+              onClick={() => startQuickCapture(SHOWCASE_CAPTURE.document)}
               className="h-9 rounded-lg border-[#dfe6ee] bg-white text-xs"
             >
               <Upload className="mr-1.5 h-3.5 w-3.5" />

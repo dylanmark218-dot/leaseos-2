@@ -122,9 +122,16 @@ export type RouteDependencies = {
    * legal or illegal. Optional, so approvals recorded before it are compared on what they carried.
    */
   liveAdvisories?: string;
+  /**
+   * T2 (P4) — the weight the route is evaluated against (basis, gross and axle groups to 100 kg).
+   * Optional, so earlier approvals are compared on what they carried.
+   */
+  measuredWeight?: string;
+  /** T2 (P4) — each road ban's resolved jurisdiction and verified base-rule promotion. Optional, likewise. */
+  legalRules?: string;
 };
 export const DEPENDENCY_LABELS: Record<keyof RouteDependencies, string> = {
-  vehicleProfile: "the unit's profile", loadProfile: "the load", permitSet: "the permits", restrictionSet: "the restrictions in force", structureSet: "the structures on the route", roadFabric: "the imported road data", requiredChecks: "the checks required", communicationsPlan: "the radio channels on the route", liveAdvisories: "the provincial road advisories on the route",
+  vehicleProfile: "the unit's profile", loadProfile: "the load", permitSet: "the permits", restrictionSet: "the restrictions in force", structureSet: "the structures on the route", roadFabric: "the imported road data", requiredChecks: "the checks required", communicationsPlan: "the radio channels on the route", liveAdvisories: "the provincial road advisories on the route", measuredWeight: "the authoritative vehicle weight", legalRules: "the legal rules the road bans resolve against",
 };
 
 export function hashPart(value: unknown): string {

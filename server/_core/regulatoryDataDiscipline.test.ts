@@ -66,18 +66,23 @@ describe("every decision cites the data it used, by version", () => {
 describe("a restriction outside its effective window is not applied", () => {
   it("windows restrictions on both read paths", () => {
     // The approval-dependency path moved from spatialRouter into server/routeDependencies.ts (the
-    // provider runtime shares it), so the two read paths now live in two files. Both still window.
+    // provider runtime shares it), and T2 moved the evaluation path into server/routeLegality.ts (so
+    // readiness re-runs the same one). The two read paths live in those two files; both still window.
     const deps = readFileSync("server/routeDependencies.ts", "utf8");
-    expect(Array.from(spatial.matchAll(/applicableRestrictions\(/g)).length, "the evaluation path in spatialRouter").toBeGreaterThanOrEqual(1);
+    const legality = readFileSync("server/routeLegality.ts", "utf8");
+    expect(spatial, "spatialRouter evaluates through routeLegality").toMatch(/evaluateSegments\(/);
+    expect(Array.from(legality.matchAll(/applicableRestrictions\(/g)).length, "the evaluation path in routeLegality").toBeGreaterThanOrEqual(1);
     expect(Array.from(deps.matchAll(/applicableRestrictions\(/g)).length, "the approval-dependency path in routeDependencies").toBeGreaterThanOrEqual(1);
-    const uses = Array.from((spatial + deps).matchAll(/applicableRestrictions\(/g)).length;
+    const uses = Array.from((legality + deps).matchAll(/applicableRestrictions\(/g)).length;
     // Two paths read restrictions; both must window them. One unwindowed path is enough to enforce
     // a road ban that ended in April, or miss one that starts tomorrow.
     expect(uses).toBeGreaterThanOrEqual(2);
   });
 
   it("says which restrictions were set aside and why, rather than dropping them silently", () => {
-    expect(spatial).toMatch(/setAside/);
-    expect(spatial).toMatch(/dateNotes\.push/);
+    const legality = readFileSync("server/routeLegality.ts", "utf8");
+    expect(legality).toMatch(/setAside/);
+    expect(legality).toMatch(/dateNotes\.push/);
+    expect(spatial).toMatch(/dateNotes/);   // and the procedure still returns them
   });
 });
