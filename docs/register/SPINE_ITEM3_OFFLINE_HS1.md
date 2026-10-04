@@ -1,5 +1,18 @@
 # SPINE item 3 — `offlineCapability` → HS1, under the owner's ruling (2026-10-03)
 
+**SPINE item 3 is COMPLETE (2026-10-04).**
+- **Merged** in dylanmark218-dot/leaseos-2#143 as `6ecf2d49`, at the reviewed head `e07eda02`.
+- **Main CI:** `6ecf2d49`'s own run was cancelled when the next merge superseded it. The next main commit, `1f24b16b` (#145), contains it and passed (CI run 37162795053).
+
+**What was delivered:**
+- **The HS1 seam:** `CapabilityMatrix`, `missingHardware`, and `capabilities()` over the adapters' probes.
+- **One offline policy:** `actionGateway.mayRunWithoutServer`.
+- **No declared `offlineClass`:** a separately declared class no longer exists. The class is derived from `requiresOnline` plus the risk level.
+- **Authority unchanged:** hardware can narrow availability but never grants authority, and being online never means executing locally.
+- **Reconnect** is re-authorized by the server against the current session, acting organization and permission.
+
+**What remains:** the production device runtime is **still not activated**. No device runtime is mounted, and there is no native shell. The contract is wired; the native field runtime does not exist yet.
+
 The SPINE wiring plan's item 3 reads "`offlineCapability` → HS1. It is the device seam and the hybrid
 plan already covers it." The survey (`SPINE_RECONCILIATION_2026-10-03.md` §7) found that HS1, as the
 repository defines it, is a **hardware** seam (`docs/hybrid-seam/HS_CONTRACTS.md` §1,

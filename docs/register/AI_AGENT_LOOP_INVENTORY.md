@@ -14,7 +14,7 @@ verdict.
 | SPINE 1: BoundaryConfirmation resolver + chain rule | **merged** (#10, `6f52b57`) |
 | SPINE 1: receipt reader + 0179 trip-stop provenance (clears the 0169 release blocker) | **merged** ([dylanmark218-dot/leaseos-2#17](https://github.com/dylanmark218-dot/leaseos-2/pull/17), `d307ba4`) |
 | SPINE 2: resolve the four duplications (`dispatchMatching`, `openShifts`, `complianceDocumentValidity`, `fieldTicket`) | **COMPLETE**: #52, #60, #89 (`3f2bcec`; main green at `c3f088b`, run 36912636248). Record: `docs/register/SPINE_ITEM2_DUPLICATIONS.md` |
-| SPINE 3: `offlineCapability` → HS1 | **seam built on `claude/spine-item3-offline-hs1`**: HS1 hardware matrix, one offline policy (`requiresOnline`), availability composition, gated device outbox; contract wired, production runtime not activated. Recorded COMPLETE once merged and main CI is green. Record: `docs/register/SPINE_ITEM3_OFFLINE_HS1.md` |
+| SPINE 3: `offlineCapability` → HS1 | **COMPLETE**: #143 (`6ecf2d49`; main green at `1f24b16b`, run 37162795053). HS1 hardware seam, one offline policy (`mayRunWithoutServer`), availability composition, gated device outbox. Contract wired; production device runtime not activated. Record: `docs/register/SPINE_ITEM3_OFFLINE_HS1.md` |
 | SPINE 4: the rest of the spine, in path order | not started |
 | Secretary model layer ("door 2") | **held off `main`**: [dylanmark218-dot/leaseos-2#7](https://github.com/dylanmark218-dot/leaseos-2/pull/7), declared unwired |
 
