@@ -8,6 +8,7 @@ import { SessionGate } from "./session/SessionGate";
 import { CustomerPortal } from "./portal/external/CustomerPortal";
 import HosVerificationConsole from "./pages/HosVerificationConsole";
 import WidgetBoardPage from "./pages/WidgetBoardPage";
+import Analytics from "./pages/Analytics";
 import { ShowcaseFrame } from "./showcase/ShowcaseFrame";
 import { MapSurface, EvidenceSurface, JobsSurface, SafetySurface } from "./pages/authoritative/Surfaces";
 import { VendorFacilityPortal } from "./portal/external/VendorFacilityPortal";
@@ -60,6 +61,8 @@ function Router() {
       <Route path="/customer" component={() => <CustomerPortal />} />
       <Route path="/hos-verification" component={() => <HosVerificationConsole />} />
       <Route path="/widgets" component={() => <WidgetBoardPage />} />
+      {/* Analytics Checkpoint C — metrics over existing records, each drillable to its rows. Read-only. */}
+      <Route path="/analytics" component={() => <Analytics />} />
       <Route path="/vendor" component={() => <VendorFacilityPortal />} />
       <Route path="/facility" component={() => <VendorFacilityPortal />} />
       <Route path="/map" component={() => <MapSurface />} />

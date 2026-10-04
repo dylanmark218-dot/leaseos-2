@@ -211,6 +211,14 @@ function importsOfBody(body: string, fromDir = ""): string[] {
   for (const m of text.matchAll(/(?:from|import)\s*\(?\s*"\.\/([A-Za-z0-9_/]+)"/g)) {
     out.push(fromDir ? `${fromDir}${m[1]}` : m[1]);
   }
+  // `../documentValidity` from `analytics/metricSources.ts` is `documentValidity`. Without this an
+  // engine reached only from a subdirectory reads as unreached — the blind spot `knowledge/` escaped
+  // only because its modules import nothing but `../../db`. From a file directly in `_core`, `../x`
+  // leaves `_core` and is not an engine, so it is skipped.
+  if (fromDir) {
+    const parent = fromDir.slice(0, -1).includes("/") ? fromDir.slice(0, fromDir.slice(0, -1).lastIndexOf("/") + 1) : "";
+    for (const m of text.matchAll(/(?:from|import)\s*\(?\s*"\.\.\/([A-Za-z0-9_][A-Za-z0-9_/]*)"/g)) out.push(`${parent}${m[1]}`);
+  }
   return out;
 }
 
@@ -329,13 +337,23 @@ describe("every engine is reached, or says why not", () => {
       "ai/tools/registry",
       "ai/validate/normalizers",
       "ai/validate/validator",
+      // Six more of the same layer, visible once the census followed `../x` out of a `_core`
+      // subdirectory (Analytics Checkpoint B): each is imported only by a sibling in another `ai/`
+      // folder — `../injection/guard` from `ai/extraction/` — which the earlier walk could not see.
+      // Same subsystem, same moratorium, same exit.
+      "ai/context/contextPack",
+      "ai/extraction/runExtraction",
+      "ai/injection/guard",
+      "ai/llm/openAiCompatibleProvider",
+      "ai/proposal/bridge",
+      "ai/validate/questions",
     ].sort());
   });
 
   it("keeps the count visible, so the gap cannot grow quietly", () => {
     const unwired = engines.filter(m => !isReached(m));
     // Moving this number is a deliberate act either way.
-    expect(unwired).toHaveLength(73);   // merge of main (b35bac4) into #59: main's 73 already counts openShifts as reached (SPINE item 2), the one engine #59 wired;   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
+    expect(unwired).toHaveLength(73);   // merge of main: measured on the merged tree; this branch: Analytics Checkpoint B: no change;   // merge of main (b35bac4) into #59: main's 73 already counts openShifts as reached (SPINE item 2), the one engine #59 wired;   // v23.31: -1 eventEmitter — customerCommercialService builds its outbox rows with buildOutboxRow, so the event vocabulary is reached from a router;   // merge of main: 86 → 85 openShifts wired (SPINE item 2), then -11 below   // Canadian provider runtime: -11 — advisoryImpact, feedCollector, feedIngest, feedHttp, feedScheduler and the six transport/* adapters are now reached: geoRouter → transportFeedRuntime (geo.transportFeeds, read-only) and spatialRouter → routeDependencies (live advisories in the approval fingerprint). Reached is not running: nothing in production calls runTransportFeedTick, so no feed is collected  
     expect(engines.length).toBeGreaterThan(130);
   });
 });

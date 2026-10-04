@@ -407,7 +407,11 @@ export type Permission =
   // in the router (the caller's own policies, the caller's own signature); manage, approve and verify are
   // the acts that change what the company is taken to require, make a version binding, or close a loop.
   | "safety_program.read" | "safety_program.write" | "safety_program.manage" | "safety_program.approve" | "safety_program.verify"
-  | "safety_program.read_own" | "safety_program.acknowledge_own";
+  | "safety_program.read_own" | "safety_program.acknowledge_own"
+  // Analytics Checkpoint B — read-only metrics over existing records. `analytics.read` opens the
+  // organization's metrics, each still gated by its source records' own read permission;
+  // `analytics.read_own` is universal and self-scoped in code (analyticsRouter.mine).
+  | "analytics.read" | "analytics.read_own";
 
 /** The read categories, so a coverage test can assert none is orphaned. */
 export const EVIDENCE_READ_CATEGORIES: readonly Permission[] = [
@@ -527,6 +531,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "attest.field.place",
     "attest.signer.assign",
     "board.publish",
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "live_assist.use",
     "document.read",
     "document.intake",
@@ -650,6 +656,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "spatial.structure.record",
   ],
   mechanic: [
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "live_assist.use",
     "document.read",
     "document.intake",
@@ -730,6 +738,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "fleet.meter.verify",
   ],
   shop_lead: [
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "live_assist.use",
     "document.read",
     "document.intake",
@@ -849,6 +859,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "attest.finalize",
     "board.publish",
     "board.moderate",
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "live_assist.review",
     "document.read",
     "document.intake",
@@ -1001,6 +1013,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "attest.void",
     "attest.supersede",
     "attest.export",
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "live_assist.use",
     "document.read",
     "document.intake",
@@ -1198,6 +1212,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     "attest.export",
     "board.publish",
     "board.moderate",
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "live_assist.use",
     "live_assist.administer",
     "live_assist.review",
@@ -1503,6 +1519,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
   hr: [
     "portfolio.read",
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "document.read",
     "safety_program.read",
     "safety_program.write",
@@ -1590,6 +1608,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
     // SA1 — Sign & Attest
     "attest.read",
     "attest.export",
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "document.read",
     "safety_program.read",
     "facility.directory.read",
@@ -1788,6 +1808,8 @@ const GRANTS: Record<DomainRole, readonly Permission[]> = {
   ],
 
   controller: [
+    // Analytics Checkpoint B — organization metrics; each metric also needs its source read.
+    "analytics.read",
     "document.read",
     "document.confirm",
     "document.issue",
@@ -2060,6 +2082,9 @@ export const UNIVERSAL_PERMISSIONS: readonly Permission[] = [
   // 0228 — your own policies to acknowledge, your own signature. The router resolves the person from ctx.user.id.
   "safety_program.read_own",
   "safety_program.acknowledge_own",
+  // Analytics Checkpoint B — your own numbers. analyticsRouter.mine resolves the operator from
+  // `ctx.user.id`; the input cannot name one.
+  "analytics.read_own",
 ] as const;
 
 export function isUniversalPermission(p: Permission): boolean {
@@ -2083,7 +2108,7 @@ const DENIALS: Partial<Record<DomainRole, readonly Permission[]>> = {
   mechanic: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
   shop_lead: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
   dispatcher: ["billing.read", "billing.write", "payroll.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
-  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation", ...COMPENSATION_PERMISSIONS],
+  driver: ["billing.read", "billing.write", "payroll.read", "personnel.read", "personnel.write", "incident.read_investigation", "analytics.read", ...COMPENSATION_PERMISSIONS],
   auditor: ["payroll.read", "billing.write", "personnel.write", ...COMPENSATION_PERMISSIONS],
 
   // The banking and tax-identifier reads are held by nobody in this model.
@@ -3197,6 +3222,13 @@ export const OPERATIONAL_PROCEDURE_PERMISSIONS = {
   "widgets.offerable": "myday.read_own",
   "widgets.boardResolve": "myday.read_own",
   "widgets.layoutSave": "myday.read_own",
+  // Analytics Checkpoint B (docs/analytics/CHECKPOINT_B.md). Read-only; the organization is
+  // resolved server-side and each metric is also gated by its own source permission.
+  "analytics.catalog": "analytics.read",
+  "analytics.metric": "analytics.read",
+  "analytics.drilldown": "analytics.read",
+  "analytics.mine": "analytics.read_own",
+  "analytics.mineDrilldown": "analytics.read_own",
   "surfaces.search": "surface.search",
   // P3.6: no permission of its own — every hop is gated by the permission of the record it is,
   // and a caller with none of them gets an empty chain and the same notice everybody gets.

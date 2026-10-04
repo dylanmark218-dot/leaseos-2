@@ -9,13 +9,13 @@ here can be added rather than read.
 | Release | **v23.31** | `LEASEOS_RELEASE` (or explicit argument 1) |
 | Tables | **490** | `mysqlTable(` declarations in `drizzle/schema.ts` |
 | Migrations | **212** | `drizzle/*.sql` (slots 0016/0017 reserved and absent) |
-| Role-authorized procedures | **925** | `roleProcedure(` call sites across all routers |
+| Role-authorized procedures | **930** | `roleProcedure(` call sites across all routers |
 | Externally-gated procedures (portal) | **40** | `externalProcedure(` call sites in `server/portalRouter.ts` |
 | Integration-gated procedures (machines) | **2** | `integrationProcedure(` call sites in `server/integrationRouter.ts` |
 | Bare `protectedProcedure` | **0** | must be 0 |
-| Permissions | **442** | the `Permission` union |
+| Permissions | **444** | the `Permission` union |
 | Sensitive (fail-closed) permissions | **184** | `SENSITIVE_PERMISSIONS` |
-| Universal (self-scoped) permissions | **21** | `UNIVERSAL_PERMISSIONS` |
+| Universal (self-scoped) permissions | **22** | `UNIVERSAL_PERMISSIONS` |
 | Test files / cases | **computed by the gate, not committed** | `scripts/current-state.sh --metrics` → `artifacts/current-state-metrics.json`, printed by gate 8. Files are the runner's own list; cases are `it(` occurrences in source. Not committed because nearly every pull request changes them |
 | Native-only runtime bindings | **7 throw `NotOnDeviceError`** | `client/src/runtime/adapters/capacitor.ts` |
 
@@ -215,7 +215,13 @@ the snapshot, sent with the account's terms and an alert, listed, viewed
 and accepted in the customer portal; supplemental drafts for lines released
 by a resolved dispute or a void; disputes resolved upheld, credited or
 partial with the credit approved by a second person in AR; voids recorded,
-never deleted, refused where money is applied).
+never deleted, refused where money is applied) · analytics metric registry
+(Checkpoint B: read-only metrics over trips, fleet, maintenance, compliance documents, stored
+readiness verdicts, safety reports and duty records; each value aggregated from exactly the rows
+its drill-down returns; organization resolved from membership and applied by each source table's
+existing scope rule; every metric also gated by its source's read permission; zone-stated ranges;
+a missing timestamp reported as unknown, never zero; metrics the records cannot support registered
+with their reason — no dashboards, exports or financial metrics yet).
 
 ## Implemented on the client (logic proven in Node; platform bindings named)
 
@@ -237,6 +243,11 @@ notices, daily report. Vendor and facility portal at `/vendor` and
 `/facility`: statements and submissions. First-run setup wizard in the
 office portals: company, services, guardrails, rates with approval,
 readiness — every step the server's answer.
+Analytics dashboard at `/analytics` (Checkpoint C): the organization's metrics grouped by area,
+or a driver's own numbers; each tile shows its value or the words "No value", whether it is
+complete, the records it could not place, the interval it covers and when it was computed, marked
+stale past its budget or after a failed refresh; "Show records" lists exactly the rows behind the
+value, fetched with the question the tile's answer echoed.
 
 ## Not implemented — and not claimed
 

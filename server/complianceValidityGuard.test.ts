@@ -205,6 +205,8 @@ const READERS: Record<string, string> = {
   "server/qualificationReads.ts": "an Academy grant's evidence document through complianceDocumentValidity; the grant itself through academyVerdict (qualificationValidity)",
   // 0228 — the Safety & Compliance Program Builder, added on merging main.
   "server/safetyProgramRouter.ts": "the vendor compliance package manifest: the carrier's COR, WCB, insurance and Safety Fitness documents and each unit's CVIP through complianceDocumentValidity; decides nothing itself",
+  // Analytics Checkpoint B, added on merging main.
+  "server/_core/analytics/metricSources.ts": "the expiring / expired / unverified document metrics: every subject's rows through complianceDocumentValidity.documentExpiry; decides nothing itself",
 };
 
 function readdirTs(dir: string): string[] {

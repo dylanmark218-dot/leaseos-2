@@ -321,7 +321,13 @@ the snapshot, sent with the account's terms and an alert, listed, viewed
 and accepted in the customer portal; supplemental drafts for lines released
 by a resolved dispute or a void; disputes resolved upheld, credited or
 partial with the credit approved by a second person in AR; voids recorded,
-never deleted, refused where money is applied).
+never deleted, refused where money is applied) · analytics metric registry
+(Checkpoint B: read-only metrics over trips, fleet, maintenance, compliance documents, stored
+readiness verdicts, safety reports and duty records; each value aggregated from exactly the rows
+its drill-down returns; organization resolved from membership and applied by each source table's
+existing scope rule; every metric also gated by its source's read permission; zone-stated ranges;
+a missing timestamp reported as unknown, never zero; metrics the records cannot support registered
+with their reason — no dashboards, exports or financial metrics yet).
 
 ## Implemented on the client (logic proven in Node; platform bindings named)
 
@@ -343,6 +349,11 @@ notices, daily report. Vendor and facility portal at `/vendor` and
 `/facility`: statements and submissions. First-run setup wizard in the
 office portals: company, services, guardrails, rates with approval,
 readiness — every step the server's answer.
+Analytics dashboard at `/analytics` (Checkpoint C): the organization's metrics grouped by area,
+or a driver's own numbers; each tile shows its value or the words "No value", whether it is
+complete, the records it could not place, the interval it covers and when it was computed, marked
+stale past its budget or after a failed refresh; "Show records" lists exactly the rows behind the
+value, fetched with the question the tile's answer echoed.
 
 ## Not implemented — and not claimed
 
