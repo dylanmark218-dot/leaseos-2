@@ -11,14 +11,16 @@
  * to its own procedure); the server authenticates, scopes and authorizes it then. The gate grants no
  * `CaptureAuthorizationClaim` and reads none.
  *
- * Server imports: `server/_core/offlineCapability.ts` and the `actionGateway.ts` it reads
- * `mayRunWithoutServer` from are pure (no database, no network, no further imports), so the one
- * offline rule runs here rather than being restated for the device. The runtime otherwise stays free
+ * Server imports: `server/_core/offlineCapability.ts`, the `actionGateway.ts` it reads
+ * `mayRunWithoutServer` from, and `captureOperations.ts` (the one declaration per capture kind) are
+ * pure (no database, no network), so the one offline rule runs here rather than being restated for
+ * the device — and the server re-checks the same declaration on sync. The runtime otherwise stays free
  * of server modules (`scanSession.ts`).
  */
 
 import { HARDWARE_CAPABILITIES, type CapabilityMatrix, type HardwareCapability } from "@shared/hardwareCapability";
 import { runtimeAvailability, type DeviceOperation, type RuntimeAvailability } from "../../../server/_core/offlineCapability";
+import { CAPTURE_POLICY } from "../../../server/_core/captureOperations";
 import { NotOnDeviceError, type CaptureKind, type Connectivity } from "./contracts";
 
 /** One probe per HS1 capability, supplied by the adapter that owns the binding. */
@@ -36,31 +38,30 @@ export async function capabilities(probes: CapabilityProbes): Promise<Capability
 }
 
 /**
- * Every capture kind, declared once.
+ * Every capture kind: its offline declaration plus the hardware it needs.
  *
- * Evidence (inspections, photos, tickets, a photographed out-of-service order…) is recorded on the
- * device whether or not there is signal — the outbox's existing behaviour — so it may run without the
- * server; what it permits is the server's on sync. A board message, an acknowledgement or an open-work
- * response is a request a server procedure decides, so it requires the server: it is drafted here and
- * decided there, never done on the device. Hardware is named only where the capture cannot exist
- * without it: every capture needs the local store, a capture with files needs the vault, a photo needs
- * the camera. GPS is attached when present and never required.
+ * The declaration (`requiresOnline`, risk, draftable) is `server/_core/captureOperations.ts`, the one
+ * place it is stated, because the server re-checks the same fact on sync and the device is not an
+ * authorization boundary. Only the hardware is added here — HS1 is the device's question and the
+ * server never asks it. Hardware is named only where the capture cannot exist without it: every
+ * capture needs the local store, evidence with files needs the vault, a photo needs the camera, and a
+ * request needs only the store. GPS is attached when present and never required.
  */
-const evidence = (kind: CaptureKind, extra: readonly HardwareCapability[] = []): DeviceOperation =>
-  ({ key: `capture.${kind}`, riskLevel: "low_risk_action", requiresOnline: false, draftable: false, requiredHardware: ["localStore", "fileVault", ...extra] });
-const request = (kind: CaptureKind): DeviceOperation =>
-  ({ key: `capture.${kind}`, riskLevel: "low_risk_action", requiresOnline: true, draftable: true, requiredHardware: ["localStore"] });
+const EVIDENCE_HARDWARE: readonly HardwareCapability[] = ["localStore", "fileVault"];
+const REQUEST_HARDWARE: readonly HardwareCapability[] = ["localStore"];
+const op = (kind: CaptureKind, requiredHardware: readonly HardwareCapability[]): DeviceOperation => ({ ...CAPTURE_POLICY[kind], requiredHardware });
 
+/** Indexing `CAPTURE_POLICY` by `CaptureKind` fails to compile if a kind has no declaration. */
 export const CAPTURE_OPERATIONS: Readonly<Record<CaptureKind, DeviceOperation>> = {
-  pretrip: evidence("pretrip"), posttrip: evidence("posttrip"), hos_event: evidence("hos_event"),
-  job_accept: evidence("job_accept"), load_ticket: evidence("load_ticket"), disposal_ticket: evidence("disposal_ticket"),
-  fuel_receipt: evidence("fuel_receipt"), expense_receipt: evidence("expense_receipt"),
-  photo: evidence("photo", ["camera"]),
-  signature: evidence("signature"), incident: evidence("incident"), defect_report: evidence("defect_report"),
-  tailgate: evidence("tailgate"), tdg_document: evidence("tdg_document"), voice_note: evidence("voice_note"),
-  roadside_enforcement: evidence("roadside_enforcement"), oos_order: evidence("oos_order"),
-  scanned_document: evidence("scanned_document"),
-  board_message: request("board_message"), board_acknowledgement: request("board_acknowledgement"), shift_response: request("shift_response"),
+  pretrip: op("pretrip", EVIDENCE_HARDWARE), posttrip: op("posttrip", EVIDENCE_HARDWARE), hos_event: op("hos_event", EVIDENCE_HARDWARE),
+  job_accept: op("job_accept", EVIDENCE_HARDWARE), load_ticket: op("load_ticket", EVIDENCE_HARDWARE), disposal_ticket: op("disposal_ticket", EVIDENCE_HARDWARE),
+  fuel_receipt: op("fuel_receipt", EVIDENCE_HARDWARE), expense_receipt: op("expense_receipt", EVIDENCE_HARDWARE),
+  photo: op("photo", [...EVIDENCE_HARDWARE, "camera"]),
+  signature: op("signature", EVIDENCE_HARDWARE), incident: op("incident", EVIDENCE_HARDWARE), defect_report: op("defect_report", EVIDENCE_HARDWARE),
+  tailgate: op("tailgate", EVIDENCE_HARDWARE), tdg_document: op("tdg_document", EVIDENCE_HARDWARE), voice_note: op("voice_note", EVIDENCE_HARDWARE),
+  roadside_enforcement: op("roadside_enforcement", EVIDENCE_HARDWARE), oos_order: op("oos_order", EVIDENCE_HARDWARE),
+  scanned_document: op("scanned_document", EVIDENCE_HARDWARE),
+  board_message: op("board_message", REQUEST_HARDWARE), board_acknowledgement: op("board_acknowledgement", REQUEST_HARDWARE), shift_response: op("shift_response", REQUEST_HARDWARE),
 };
 
 /** What the outbox asks before it saves anything. */

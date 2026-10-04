@@ -20,7 +20,7 @@ import { handleSyncRefusal, type SyncRefusalCode, DEVICE_SIGNATURE_MAX_SKEW_MS, 
 import { resolveActingScope, SINGLE_TENANT_ID } from "./_core/actingScope";
 import { storageRead } from "./storage";
 import {
-  admitPackage, detectConflict, verifyPackageItems, type FieldDeviceRecord, type KeyEvent,
+  admitPackage, applyOperationPolicy, detectConflict, recordTypeOfSealManifest, verifyPackageItems, type FieldDeviceRecord, type KeyEvent,
 } from "./_core/fieldDevice";
 
 const ref = (p: string) => `${p}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -281,11 +281,16 @@ export const syncRouter = router({
       const ids = items.map(i => i.evidenceRecordId);
       const sealRows = ids.length && !foreign.has(ids[0]) ? await db.select().from(evidenceSeals).where(eq(evidenceSeals.evidenceRecordId, ids[0])) : [];
       const seals = new Map<number, { evidenceRecordId: number; contentHash: string; manifestHash: string } | null>();
+      // SPINE item 3: the operation each item was sealed as, read from the manifest the SERVER built
+      // at seal time. Nothing in the package — no class, flag or operation key — is consulted.
+      const recordTypeById = new Map<number, string | null>();
       for (const id of ids) {
-        if (foreign.has(id)) { seals.set(id, null); continue; }
-        const rows = await db.select({ evidenceRecordId: evidenceSeals.evidenceRecordId, contentHash: evidenceSeals.contentHash, manifestHash: evidenceSeals.manifestHash })
+        if (foreign.has(id)) { seals.set(id, null); recordTypeById.set(id, null); continue; }
+        const rows = await db.select({ evidenceRecordId: evidenceSeals.evidenceRecordId, contentHash: evidenceSeals.contentHash, manifestHash: evidenceSeals.manifestHash, canonicalManifest: evidenceSeals.canonicalManifest })
           .from(evidenceSeals).where(eq(evidenceSeals.evidenceRecordId, id)).orderBy(desc(evidenceSeals.version)).limit(1);
-        seals.set(id, rows[0] ?? null);
+        const row = rows[0] ?? null;
+        seals.set(id, row ? { evidenceRecordId: row.evidenceRecordId, contentHash: row.contentHash, manifestHash: row.manifestHash } : null);
+        recordTypeById.set(id, recordTypeOfSealManifest(row?.canonicalManifest));
       }
       void sealRows;
       // v21.6 — the "computed" hash is the server's, from the bytes it stored,
@@ -303,7 +308,9 @@ export const syncRouter = router({
           return { ...it, computedContentHash: "0".repeat(64), computedManifestHash: it.declaredManifestHash };
         }
       }));
-      const verification = verifyPackageItems({ items: recomputed, seals });
+      // Hashes first, then the one offline policy re-checked here — the device's gate is not
+      // authority. The re-check can only reject; it never verifies, and admission and scope ran first.
+      const verification = applyOperationPolicy({ verdicts: verifyPackageItems({ items: recomputed, seals }).verdicts, recordTypeById });
 
       for (const it of items) {
         const v = verification.verdicts.find(x => x.evidenceRecordId === it.evidenceRecordId)!;
